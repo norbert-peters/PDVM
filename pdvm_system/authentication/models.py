@@ -36,7 +36,7 @@ class AccountManager(BaseUserManager):
 # Django Modell für den 'Account' - erzeugt Kommunikation mit der Datenbank
 class Account(AbstractBaseUser):
     # id wird mit einer UUID belegt
-    id = models.UUIDField(primary_key=True, default=getNewId() ,unique=True)
+    id = models.UUIDField(primary_key=True, default=getNewId ,unique=True)
     # Email Adresse zwingend erforderlich
     email = models.EmailField(unique=True)
     # Benutzername zwingend erforderlich - maximal 50 Zeichen lang
@@ -92,4 +92,3 @@ class Account(AbstractBaseUser):
     @is_staff.setter
     def is_staff(self, value):
         self._is_staff = value
-        
