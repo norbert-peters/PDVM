@@ -14,7 +14,7 @@ def getNewId():                             # Definition der Funktion
     return str(uuid.uuid4())                # neue UUID/GUID
 
 def getStaticId(zahl):                      # Definition der Funktion
-    if __checkHexValue(zahl):
+    if __checkHexValue(zahl):               # nur zugelassene Zeichen verarbeiten
         t=""
         z = 8
         for i in range(36):                 # statik UUID/GUID aus zahl
@@ -36,12 +36,17 @@ def __checkHexValue(zeich):                 # Prüfung zugelassener Zeichen
     else:
         return False
    
-           
-
 # ------------------------------------------------------------------
 # Hauptprogramm - Testumgebung
 # ------------------------------------------------------------------
-if __name__=='__main__':                    # Test der Funktionen, wenn
+if __name__=='__main__':                    
+    import os                               # Für Testbereich
+    
+    try:                                    # Console wir leer gemacht
+        os.system('CLS')                    # for Windows
+    except:
+        os.system('CLEAR')                  # for Unix
+                                            # Test der Funktionen, wenn
     # Test der Funktion getNewId()          # die Funktionsbibliothek
     b=getNewId()                            # direkt aufgerufen wird
     print("T e s t  -- getNewId() -- Funktion öffentlich")
