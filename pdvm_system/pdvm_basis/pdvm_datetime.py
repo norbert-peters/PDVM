@@ -9,19 +9,22 @@
 
     Neu zusammengestellt:
     01.08.2019 Norbert Peters
+    07.10.2019 überarbeitet
 """
 # -----------------------------------------------------------------------
-from numbers import Number                                      # Wird zur Prüfung numerischer Werte verwendet
-from pdvm_lanqtext import transkateone, transkate               # Für Übersetzung Texte
-import time                                                     # Wird benutzt um die aktuelle Zeit zu ermitteln
-import os                                                       # Für Testbereich
-# -----------------------------------------------------------------------
+from numbers import Number                             # Wird zur Prüfung numerischer Werte verwendet
+from pdvm_util import printMessage 
+from pdvm_langtext import transkateone, transkate      # Für Übersetzung Texte
+from django.conf import settings                       # Standardeinstellungen immer aus den Settings
+import time                                            # Wird benutzt um die aktuelle Zeit zu ermitteln
 
 # E i n s t e l l u n g e n
 # ================================================================================
-pdvmObjekt = "Pdvm_DateTime"        # Objektnamen in pdvm_system
-st_lanquage = 'de-de'               # verwendete Standardsprache
-#st_lanquage = 'en-us'               # verwendete Standardsprache
+pdvmObjekt = "Pdvm_DateTime"            # Objektnamen in pdvm_system
+try:
+    st_language = settings.LANGUAGE_CODE    # verwendete Standardsprache
+except:
+    st_language = 'de-de'
 
 # Anzahl der Tage einzelner Monate
 monthdays = [[0,0],[0,0],[31,31],[59,60],[90,91],[120,121],[151,152],[181,182],
@@ -109,9 +112,9 @@ class Pdvm_DateTime(object):
         self.second        = 0
         # Parameter auf Basis von fCountry setzen
         # Form Land vom Datum - werden als Parameter gesetzt
-        self.__setFormCountry(fCountry)  # Die Länderformen DEU / ENG / USA sind vorhanden
-        self.proptext = transkate(self.lanquage,'proptext')     # Übersetzungen der Eigenschaften
-                                                                # werden als Wörterbuch eingelesen
+        self.__setFormCountry(fCountry)                             # Die Länderformen DEU / ENG / USA sind vorhanden
+        self.proptext = transkate('proptext', self.language)        # Übersetzungen der Eigenschaften
+                                                                    # werden als Wörterbuch eingelesen
     # --------------------------------------------------------------------
     # FormCountry
     # --------------------------------------------------------------------
@@ -122,7 +125,7 @@ class Pdvm_DateTime(object):
         dateYearPos  = {'DIN': 0,   'DEU': 2,   'ENG': 2,   'USA': 2  }
         dateMonthPos = {'DIN': 2,   'DEU': 1,   'ENG': 1,   'USA': 0  }
         monthDayLen  = {'DIN': 2,   'DEU': 2,   'ENG': 2,   'USA': 1  }
-        lanquage_in  = {'DIN': 'st-st',   'DEU': 'de-de',   'ENG': 'en-us',   'USA': 'en-us'  }
+        language_in  = {'DIN': 'st-st',   'DEU': 'de-de',   'ENG': 'en-us',   'USA': 'en-us'  }
 
         ok = False
         fC = fCountry.upper().strip()
@@ -138,14 +141,14 @@ class Pdvm_DateTime(object):
             self.dateYearPos   = dateYearPos[fC]
             self.dateMonthPos  = dateMonthPos[fC]
             self.monthDayLen   = monthDayLen[fC]
-            if lanquage_in[fC] == 'st-st':
-                self.lanquage      = st_lanquage
+            if language_in[fC] == 'st-st':
+                self.language      = st_language
             else:
-                self.lanquage      = lanquage_in[fC]
+                self.language      = language_in[fC]
         else:
             self.formCountry   ='DIN'      # Standardwert
-            self.lanquage      = st_lanquage
-            self.__message("error",pdvmObjekt,"PDT_013",["def: __setFormCountry","Eingabe: " + fCountry])
+            self.language      = st_language
+            printMessage("error",pdvmObjekt,"PDT_013",["def: __setFormCountry","Eingabe: " + fCountry])
             self.dateSplitter  = dateSplitter['DIN']
             self.dateYearPos   = dateYearPos['DIN']
             self.dateMonthPos  = dateMonthPos['DIN']
@@ -166,7 +169,7 @@ class Pdvm_DateTime(object):
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
         except:
-            self.__message("error",pdvmObjekt,"PDT_001",["def: setPdvmDateTime", "Eingabe: " + str(pdvmddate)])
+            printMessage("error",pdvmObjekt,"PDT_001",["def: setPdvmDateTime", "Eingabe: " + str(pdvmddate)], self.language)
 
     def __getPdvmDateTime(self):
         return self.pdvmdatetime
@@ -182,7 +185,7 @@ class Pdvm_DateTime(object):
                                            pdvmdtt[3],pdvmdtt[4],pdvmdtt[5],
                                            pdvmdtt[6])
         except:
-            self.__message("error",pdvmObjekt,"PDT_002",["def: setPdvmDateTimeT", "Eingabe: " + str(pdvmdtt)])
+            printMessage("error",pdvmObjekt,"PDT_002",["def: setPdvmDateTimeT", "Eingabe: " + str(pdvmdtt)], self.language)
     
     def __getPdvmDateTimeT(self):
         return self.dtt
@@ -199,7 +202,7 @@ class Pdvm_DateTime(object):
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
         except:
-            self.__message("error",pdvmObjekt,"PDT_003",["def: setPdvmDate", "Eingabe: " + str(pdvmdt)])
+            printMessage("error",pdvmObjekt,"PDT_003",["def: setPdvmDate", "Eingabe: " + str(pdvmdt)], self.language)
 
     def __getPdvmDate(self):
         return self.pdvmdate
@@ -213,7 +216,7 @@ class Pdvm_DateTime(object):
         try:
             self.__pdvmdatime(pdvmdtt[0],pdvmdtt[1],pdvmdtt[2],0,0,0,0)
         except:
-            self.__message("error",pdvmObjekt,"PDT_004",["def: setPdvmDateT", "Eingabe: " + str(pdvmdtt)])
+            printMessage("error",pdvmObjekt,"PDT_004",["def: setPdvmDateT", "Eingabe: " + str(pdvmdtt)], self.language)
     
     def __getPdvmDateT(self):
         return self.dd
@@ -230,7 +233,7 @@ class Pdvm_DateTime(object):
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
         except:
-            self.__message("error",pdvmObjekt,"PDT_005",["def: setPdvmTime", "Eingabe: " + str(pdvmtt)])
+            printMessage("error",pdvmObjekt,"PDT_005",["def: setPdvmTime", "Eingabe: " + str(pdvmtt)], self.language)
 
     def __getPdvmTime(self):
         return self.pdvmtime
@@ -244,7 +247,7 @@ class Pdvm_DateTime(object):
         try:
             self.__pdvmdatime(0,0,0,pdvmttt[0],pdvmttt[1],pdvmttt[2],pdvmttt[3])
         except:
-            self.__message("error",pdvmObjekt,"PDT_006",["def: setPdvmTimeT", "Eingabe: " + str(pdvmttt)])
+            printMessage("error",pdvmObjekt,"PDT_006",["def: setPdvmTimeT", "Eingabe: " + str(pdvmttt)], self.language)
     
     def __getPdvmTimeT(self):
         return self.dt
@@ -366,22 +369,6 @@ class Pdvm_DateTime(object):
         return  s                       # Rückgabe Ergebnis
 
     # --------------------------------------------------------------------
-    # Meldungen
-    # --------------------------------------------------------------------
-    def __message(self,typ,mod,num,aon):
-        la = 70
-        h_line = lockedWritten(transkateone(self.lanquage,'general', 'message'))
-        h_mh = int((la - len(h_line) - 2) / 2)
-        h_line = ' '+h_line+' '
-        print(multiChar('=',h_mh)+h_line+multiChar('=',h_mh))
-        print("Nummer:  "+num)
-        print("Art:     "+typ)
-        print("Modul:   "+mod)
-        print("         "+str(transkateone(self.lanquage,'messages',num)))
-        print("Hinweis: "+str(aon))
-        print(multiChar("=",la,0))
-
-    # --------------------------------------------------------------------
     # Date    --- Datum yyyy-mm-dd ausgeben 
     #           Datumsformate nach DIN 5008:2011-04
     #
@@ -429,19 +416,19 @@ class Pdvm_DateTime(object):
             try:
                 int(datein)                             # Prüfung numerischer Wert
             except:
-                self.__message("error",pdvmObjekt,"PDT_007",["def: __setDate","Eingabe: " + datein])
+                printMessage("error",pdvmObjekt,"PDT_007",["def: __setDate","Eingabe: " + datein], self.language)
                 ok = False
 
             if ok == True:       # kein Splitter und nicht numerisch
                 if len(datein) > 8:                       # für numerischen Wert zu lange
-                    self.__message("error",pdvmObjekt,"PDT_008",["def: __setDate","Eingabe: " + datein])
+                    printMessage("error",pdvmObjekt,"PDT_008",["def: __setDate","Eingabe: " + datein], self.language)
                     ok = False
                 elif (len(datein) == 8                    # mit 4 Stellen Jahr
                         or len(datein) == 6               # mit 2 Stellen Jahr
                         or len(datein) == 4):             # ohne Jahreszahl
                     pdate = self.__calcDateToForm(datein, len(datein))
                 else:
-                    self.__message("error",pdvmObjekt,"PDT_009",["def: __setDate","Eingabe: " + datein])
+                    printMessage("error",pdvmObjekt,"PDT_009",["def: __setDate","Eingabe: " + datein], self.language)
                     ok = False
         else:
             xdate = datein.split(splitter)
@@ -499,7 +486,7 @@ class Pdvm_DateTime(object):
         if int(month) > 0 and int(month) < 13:
             ok = True
         else:
-            self.__message("error",pdvmObjekt,"PDT_010",["def: __checkDate","Monat: " + str(month)])
+            printMessage("error",pdvmObjekt,"PDT_010",["def: __checkDate","Monat: " + str(month)], self.language)
         
         # Check Day
         # Der Tag wird genau geprüft, dies bedeutet, dass beim Februar das Schaltjahr 
@@ -510,7 +497,7 @@ class Pdvm_DateTime(object):
                 ok = True
             else:
                 ok = False
-                self.__message("error",pdvmObjekt,"PDT_011",["def: __checkDate", "Tag: " + str(day),"Monat: " + str(month),"Jahr: " + str(year)])
+                printMessage("error",pdvmObjekt,"PDT_011",["def: __checkDate", "Tag: " + str(day),"Monat: " + str(month),"Jahr: " + str(year)], self.language)
 
         return ok
 
@@ -537,7 +524,7 @@ class Pdvm_DateTime(object):
             year = self.GetAYear
         else:
             # darf hier nie ankommen / Sicherheit
-            self.__message("error",pdvmObjekt,"PDT_012",["def: __calcDateToForm","Länge: " + str(dlen)])
+            printMessage("error",pdvmObjekt,"PDT_012",["def: __calcDateToForm","Länge: " + str(dlen)], self.language)
 
         # Monat ermitteln
         month = datein[posMonth[dlen][self.dateMonthPos][0]:posMonth[dlen][self.dateMonthPos][1]]
@@ -579,19 +566,19 @@ class Pdvm_DateTime(object):
                 minute = tis[1]
                 second = tis[2]
             except:
-                self.__message("error",pdvmObjekt,"PDT_014",["def: __setTime","Splitwert: " + str(tis)])
+                printMessage("error",pdvmObjekt,"PDT_014",["def: __setTime","Splitwert: " + str(tis)], self.language)
                 ok = False
         else:           # Eingabe ohne Splitter
             try:
                 int(timein)                             # Prüfung numerischer Wert
             except:
-                self.__message("error",pdvmObjekt,"PDT_007",["def: __setTime","Eingabe: " + timein])
+                printMessage("error",pdvmObjekt,"PDT_007",["def: __setTime","Eingabe: " + timein], self.language)
                 ok = False
             if ok and len(timein)%2 > 0:                       #falsche Länge nicht durch 2 teilbar
-                self.__message("error",pdvmObjekt,"PDT_012",["def: __setTime","Eingabe: " + timein])
+                printMessage("error",pdvmObjekt,"PDT_012",["def: __setTime","Eingabe: " + timein], self.language)
                 ok = False
             elif ok and len(timein) > 6:                         # zu lang
-                self.__message("error",pdvmObjekt,"PDT_008",["def: __setTime","Eingabe: " + timein])
+                printMessage("error",pdvmObjekt,"PDT_008",["def: __setTime","Eingabe: " + timein], self.language)
                 ok = False
             if ok:    
                 tin = (timein + '000000')[0:6]
@@ -1135,15 +1122,15 @@ class Pdvm_DateTime(object):
     # --------------------------------------------------------------------
     # Wochentagname 
     def __weekdayName(self, gwd):
-        return transkateone(self.lanquage,'weekdays',str(gwd)) 
+        return transkateone('weekdays',str(gwd), self.language) 
 
     # Monatsnamen 
     def __transMN(self, tmn):
-        return transkateone(self.lanquage,'monthname',str(tmn-1))              
+        return transkateone('monthname',str(tmn-1), self.language)              
 
     # Translation Ja/Nein  1/0
     def __transYN(self, tjn):
-        return transkateone(self.lanquage,'transYN',str(tjn))    
+        return transkateone('transYN',str(tjn), self.language)    
 
 
 
@@ -1190,8 +1177,8 @@ def transString (pdvmstr, pdvmkat, pdvml):
 # übersetzte String 'pdvmstr' mit Kategorie 'pdvmkat' auf die Länge 'pdvml' 
 # direkt aus dem Wörterbuch mit der Sprache 'lanq'
 # --------------------------------------------------------------------
-def transStringOne (lanq, pdvmkat, pdvmstr, pdvml):
-    vstr = transkateone(lanq, pdvmkat, pdvmstr)
+def transStringOne (lang, pdvmkat, pdvmstr, pdvml):
+    vstr = transkateone(pdvmkat, pdvmstr, lang)
     ret =('{:<'+pdvml+'}').format(vstr)
     return ret
 
@@ -1206,7 +1193,7 @@ def stringToLength (pdvmstr, pdvml):
 
 
 # --------------------------------------------------------------
-# für Test / Ausgabe und Berechnung
+# für Test / Ausgabe und Berechnung - müssen direkt eingebunden sein
 # --------------------------------------------------------------
 
 def tests_print (a, test_list, testname='ohne Parameter', 
@@ -1223,28 +1210,6 @@ def test_out (a, test_pro, test_in):
     exec("a."+test_pro+" = " + test_in)
     return a
 
-def p_print(show_detail, prt):
-    if show_detail == 1 : print(prt)
-
-def t_p_t(lanq, word):
-    return transkateone(lanq, 'proptext', word)
-
-def lockedWritten(word):
-    ret = ''
-    for b in word:
-        ret = ret+b+' '
-    return ret 
-
-def multiChar(char,multi,lf=0):
-    # lf --> linefeed  // lf = 0 --> kein lf
-    # lf = 1 --> lf vorne  // lf = 2 --> lf hinten  // lf = 3 --> vorne und hinten
-    ret = char * multi
-    if lf == 1 or lf == 3:
-        ret = '\n'+ret
-    if lf == 2 or lf == 3:
-        ret = ret+'\n'
-    return ret
-
 # --------------------------------------------------------------
 # --------------------------------------------------------------
 
@@ -1252,11 +1217,13 @@ def multiChar(char,multi,lf=0):
 # --------------------------------------------------------------
 if __name__=='__main__':
     # --------------------------------------------------------------
+    import os                                  # Für Testbereich
+    from pdvm_util import lockedWritten, multiChar, p_print, t_p_t  
     # das Wörterbuch mit den einzelnen Testelementen wurde ausgelagert
     import pdvm_datetime_test
     tests = pdvm_datetime_test.testtabelle()
     # --------------------------------------------------------------
-    try:        # Console wir leer gemacht
+    try:                    # Console wir leer gemacht
         os.system('CLS')    # for Windows
     except:
         os.system('CLEAR')  # for Unix
@@ -1265,12 +1232,20 @@ if __name__=='__main__':
 
     linel = 70                  # Länge der Linien im Log
     print(multiChar("=",linel,1))
-    print(lockedWritten(transkateone(a.lanquage,'general','OutTestProt')))
+    print(lockedWritten(transkateone('general','OutTestProt', a.language)))
     print(multiChar("=",linel,2))
     blank = "----> "            # einrücken verschiedener Ausgaben
     test_list = {}
-    akt_year = '2019'           # muss auf dem aktuellen Jahr stehen
-    tag_4mon = 123              # Tage 4 Monate vom aktuellen Monat zurück [Test0230]
+
+    a = Pdvm_DateTime()         # Objekt für default Test
+    a.PdvmDateTime = a.PdvmDateTimeNow()
+    akt_year = str(a.Year)      # muss auf dem aktuellen Jahr stehen
+    tag_4monC = (               # Tage 4 Monate vom aktuellen Monat zurück [Test0230]
+        (122,122),(122,122),(120,121),(120,121),(119,120),(122,122),
+        (121,121),(122,122),(122,122),(122,122),(122,122),(121,121)
+    )
+    tag_4mon = int(tag_4monC[a.Month][a.LYear])
+
 
     # Einstellungen zur Log-Ausgabe
     show_detail = [
@@ -1302,9 +1277,9 @@ if __name__=='__main__':
     a.FormCountry = ' enl '                         # Fehlermeldung FormCountry = DIN
     p_print(show_detail[6],  a.FormCountry)
 
-    fC = input('\n'+ transkateone(a.lanquage, 'general', 'countryFDate') +': ')   # Eingabe FormCountry für den Test
+    fC = input('\n'+ transkateone('general', 'countryFDate', a.language) +': ')   # Eingabe FormCountry für den Test
     a = Pdvm_DateTime(fC)                           #   korrekter Test muss mit allen FormCountry
-    la = a.lanquage                                 # Sprache in kurze Veriable
+    la = a.language                                 # Sprache in kurze Veriable
     p_print(show_detail[6],  a.formCountry)         #   ok sein.
 
     # --------------------------------------------------------------------------------
@@ -1396,21 +1371,21 @@ if __name__=='__main__':
     # Testausgabe - erfolgt nach den Einstellungen
     if show_detail[4] == 1:
         print(multiChar("=",linel,1))
-        print(lockedWritten(transkateone(la,'general','testEdition')))
+        print(lockedWritten(transkateone('general','testEdition', a.language)))
         print(multiChar("=",linel,0))
         for test_d in test_list:
             print(test_list[test_d])
     
     print(multiChar("=",linel,1))
-    print(lockedWritten(transkateone(la,'general','testResult')))
+    print(lockedWritten(transkateone('general','testResult', a.language)))
     print(multiChar("=",linel,0))
     er = 0
     for test_d in test_list:
         if test_list[test_d][1] != test_list[test_d][2]:
-            print(transkateone(la,'general','diffIn')+" " + test_d + " -- " + 
+            print(transkateone('general','diffIn', a.language)+" " + test_d + " -- " + 
                 str(test_list[test_d][1]) + " -- " + str(test_list[test_d][2]))
             er += 1
     if er > 0:
-        print(str(er) + " "+ transkateone(la,'general','diffExist'))
+        print(str(er) + " "+ transkateone('general','diffExist', a.language))
     else:
-        print(transkateone(la,'general','noDiff')+" - Test OK")
+        print(transkateone('general','noDiff', a.language)+" - Test OK")

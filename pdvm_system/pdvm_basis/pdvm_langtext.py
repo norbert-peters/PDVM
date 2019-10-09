@@ -15,12 +15,15 @@
 # die sich nicht auf ein Objekt beziehen.
 #
 # -------------------------------------------------------------------------------------------
-
+from django.conf import settings            # Standardeinstellungen immer aus den Settings
 # -------------------------------------------------------------------------------------------
 # Einstellungen 
 # -------------------------------------------------------------------------------------------
-language = ['en-us','de-de']        # verfügbare Sprachen - Programmabbruch vermeiden
-st_lanquage = 'de-de'               # Standardsprache, wenn Sprachangabe falsch ist
+language = ['en-us','de-de']                # verfügbare Sprachen - Programmabbruch vermeiden
+try:
+    st_language = settings.LANGUAGE_CODE    # Standardsprache, wenn Sprachangabe falsch ist oder fehlt
+except:
+    st_language = 'de-de'    
 # -------------------------------------------------------------------------------------------
 
 transbook = {
@@ -85,23 +88,31 @@ transbook = {
             'gaz':'Gültig ab Zeit',
             'is_admin':'Ist Administrator',
             'last_name':'Nachname',
+            'modul':'Modul',
+            'note':'Hinweis',
+            'number':'Nummer',
             'password':'Passwort',
             'rep_password':'Passwort wiederholen',
+            'typ':'Art',
             'updated_at':'Letztes Update',
             'username':'Benutzername',
         },
         'en-us':{
-            'birthday':'birthday',
-            'comment':'comment',
-            'created_at':'created at',
-            'first_name':'first name',
+            'birthday':'Birthday',
+            'comment':'Comment',
+            'created_at':'Created at',
+            'first_name':'First name',
             'gaz':'Valid from time',
-            'is_admin':'is administrator',
-            'last_name':'last name',
-            'password':'password',
+            'is_admin':'Is administrator',
+            'last_name':'Last name',
+            'modul':'Modul',
+            'note':'Note',
+            'number':'Number',
+            'password':'Password',
             'rep_password':'Repeat password',
-            'updated_at':'updated at',
-            'username':'username',
+            'typ':'Typ',
+            'updated_at':'Updated at',
+            'username':'Username',
         },
     },
     'monthname':{
@@ -153,8 +164,10 @@ transbook = {
             "PDT_012":"Länge nicht zugelassen",
             "PDT_013":"Nicht realisiertes Landformat",
             "PDT_014":"Gesplitteter Wert falsch! Splitter unterschiedlich?",
+            "PDU_001":"Eingabezeichen ist nicht zugelassen!",
             "PLT_001":"Kein Eintrag im Wörterbuch",
             "PLT_002":"Für diese Sprache ist kein Wörterbuch verfügbar",
+            "PLT_003":"Keine Kategorie ausgewählt",
         },
         'en-us':{
             'ACC_001':'The user account requires a valid email address!',
@@ -174,8 +187,10 @@ transbook = {
             "PDT_012":"Length not allowed",
             "PDT_013":"Unrealized land format",
             "PDT_014":"Split value wrong! Splitter different?",
+            "PDU_001":"Input character is not allowed!",
             "PLT_001":"No entry in the dictionary",
             "PLT_002":"There is no dictionary available for this language",
+            "PLT_003":"No category selected",
         },
     },
     'proptext':{
@@ -291,55 +306,99 @@ transbook = {
 # --------------------------------------------------------------------
 # gibt eine ganze Kategorie zurück
 # --------------------------------------------------------------------
-def transkate(lanq, kate):
+def transkate(kate='kategory', lang=st_language):
     ret = ''
     z = 0
     for x in language:
-        if x == lanq:
+        if x == lang:
             z += 1
     if z == 0:
-        __message('error','pdvm_lanqtext','PLT_002','Eingabe:'+lanq+' | '+kate,st_lanquage)    
-        lanq = st_lanquage
-    try:
-        ret = transbook[kate][lanq]
+        printMessage('error','pdvm_langtext','PLT_002','Eingabe:'+lang+' | '+kate,st_language)    
+        lang = st_language
+    try:            # Sprache nicht vorhanden -- wird nach Fehlermeldung in Standardsprache ausgegeben
+        ret = transbook[kate][lang]
     except:
-        __message('error','pdvm_lanqtext','PLT_001','Eingabe:'+lanq+' | '+kate,lanq)    
+        printMessage('error','pdvm_langtext','PLT_001','Eingabe:'+lang+' | '+kate,lang)    
     return ret
 
 # --------------------------------------------------------------------
 # gibt eine einzelne Übersetzung zurück
 # --------------------------------------------------------------------
-def transkateone(lanq, kate, word):
+def transkateone(kate='messages', word='PLT003', lang=st_language):
     ret = ''
     z = 0
     for x in language:
-        if x == lanq:
+        if x == lang:
             z += 1
     if z == 0:
-        __message('error','pdvm_lanqtext','PLT_002','Eingabe:'+lanq+' | '+kate,st_lanquage)    
-        lanq = st_lanquage
+        printMessage('error','pdvm_langtext','PLT_002','Eingabe:'+lang+' | '+kate,st_language)    
+        lang = st_language
     try:
-        ret = transbook[kate][lanq][word]
+        ret = transbook[kate][lang][word]
     except:
-        __message('error','pdvm_lanqtext','PLT_001','Eingabe:'+lanq+' | '+kate+' | '+word,st_lanquage)    
+        printMessage('error','pdvm_langtext','PLT_001','Eingabe:'+lang+' | '+kate+' | '+word,st_language)    
     return ret
 
 # --------------------------------------------------------------------
-# Meldungen
+# Meldungen kann hier nicht aus pdvm_util verwendet werden (Rekursion)
 # --------------------------------------------------------------------
-def __message(typ,mod,num,aon,lanq):
-    print("--------------Meldung----------------------")
-    print("Nummer:  "+num)
-    print("Art:     "+typ)
-    print("Modul:   "+mod)
-    print("         "+str(transkateone(lanq,'messages',num)))
-    print("Hinweis: "+str(aon))
-    print("-------------------------------------------")
+def printMessage(typ,mod,num,aon=' ',lang=st_language):
+    la = 70
+    li = '10'
+    h_line = lockedWritten(transkateone('general', 'message', lang))
+    h_mh = int((la - len(h_line) - 2) / 2)
+    h_line = ' '+h_line+' '
+    print(multiChar('=',h_mh)+h_line+multiChar('=',h_mh))
+    print(transStringOne (lang, 'label', 'number', li)+":  "+num)
+    print(transStringOne (lang, 'label', 'typ', li)+":  "+typ)
+    print(transStringOne (lang, 'label', 'modul', li)+":  "+mod)
+    print(stringToLength('',str(int(li)+3))+str(transkateone('messages',num, lang)))
+    print(transStringOne (lang, 'label', 'note', li)+":  "+str(aon))
+    print(multiChar("=",la,0))
 
+# --------------------------------------------------------------------
+# String gesperrt zurückgeben - geht nicht aus pdvm_util
+# --------------------------------------------------------------------
+def lockedWritten(word):
+    ret = ''
+    for b in word:
+        ret = ret+b+' '
+    return ret 
 
+# --------------------------------------------------------------------
+# gibt ein Zeichen (string) mehrfach aus - kann nicht aus pdvm_util genommen werden
+# --------------------------------------------------------------------
+# lf --> linefeed  // lf = 0 --> kein lf
+# lf = 1 --> lf vorne  // lf = 2 --> lf hinten  // lf = 3 --> vorne und hinten
+# --------------------------------------------------------------------
+def multiChar(char,multi,lf=0):
+    ret = char * multi
+    if lf == 1 or lf == 3:
+        ret = '\n'+ret
+    if lf == 2 or lf == 3:
+        ret = ret+'\n'
+    return ret
 
+# --------------------------------------------------------------------
+# übersetzte String 'pdvmstr' mit Kategorie 'pdvmkat' auf die Länge 'pdvml' 
+# direkt aus dem Wörterbuch mit der Sprache 'lang'
+# -- kann nicht aus pdvm_util genommen werden
+# --------------------------------------------------------------------
+def transStringOne (lang, pdvmkat, pdvmstr, pdvml):
+    vstr = transkateone(pdvmkat, pdvmstr, lang)
+    ret =('{:<'+pdvml+'}').format(vstr)
+    return ret
+
+# --------------------------------------------------------------------
+# String auf die Länge pdvml konvertieren -- kann nicht aus pdvm_util genommen werden
+# --------------------------------------------------------------------
+def stringToLength (pdvmstr, pdvml):
+    ret =('{:<'+pdvml+'}').format(pdvmstr)
+    return ret
+
+# --------------------------------------------------------------------
 # Hauptprogramm - Testumgebung
-# --------------------------------------------------------------
+# --------------------------------------------------------------------
 if __name__=='__main__':
     import os               # Für Testbereich
 
@@ -348,7 +407,8 @@ if __name__=='__main__':
     except:
         os.system('CLEAR')  # for Unix
 
-    print(str(transkate('de-de','mess1ages'))+'\n')
-    print(str(transkate('en-en','messages'))+'\n')
-    print(str(transkateone('de-de','messages','PDT_011'))+'\n')
-    print(str(transkateone('en-us','mes1sages','PDT_011'))+'\n')
+    print(str(transkate('messages', 'de-de'))+'\n')
+    print(str(transkate('messages', 'en-en'))+'\n')
+    print(str(transkate('messages', 'en-us'))+'\n')
+    print(str(transkateone('messages','PDT_011', 'de-de'))+'\n')
+    print(str(transkateone('messages','PDT_011', 'en-us'))+'\n')
