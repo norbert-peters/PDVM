@@ -7,6 +7,8 @@
     Es sind weiterhin Kalenderfunktionen bzw. Kalenderwerte in der Klasse 
     verfügbar.
 
+    nähere Erläuterungen sind unter www.pdvm.de zu finden.
+
     Neu zusammengestellt:
     01.08.2019 Norbert Peters
     07.10.2019 überarbeitet
@@ -20,11 +22,16 @@ import time                                            # Wird benutzt um die akt
 
 # E i n s t e l l u n g e n
 # ================================================================================
-pdvmObjekt = "Pdvm_DateTime"            # Objektnamen in pdvm_system
+pdvmObjekt = "Pdvm_DateTime"                # Objektnamen in pdvm_system
 try:
     st_language = settings.LANGUAGE_CODE    # verwendete Standardsprache
 except:
     st_language = 'de-de'
+
+try:
+    st_time = settings.TIME_CODE             # verwendeter Ländercode
+except:
+    st_time = 'DIN'
 
 # Anzahl der Tage einzelner Monate
 monthdays = [[0,0],[0,0],[31,31],[59,60],[90,91],[120,121],[151,152],[181,182],
@@ -85,7 +92,7 @@ posDay = {
 
 class Pdvm_DateTime(object):
 
-    def __init__(self,fCountry='DIN'):
+    def __init__(self,fCountry=st_time):
         # konstante Faktoren
         self._tag     = 86400000000      # Microsekunden eines Tages
         self._stunde  = 3600000000       # Microsekunden einer Stunde
@@ -148,7 +155,7 @@ class Pdvm_DateTime(object):
         else:
             self.formCountry   ='DIN'      # Standardwert
             self.language      = st_language
-            printMessage("error",pdvmObjekt,"PDT_013",["def: __setFormCountry","Eingabe: " + fCountry])
+            printMessage("error",pdvmObjekt,"PDT_013",["def: __setFormCountry","Eingabe: " + fCountry], self.language)
             self.dateSplitter  = dateSplitter['DIN']
             self.dateYearPos   = dateYearPos['DIN']
             self.dateMonthPos  = dateMonthPos['DIN']
