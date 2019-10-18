@@ -171,7 +171,7 @@ class Pdvm_DateTime(object):
     # --------------------------------------------------------------------
     def __setPdvmDateTime(self,pdvmddate):
         try:
-            self.pdvmdatetime = pdvmddate
+            self.pdvmdatetime = float(pdvmddate)
             self.__pdvmDateInDateSplit()
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
@@ -179,7 +179,10 @@ class Pdvm_DateTime(object):
             printMessage("error",pdvmObjekt,"PDT_001",["def: setPdvmDateTime", "Eingabe: " + str(pdvmddate)], self.language)
 
     def __getPdvmDateTime(self):
-        return self.pdvmdatetime
+        if self.vChr:
+            return self.pdvmdatetime * -1
+        else:
+            return self.pdvmdatetime
 
     PdvmDateTime = property(__getPdvmDateTime,__setPdvmDateTime)
 
@@ -212,7 +215,10 @@ class Pdvm_DateTime(object):
             printMessage("error",pdvmObjekt,"PDT_003",["def: setPdvmDate", "Eingabe: " + str(pdvmdt)], self.language)
 
     def __getPdvmDate(self):
-        return self.pdvmdate
+        if self.vChr:
+            return self.pdvmdate
+        else:
+            return self.pdvmdate
 
     PdvmDate = property(__getPdvmDate,__setPdvmDate)
     
@@ -235,7 +241,8 @@ class Pdvm_DateTime(object):
     # --------------------------------------------------------------------
     def __setPdvmTime(self,pdvmtt):
         try:
-            self.pdvmdatetime = float(pdvmtt)  
+            xx = int(pdvmtt)
+            self.pdvmdatetime = float(pdvmtt)-xx  
             self.__pdvmDateInDateSplit()
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
@@ -277,7 +284,7 @@ class Pdvm_DateTime(object):
         self.pdvmdatetime = self.__convertToPdvmDateTime(year,month,day,hour,minute,second,microsecond)
 
         self.pdvmtime = float(str(self.pdvmdatetime)[str(self.pdvmdatetime).find("."):])
-        self.svalue()
+        self.__svalue()
 
         return self.pdvmdatetime
 
@@ -306,14 +313,14 @@ class Pdvm_DateTime(object):
         if self.microsecond > 999000:                 # Korrektur Ungenauigkeit
             self.microsecond = 0                      #    bei Ursprungswert 0
             
-        self.svalue()
+        self.__svalue()
 
         return self.dtt
 
     # --------------------------------------------------------------------
     # Objektwerte
     # --------------------------------------------------------------------
-    def svalue(self):
+    def __svalue(self):
         # Tuple Datum / Zeiten setzen
         ret = []
         ret.append(self.year)
@@ -339,16 +346,38 @@ class Pdvm_DateTime(object):
         # des Kalenders berechnet und inter die Tage im Jahr addiert.
         # Jahr 0 hat Wochentag 5 Samstag, Jahr 1 hat 6 Sonntag, da der
         # Kalender im Jahre 1 mit Sonntag beginnt.  
-        # Negative Jahreszahl führt zum Fehler !!      
+        # Für das Jahr 0 und die negative Jahre wird dieses einfach logisch
+        #    weitergeführt     
         year = self.year                # Jahreszahl
-        year -= 1                       # Anzahl volle Jahre
+        if self.vChr:   
+            year = year * -1          
+        x_year = year                   # für spätere Verwendung        
+        print(self.vChr)
+        print(x_year)
+        if year <= 0:                   # für Jahr 0 und kleiner, volle Jahre ohne Korrektur    
+            pass
+        else:
+            year -= 1                   # Anzahl volle Jahre
+        print(year)
         yday = self.yday                # Anzahl Tage im Jahr
+        print(yday)
         sjahr= int(year/4)              # Anzahl grundsätzliche Schaltjahre
+        print(sjahr)
         n_sjahr = int(year/100)         # Anzahl doch keine Schaltjahre
+        print(n_sjahr)
         d_jahr = int(year/400)          # Anzahl doch wieder Schaltjahre
+        print(d_jahr)
         all_years_day = year*365        # Anzahl Tage der Jahre
+        print(all_years_day)
         all_s_years = sjahr - n_sjahr + d_jahr      # Summe der Schaltjahre
-        year_number = all_years_day + all_s_years + yday - 1 
+        print(all_s_years)
+        if x_year < 1:
+            print('keiner 1')
+            year_number = all_years_day + all_s_years - yday
+        else:    
+            print('größer 1')
+            year_number = all_years_day + all_s_years + yday -1
+        print(year_number)
         return year_number%7
 
     Weekday = property(__getWeekday,)
@@ -469,10 +498,14 @@ class Pdvm_DateTime(object):
         for i in range(1, 3):                           # 0 ist Jahr bleibt wie es ist
             if len(xdate[i])<self.monthDayLen:
                     xdate[i] = xdate[i].rjust(2, "0")
-
-        ret = (xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
-                +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
-                +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
+            if self.vChr:
+                ret = ('-'+xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
+                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
+                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
+            else:
+                ret = (xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
+                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
+                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
 
         return ret
 
@@ -663,10 +696,16 @@ class Pdvm_DateTime(object):
         self.PdvmDateTime = float(da) + float(self.pdvmdatetime)
 
     def __getFormTimeStamp(self):
-        return self.Date + " - " + self.Time
+        if self.vChr:
+            return "-"+self.Date + " - " + self.Time
+        else:
+            return self.Date + " - " + self.Time
 
     def __getTimeStamp(self):
-        return self.Date + " - " + self.TimeAll
+        if self.vChr:
+            return "-"+self.Date + " - " + self.TimeAll
+        else:
+            return self.Date + " - " + self.TimeAll
 
     FormTimeStamp = property(__getFormTimeStamp, __setFormTimeStamp)
     TimeStamp = property(__getTimeStamp)    
@@ -721,7 +760,7 @@ class Pdvm_DateTime(object):
     Year = property(__getYear,)
 
     # --------------------------------------------------------------------
-    # Month    --- Jahr ausgeben
+    # Month    --- Monat ausgeben
     # --------------------------------------------------------------------
     def __getMonth(self):
         return self.month
@@ -729,7 +768,7 @@ class Pdvm_DateTime(object):
     Month = property(__getMonth,)
 
     # --------------------------------------------------------------------
-    #Dday    --- Jahr ausgeben
+    #Dday    --- Tag ausgeben
     # --------------------------------------------------------------------
     def __getDay(self):
         return self.day
@@ -737,7 +776,7 @@ class Pdvm_DateTime(object):
     Day = property(__getDay,)
 
     # --------------------------------------------------------------------
-    # Hour    --- Jahr ausgeben
+    # Hour    --- Stunde ausgeben
     # --------------------------------------------------------------------
     def __getHour(self):
         return self.hour
@@ -745,7 +784,7 @@ class Pdvm_DateTime(object):
     Hour = property(__getHour,)
 
     # --------------------------------------------------------------------
-    # Minute    --- Jahr ausgeben
+    # Minute    --- Minute ausgeben
     # --------------------------------------------------------------------
     def __getMinute(self):
         return self.minute
@@ -753,7 +792,7 @@ class Pdvm_DateTime(object):
     Minute = property(__getMinute,)
 
     # --------------------------------------------------------------------
-    # Second    --- Jahr ausgeben
+    # Second    --- Sekunde ausgeben
     # --------------------------------------------------------------------
     def __getSecond(self):
         return self.second
@@ -762,6 +801,7 @@ class Pdvm_DateTime(object):
 
     # --------------------------------------------------------------------
     # Period    --- Periode (JJJJMM) ausgeben (Monat)  [Monatsperiode]
+    # --> wird immer positiv ausgegeben
     # --------------------------------------------------------------------
     def __getPeriod(self):
         return self.period
@@ -770,6 +810,7 @@ class Pdvm_DateTime(object):
 
     # --------------------------------------------------------------------
     # FirstDayOfMonth    --- 1. Tag des Monats / Periode
+    # --> nur bei positivem Datum korrekt
     # --------------------------------------------------------------------
     def __getFirstDayOfMonth(self):
         year = self.year
@@ -784,6 +825,7 @@ class Pdvm_DateTime(object):
 
     # --------------------------------------------------------------------
     # LastDayOfMonth    --- letzter Tag des Monats
+    # --> nur bei positivem Datum korrekt
     # --------------------------------------------------------------------
     # --- A c h t u n g !!  Monat endet erst am Folgetag um 00:00 Uhr
     # --------------------------------------------------------------------
@@ -800,6 +842,7 @@ class Pdvm_DateTime(object):
 
     # --------------------------------------------------------------------
     # FrstDayOfNextMonth    --- 1. Tag des nächsten Monats
+    # --> nur bei positivem Datum korrekt
     # --------------------------------------------------------------------
     # --- A c h t u n g !!  Es ist das Ende des Vormonats, 00:00 Uhr
     # --------------------------------------------------------------------
@@ -1396,3 +1439,10 @@ if __name__=='__main__':
         print(str(er) + " "+ transkateone('general','diffExist', a.language))
     else:
         print(transkateone('general','noDiff', a.language)+" - Test OK")
+
+    a = Pdvm_DateTime('DEU')
+    a.Date = '-17.10.5'
+    print(a.Weekday)
+    print(transkateone('weekdays', str(a.Weekday), a.language))
+    print(a.PdvmDateTime)
+    print(a.TimeStamp)
