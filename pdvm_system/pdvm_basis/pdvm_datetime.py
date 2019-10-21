@@ -341,7 +341,7 @@ class Pdvm_DateTime(object):
     # --------------------------------------------------------------------
     # Weekday    --- Wochentag ermitteln
     # --------------------------------------------------------------------
-    def __getWeekday(self):
+    def __getWeekday(self): 
         # Wochentag wird auf Basis der Gesamttage ab Beginn des
         # des Kalenders berechnet und inter die Tage im Jahr addiert.
         # Jahr 0 hat Wochentag 5 Samstag, Jahr 1 hat 6 Sonntag, da der
