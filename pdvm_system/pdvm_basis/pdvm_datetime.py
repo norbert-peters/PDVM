@@ -216,7 +216,7 @@ class Pdvm_DateTime(object):
 
     def __getPdvmDate(self):
         if self.vChr:
-            return self.pdvmdate
+            return self.pdvmdate * -1
         else:
             return self.pdvmdate
 
@@ -352,32 +352,20 @@ class Pdvm_DateTime(object):
         if self.vChr:   
             year = year * -1          
         x_year = year                   # für spätere Verwendung        
-        print(self.vChr)
-        print(x_year)
         if year <= 0:                   # für Jahr 0 und kleiner, volle Jahre ohne Korrektur    
             pass
         else:
             year -= 1                   # Anzahl volle Jahre
-        print(year)
         yday = self.yday                # Anzahl Tage im Jahr
-        print(yday)
         sjahr= int(year/4)              # Anzahl grundsätzliche Schaltjahre
-        print(sjahr)
         n_sjahr = int(year/100)         # Anzahl doch keine Schaltjahre
-        print(n_sjahr)
         d_jahr = int(year/400)          # Anzahl doch wieder Schaltjahre
-        print(d_jahr)
         all_years_day = year*365        # Anzahl Tage der Jahre
-        print(all_years_day)
         all_s_years = sjahr - n_sjahr + d_jahr      # Summe der Schaltjahre
-        print(all_s_years)
         if x_year < 1:
-            print('keiner 1')
             year_number = all_years_day + all_s_years - yday
         else:    
-            print('größer 1')
             year_number = all_years_day + all_s_years + yday -1
-        print(year_number)
         return year_number%7
 
     Weekday = property(__getWeekday,)
@@ -420,7 +408,7 @@ class Pdvm_DateTime(object):
     #   mit __setFormCountry als Objektparameter gesetzt.
     #   Hinweis: Erfolgt eine Eingabe mit ainem Minus am Anfang so wird intern self.vChr auf True 
     #   -------- gesetzt. In den Berechungen hat es noch keine Auswirkungen. Datum wird wie positiv
-    #            veraltet. !!!Als PDVM_DateTime erfolgt die Ausgabe negativ. fehlt noch!!!
+    #            verwaltet. Als PDVM_DateTime erfolgt die Ausgabe und damit ggf. auch die Speicherung negativ.
     # --------------------------------------------------------------------
     def __setDate(self,datein):
         # Initalisierung
@@ -455,7 +443,7 @@ class Pdvm_DateTime(object):
                 printMessage("error",pdvmObjekt,"PDT_007",["def: __setDate","Eingabe: " + datein], self.language)
                 ok = False
 
-            if ok == True:       # kein Splitter und nicht numerisch
+            if ok == True:       # kein Splitter und numerisch
                 if len(datein) > 8:                       # für numerischen Wert zu lange
                     printMessage("error",pdvmObjekt,"PDT_008",["def: __setDate","Eingabe: " + datein], self.language)
                     ok = False
@@ -498,14 +486,9 @@ class Pdvm_DateTime(object):
         for i in range(1, 3):                           # 0 ist Jahr bleibt wie es ist
             if len(xdate[i])<self.monthDayLen:
                     xdate[i] = xdate[i].rjust(2, "0")
-            if self.vChr:
-                ret = ('-'+xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
-                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
-                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
-            else:
-                ret = (xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
-                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
-                    +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
+            ret = (xdate[outpos[self.dateYearPos][self.dateMonthPos][0]]
+                +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][1]]
+                +self.dateSplitter+xdate[outpos[self.dateYearPos][self.dateMonthPos][2]])
 
         return ret
 
