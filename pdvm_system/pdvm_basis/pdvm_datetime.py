@@ -497,9 +497,9 @@ class Pdvm_DateTime(object):
     # -------------------------------------------------------------------------------------
     # Datum prüfen
         # ---------------------------------------------------------------------------------
-        # Hinweis: Heute muss das Jahr noch positiv sein. Auf Dauer möchte ich hier auch Daten vor 
-        # -------- Chr. nach den Regeln des Gregorianischen Kalenders, als negative Zahl verarbeiten.
-        #          Daher wird eine Prüfung auf das Jahr weggelassen.
+        # Hinweis: Alle Jahre, auch die vor Chr. (negatives Datum) werden nach den Regeln des
+        # -------- gregorianischen Kalenders verarbeitet. Daher macht eine Prüfung auf das 
+        #          Jahr keinen Sinn und wurde weggelassen.
         # ---------------------------------------------------------------------------------
     # -------------------------------------------------------------------------------------
     def __checkDate(self,year,month,day):
@@ -1429,3 +1429,7 @@ if __name__=='__main__':
     print(transkateone('weekdays', str(a.Weekday), a.language))
     print(a.PdvmDateTime)
     print(a.TimeStamp)
+
+    a.Date = '-01.01.1916'
+    print('Jahr      : ' + str(a.Year))
+    print('Schaltjahr: ' + str(a.LYear))
