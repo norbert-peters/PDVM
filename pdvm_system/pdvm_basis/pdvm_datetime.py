@@ -1022,7 +1022,7 @@ class Pdvm_DateTime(object):
     # __splitPdvmDate   PdvmDate wird in year,month,day zerlegt
     # --------------------------------------------------------------------
     def __splitPdvmDate(self,pdvmdate):
-        if pdvmdate > 1000:
+        if pdvmdate > 0:
             yday = int(pdvmdate % 1000)               # Tage im Jahr
             year = int((pdvmdate - yday) / 1000)      # Jahr
             s = self.__lYearFYear(year)               # Schaltjahr
