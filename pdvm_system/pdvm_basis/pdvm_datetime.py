@@ -1270,7 +1270,7 @@ if __name__=='__main__':
     blank = "----> "            # einrücken verschiedener Ausgaben
     test_list = {}
 
-    a = Pdvm_DateTime()         # Objekt für default Test
+    # a = Pdvm_DateTime()         # Objekt für default Test
     a.PdvmDateTime = a.PdvmDateTimeNow()
     akt_year = str(a.Year)      # muss auf dem aktuellen Jahr stehen
     tag_4monC = (               # Tage 4 Monate vom aktuellen Monat zurück [Test0230]
