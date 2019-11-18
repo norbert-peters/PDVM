@@ -171,6 +171,8 @@ class Pdvm_DateTime(object):
     # --------------------------------------------------------------------
     def __setPdvmDateTime(self,pdvmddate):
         try:
+            if pdvmddate > 0:
+                self.vChr = False
             self.pdvmdatetime = float(pdvmddate)
             self.__pdvmDateInDateSplit()
             self.__pdvmdatime(self.year,self.month,self.day,
@@ -242,7 +244,7 @@ class Pdvm_DateTime(object):
     def __setPdvmTime(self,pdvmtt):
         try:
             xx = int(pdvmtt)
-            self.pdvmdatetime = float(pdvmtt)-xx  
+            self.pdvmdatetime = float(pdvmtt)-xx 
             self.__pdvmDateInDateSplit()
             self.__pdvmdatime(self.year,self.month,self.day,
                             self.hour,self.minute,self.second,self.microsecond)
@@ -1029,7 +1031,7 @@ class Pdvm_DateTime(object):
             ret = 0
             for i in range(13,-1,-1):
                 if int(yday) < monthdays[i][s]+1:
-                    pass
+                    mfndays_e = 0
                 else:
                     if ret==0:
                         ret = i
@@ -1096,6 +1098,7 @@ class Pdvm_DateTime(object):
     # ------------------------------------------------------"--------------
     def FullProperties(self):
         fullprop = {
+        "FormCountry"         : str(self.FormCountry),
         "PdvmDateTime"        : str(self.PdvmDateTime),
         "PdvmDate"            : str(self.PdvmDate),
         "PdvmTime"            : str(self.PdvmTime),
@@ -1103,26 +1106,32 @@ class Pdvm_DateTime(object):
         "PdvmDateT"           : str(self.PdvmDateT),
         "PdvmTimeT"           : str(self.PdvmTimeT),
         "Date"                : str(self.Date),
-        "Time"                : self.Time,
+        "Time"                : str(self.Time),
+        "TimeAll"             : str(self.TimeAll),
+        "TimeShort"           : str(self.TimeShort),
         "YDay"                : str(self.YDay),
         "Weekday"             : str(self.Weekday),
         "LYear"               : str(self.LYear),
         "Period"              : str(self.Period),
+        "TimeStamp"           : str(self.TimeStamp),
         "FormTimeStamp"       : self.FormTimeStamp,
         "FirstDayOfMonth"     : str(self.FirstDayOfMonth),
         "LastDayOfMonth"      : str(self.LastDayOfMonth),
         "FirstDayOfNextMonth" : str(self.FirstDayOfNextMonth),
-        "Year"                : str(self.year),
-        "Month"               : str(self.month),
-        "Day"                 : str(self.day),
-        "Hour"                : str(self.hour),
-        "Minute"              : str(self.minute),
-        "Second"              : str(self.second),
+        "Year"                : str(self.Year),
+        "Month"               : str(self.Month),
+        "Day"                 : str(self.Day),
+        "Hour"                : str(self.Hour),
+        "Minute"              : str(self.Minute),
+        "Second"              : str(self.Second),
         "DecHour"             : str(self.DecHour),
         "DecMin"              : str(self.DecMin),
         "DecSec"              : str(self.DecSec),
         "HourDec"             : str(self.HourDec),
         "MinDec"              : str(self.MinDec),
+        "GetAYear"            : str(self.GetAYear),
+        "GetAYear2"           : str(self.GetAYear2),
+        "GetAYearH2"          : str(self.GetAYearH2),
         }
 
         return fullprop
@@ -1231,9 +1240,9 @@ def stringToLength (pdvmstr, pdvml):
 
 def tests_print (a, test_list, testname='ohne Parameter', 
         fixValue=0, variValue=0, show_datail = [], show_mod=0):
-    p_print(show_detail[6],  "--- get "+variValue)    
-    exec('test_list[testname] = [testname, '+fixValue+', '+ variValue+']')
-    if show_detail[3] : print(test_list[testname])
+    p_print(show_detail[6],  "--- get "+variValue)   
+    exec('test_list[a.FormCountry+"_"+testname] = [a.FormCountry+"_"+testname, '+fixValue+', '+ variValue+']')
+    if show_detail[3] : print(test_list[a.FormCountry+"_"+testname])
     if show_detail[6] == 1 : a.PrintFullProperties(show_detail[show_mod])
     p_print(show_detail[6],  multiChar("-",70,1))
     return a
@@ -1261,8 +1270,8 @@ if __name__=='__main__':
     except:
         os.system('CLEAR')  # for Unix
 
-    a = Pdvm_DateTime()                                 # Objekt wird initialisiert / Standardsprache
-
+    a = Pdvm_DateTime()     # Objekt wird initialisiert / Standardsprache
+    st_language = a.language
     linel = 70                  # Länge der Linien im Log
     print(multiChar("=",linel,1))
     print(lockedWritten(transkateone('general','OutTestProt', a.language)))
@@ -1270,25 +1279,24 @@ if __name__=='__main__':
     blank = "----> "            # einrücken verschiedener Ausgaben
     test_list = {}
 
-    # a = Pdvm_DateTime()         # Objekt für default Test
     a.PdvmDateTime = a.PdvmDateTimeNow()
     akt_year = str(a.Year)      # muss auf dem aktuellen Jahr stehen
     tag_4monC = (               # Tage 4 Monate vom aktuellen Monat zurück [Test0230]
-        (122,122),(122,122),(120,121),(120,121),(119,120),(122,122),
-        (121,121),(122,122),(122,122),(122,122),(122,122),(121,121)
+        (123,123),(123,123),(121,122),(121,122),(120,121),(123,123),
+        (122,122),(123,123),(123,123),(123,123),(123,123),(122,122)
     )
-    tag_4mon = int(tag_4monC[a.Month][a.LYear])
+    # tag_4mon = int(tag_4monC[a.Month-1][a.LYear])    --> siehe in Testschleife
 
 
     # Einstellungen zur Log-Ausgabe
     show_detail = [
-        0,                      # (0) Details nach init / nur wenn 6 = 0
-        0,                      # (1) Details bei dem Setzen / nur wenn 6 = 0
-        0,                      # (2) Details bei den Additionen / nur wenn 6 = 0
-        0,                      # (3) print Testdaten im Log
+        0,                      # (0) Details nach init / nur wenn 6 = 1
+        0,                      # (1) Details bei dem Setzen / nur wenn 6 = 1
+        0,                      # (2) Details bei den Additionen / nur wenn 6 = 1
+        1,                      # (3) print Testdaten im Log
         0,                      # (4) print Testdaten am Ende
-        0,                      # (5) Detail Date/Time / nur wenn 6 = 0
-        0,                      # (6) Ergebnis im Log ausgeben / Fehlermeldungen kommen immer
+        0,                      # (5) Detail Date/Time / nur wenn 6 = 1
+        1,                      # (6) Ergebnis im Log ausgeben / Fehlermeldungen kommen immer
     ]
 
 
@@ -1298,34 +1306,21 @@ if __name__=='__main__':
     if show_detail[0] == 1:                             # ggf. Ausgabe der Eigenschaften
         p_print(show_detail[6], a.FullProperties() )
     if show_detail[6] == 1 : a.PrintFullProperties(show_detail[0])
-    p_print(show_detail[6], multiChar("-",linel,0))
-
-    p_print(show_detail[6],  a.FormCountry)
-    a.FormCountry = 'deu'
-    p_print(show_detail[6],  a.FormCountry)
-    a.FormCountry = 'USA '
-    p_print(show_detail[6],  a.FormCountry)
-    a.FormCountry = ' eng '
-    p_print(show_detail[6],  a.FormCountry)
-    a.FormCountry = ' enl '                         # Fehlermeldung FormCountry = DIN
-    p_print(show_detail[6],  a.FormCountry)
-
-    fC = input('\n'+ transkateone('general', 'countryFDate', a.language) +': ')   # Eingabe FormCountry für den Test
-    a = Pdvm_DateTime(fC)                           #   korrekter Test muss mit allen FormCountry
-    la = a.language                                 # Sprache in kurze Veriable
-    p_print(show_detail[6],  a.formCountry)         #   ok sein.
-
+    p_print(show_detail[6], multiChar("-",linel,0))     # Linie ausgeben
+    p_print(show_detail[6],  a.FormCountry)             # Anzeige von FormCountry --> DIN
+    p_print(show_detail[6], multiChar("=",linel,0))     # Linie ausgeben
     # --------------------------------------------------------------------------------
     # Tests aus den Wörterbuch-Definitionen (pdvm_datetime_test,py)
-    tfc = ('DIN', 'DEU', 'ENG', 'USA')
-    for sts in tests:
-        for tfcEle in tfc:
-            if a.formCountry == tfcEle:
-                erg = tests[sts][tfcEle]
-                break
-        a = test_out(a, tests[sts]['tset'], tests[sts]['tins'])
-        tests_print(a, test_list, sts, erg, tests[sts]['tget'], show_detail, tests[sts]['tlog'])
-
+    tfc = ('DIN', 'DeU', 'ENg', 'USA', 'enx')
+    for tfcEle in tfc:
+        a = Pdvm_DateTime(tfcEle)                #   korrekter Test muss mit allen FormCountry
+        la = a.language                          # Sprache in kurze Veriable
+        p_print(show_detail[6], a.FormCountry)             # Anzeige von FormCountry für Test
+        p_print(show_detail[6], multiChar("-",linel,0))     # Linie ausgeben
+        for sts in tests:
+            tag_4mon = int(tag_4monC[a.Month-1][a.LYear])
+            a = test_out(a, tests[sts]['tset'], tests[sts]['tins'])
+            tests_print(a, test_list, sts, tests[sts][a.FormCountry], tests[sts]['tget'], show_detail, tests[sts]['tlog'])
     # Ende Test aus den Wörterbuch-Definitionen
     # --------------------------------------------------------------------------------
 
@@ -1351,7 +1346,7 @@ if __name__=='__main__':
     p_print(show_detail[6], multiChar("-",linel,0))
     res1 = b.DiffToPdvmDateTime(res)
     p_print(show_detail[6],  str(res1))
-    # Differenz wird wieder addiert. Ergebnist muss gleich dem Eingang sein
+   # Differenz wird wieder addiert. Ergebnist muss gleich dem Eingang sein
     res2 = b.AddToPdvmDateTime(res1[0], res1[1], res1[2], res1[3], res1[4], res1[5])
     l = '32'
     p_print(show_detail[6],  transStringOne (la, 'general', 'ResAfterDiffAddition', l)+": " + str(res2))
@@ -1378,7 +1373,7 @@ if __name__=='__main__':
     p_print(show_detail[6],  multiChar("-",linel,0))
     res1 = b.DiffToPdvmDateTime(res)
     p_print(show_detail[6],  str(res1))
-    # Differenz wird wieder addiert. Ergebnist muss gleich dem Eingang sein
+   # Differenz wird wieder addiert. Ergebnist muss gleich dem Eingang sein
     res2 = b.AddToPdvmDateTime(res1[0], res1[1], res1[2], res1[3], res1[4], res1[5])
     l = '32'
     p_print(show_detail[6],  transStringOne (la, 'general', 'ResAfterDiffAddition', l)+": " + str(res2))
@@ -1391,45 +1386,39 @@ if __name__=='__main__':
     print("\nT e s t  -- Form PdvmDateTime --> TimeStamp")
     print(multiChar("=",linel,0))
     l = '30'
-    a.PdvmDateTime = getDateTimeNow()
-    print(transStringOne (la, 'proptext', 'FormCountry', l)+" : "+ a.FormCountry)
-    print(transStringOne (la, 'proptext', 'PdvmDateTimeNow', l)+" : "+ str(a.PdvmDateTime))
-    print(transStringOne (la, 'proptext', 'FormTimeStamp', l)+" : "+ str(a.FormTimeStamp))
-    print(transStringOne (la, 'proptext', 'TimeStamp', l)+" : "+ str(a.TimeStamp))
-    print(transStringOne (la, 'proptext', 'Date', l)+" : "+ str(a.Date))
-    print(transStringOne (la, 'proptext', 'Time', l)+" : "+ str(a.Time ))
-    print(transStringOne (la, 'proptext', 'TimeShort', l)+" : "+ str(a.TimeShort))
+
+    tfc = ('DIN', 'DeU', 'ENg', 'USA')
+    for tfcEle in tfc:    
+        a.PdvmDateTime = getDateTimeNow()
+        a.FormCountry = tfcEle
+        print(transStringOne (la, 'proptext', 'FormCountry', l)+" : "+ a.FormCountry)
+        print(transStringOne (la, 'proptext', 'PdvmDateTimeNow', l)+" : "+ str(a.PdvmDateTime))
+        print(transStringOne (la, 'proptext', 'FormTimeStamp', l)+" : "+ str(a.FormTimeStamp))
+        print(transStringOne (la, 'proptext', 'TimeStamp', l)+" : "+ str(a.TimeStamp))
+        print(transStringOne (la, 'proptext', 'Date', l)+" : "+ str(a.Date))
+        print(transStringOne (la, 'proptext', 'Time', l)+" : "+ str(a.Time ))
+        print(transStringOne (la, 'proptext', 'TimeShort', l)+" : "+ str(a.TimeShort))
+        print(multiChar("-",linel,0))
 
 
     # Testausgabe - erfolgt nach den Einstellungen
     if show_detail[4] == 1:
         print(multiChar("=",linel,1))
-        print(lockedWritten(transkateone('general','testEdition', a.language)))
+        print(lockedWritten(transkateone('general','testEdition', st_language)))
         print(multiChar("=",linel,0))
         for test_d in test_list:
             print(test_list[test_d])
     
     print(multiChar("=",linel,1))
-    print(lockedWritten(transkateone('general','testResult', a.language)))
+    print(lockedWritten(transkateone('general','testResult', st_language)))
     print(multiChar("=",linel,0))
     er = 0
     for test_d in test_list:
         if test_list[test_d][1] != test_list[test_d][2]:
-            print(transkateone('general','diffIn', a.language)+" " + test_d + " -- " + 
+            print(transkateone('general','diffIn', st_language)+" " + test_d + " -- " + 
                 str(test_list[test_d][1]) + " -- " + str(test_list[test_d][2]))
             er += 1
     if er > 0:
-        print(str(er) + " "+ transkateone('general','diffExist', a.language))
+        print(str(er) + " "+ transkateone('general','diffExist', st_language))
     else:
-        print(transkateone('general','noDiff', a.language)+" - Test OK")
-
-    a = Pdvm_DateTime('DEU')
-    a.Date = '-17.10.5'
-    print(a.Weekday)
-    print(transkateone('weekdays', str(a.Weekday), a.language))
-    print(a.PdvmDateTime)
-    print(a.TimeStamp)
-
-    a.Date = '-01.01.1916'
-    print('Jahr      : ' + str(a.Year))
-    print('Schaltjahr: ' + str(a.LYear))
+        print(transkateone('general','noDiff', st_language)+" - Test OK")
