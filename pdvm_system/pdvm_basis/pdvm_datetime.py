@@ -1293,10 +1293,10 @@ if __name__=='__main__':
         0,                      # (0) Details nach init / nur wenn 6 = 1
         0,                      # (1) Details bei dem Setzen / nur wenn 6 = 1
         0,                      # (2) Details bei den Additionen / nur wenn 6 = 1
-        1,                      # (3) print Testdaten im Log
+        0,                      # (3) print Testdaten im Log
         0,                      # (4) print Testdaten am Ende
         0,                      # (5) Detail Date/Time / nur wenn 6 = 1
-        1,                      # (6) Ergebnis im Log ausgeben / Fehlermeldungen kommen immer
+        0,                      # (6) Ergebnis im Log ausgeben / Fehlermeldungen kommen immer
     ]
 
 

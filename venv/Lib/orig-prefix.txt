@@ -1,1 +1,1 @@
-c:\python\python36-32
+C:\Users\norbe\AppData\Local\Programs\Python\Python38-32

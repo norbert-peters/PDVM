@@ -24,7 +24,7 @@ def testtabelle():
             'DIN': 'a.PdvmDateTime', 'DEU':'a.PdvmDateTime', 'ENG':'a.PdvmDateTime', 'USA':'a.PdvmDateTime'},
 
         'Test_0040': {'tlog':1, 'tins':'(2016,7,26)', 'tset':'PdvmDateT', 'tget':'a.Date', 
-            'DIN': "'2016-07-26'", 'DEU':'a.Date', 'ENG':'a.Date', 'USA':'a.Date'},
+            'DIN': "'2016-07-26'", 'DEU':"'26.07.2016'", 'ENG':"'26/07/2016'", 'USA':"'7/26/2016'"},
 
         'Test_0050': {'tlog':1, 'tins':'(13,46,26,23456)', 'tset':'PdvmTimeT', 'tget':'a.PdvmTime', 
             'DIN': '0.5739123085185185', 'DEU':'0.5739123085185185', 'ENG':'0.5739123085185185', 'USA':'0.5739123085185185'},
@@ -93,7 +93,7 @@ def testtabelle():
             'DIN': 'a.PdvmDateTime+4.1666666667', 'DEU':'a.PdvmDateTime+4.1666666667', 'ENG':'a.PdvmDateTime+4.1666666667', 'USA':'a.PdvmDateTime+4.1666666667'},
 
         'Test_0260': {'tlog':2, 'tins':'a.PdvmDateTime', 'tset':'PdvmDateTime', 'tget':'a.AddSecond(90)', 
-            'DIN': 'a.PdvmDateTime+0.0010416667', 'DEU':'a.PdvmDateTime+0.0010416667', 'ENG':'a.PdvmDateTime++0.0010416667', 'USA':'a.PdvmDateTime++0.0010416667'},
+            'DIN': 'a.PdvmDateTime+0.0010416667', 'DEU':'a.PdvmDateTime+0.0010416667', 'ENG':'a.PdvmDateTime+0.0010416667', 'USA':'a.PdvmDateTime+0.0010416667'},
 
         'Test_0270': {'tlog':5, 'tins':"'191,14'", 'tset':'Date', 'tget':'a.Date', 
             'DIN': 'a.Date', 'DEU':'a.Date', 'ENG':'a.Date', 'USA':'a.Date'},
@@ -110,7 +110,6 @@ def testtabelle():
         'Test_0310': {'tlog':5, 'tins':"'20191130'", 'tset':'Date', 'tget':'a.Date', 
             'DIN': "'2019-11-30'", 'DEU':'a.Date', 'ENG':'a.Date', 'USA':'a.Date'},
 
-        # Test wird im Jahr 2021 falsch!! dynamische Berechnung - Ergebnis korrigieren
         'Test_0320': {'tlog':5, 'tins':"'250130'", 'tset':'Date', 'tget':'a.Date', 
             'DIN': "'1925-01-30'", 'DEU':"'25.01.1930'", 'ENG':"'25/01/1930'", 'USA':'a.Date'},
 
@@ -121,7 +120,7 @@ def testtabelle():
             'DIN': "'2012-02-29'", 'DEU':"'20.12.229'", 'ENG':"'20/12/229'", 'USA':'a.Date'},
 
         'Test_0350': {'tlog':5, 'tins':"'0229'", 'tset':'Date', 'tget':'a.Date', 
-            'DIN': 'a.Date', 'DEU':'a.Date', 'ENG':'a.Date', 'USA':"'2/29/'+akt_year if (a.LYear == 1) else a.Date"},
+            'DIN': "'2012-02-29' if (a.LYear == 1) else a.Date", 'DEU':'a.Date', 'ENG':'a.Date', 'USA':"'2/29/'+akt_year if (a.LYear == 1) else a.Date"},
 
         'Test_0360': {'tlog':5, 'tins':"'2020-2-29'", 'tset':'Date', 'tget':'a.Date', 
             'DIN': "'2020-02-29'", 'DEU':'a.Date', 'ENG':'a.Date', 'USA':'a.Date'},

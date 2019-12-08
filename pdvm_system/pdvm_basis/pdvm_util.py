@@ -19,7 +19,7 @@
 """
 # --------------------------------------------------------------------------
 import uuid                                             # import Modul uuid
-from pdvm_langtext import transkateone, transkate       # Für Übersetzung Texte
+from .pdvm_langtext import transkateone, transkate       # Für Übersetzung Texte
 from django.conf import settings                        # Standardeinstellungen immer aus den Settings
 
 try:
