@@ -73,7 +73,7 @@ WSGI_APPLICATION = 'pdvm_system.wsgi.application'
 
 WEBPACK_LOADER = {
     'DEFAULT': {
-            'BUNDLE_DIR_NAME': 'bundles/',
+            'BUNDLE_DIR_NAME': '',
             'STATS_FILE': os.path.join(BASE_DIR, 'webpack-stats.dev.json'),
         }
 }

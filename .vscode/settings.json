@@ -1,4 +1,4 @@
 {
     "git.ignoreLimitWarning": true,
-    "python.pythonPath": "C:\\Users\\norbe\\AppData\\Local\\Programs\\Python\\Python38-32\\python.exe"
+    "python.pythonPath": "venv\\Scripts\\python.exe"
 }

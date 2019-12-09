@@ -124,7 +124,7 @@ def _formatwarnmsg(msg):
         if fw is not _formatwarning_orig:
             # warnings.formatwarning() was replaced
             return fw(msg.message, msg.category,
-                      msg.filename, msg.lineno, line=msg.line)
+                      msg.filename, msg.lineno, msg.line)
     return _formatwarnmsg_impl(msg)
 
 def filterwarnings(action, message="", category=Warning, module="", lineno=0,
@@ -314,28 +314,16 @@ def warn(message, category=None, stacklevel=1, source=None):
                     raise ValueError
     except ValueError:
         globals = sys.__dict__
+        filename = "sys"
         lineno = 1
     else:
         globals = frame.f_globals
+        filename = frame.f_code.co_filename
         lineno = frame.f_lineno
     if '__name__' in globals:
         module = globals['__name__']
     else:
         module = "<string>"
-    filename = globals.get('__file__')
-    if filename:
-        fnl = filename.lower()
-        if fnl.endswith(".pyc"):
-            filename = filename[:-1]
-    else:
-        if module == "__main__":
-            try:
-                filename = sys.argv[0]
-            except AttributeError:
-                # embedded interpreters don't have sys.argv, see bug #839151
-                filename = '__main__'
-        if not filename:
-            filename = module
     registry = globals.setdefault("__warningregistry__", {})
     warn_explicit(message, category, filename, lineno, module, registry,
                   globals, source)
