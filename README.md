@@ -2,4 +2,4 @@
 norbert new system for training
 
 # PDVM_BASIS
-Using the Hello World guide, you’ll start a branch, write comments, and open a pull request. 
+Here you can find general things that I use in the project. Maybe I'll create modules out of it.
