@@ -37,10 +37,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'authentication',
+    'rest_framework',
+    'pdvm_posts',
 ]
-
+  
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -125,3 +129,11 @@ STATIC_URL = '/static/'
 # UserModell von Django wird auf 'authentication.Account' umgestellt.
 AUTH_USER_MODEL = 'authentication.Account'
 
+CORS_ORIGIN_ALLOW_ALL = False
+
+
+CORS_ORIGIN_WHITELIST  =  [ 
+    "http://localhost:3000", 
+]
+     
+# CORS_ALLOW_CREDENTIALS = False 
