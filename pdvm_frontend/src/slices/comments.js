@@ -1,7 +1,13 @@
 import { createSlice } from '@reduxjs/toolkit'
 import axios from 'axios'
 
+const API_URL = 'http://localhost:8000'
+
 export const initialState = {
+  nextPageURL: '',
+  prevPageURL: '',
+  numPages: 0,
+  count: 0,
   loading: false,
   hasErrors: false,
   comments: [],
@@ -15,10 +21,17 @@ const commentsSlice = createSlice({
       state.loading = true
     },
     getCommentsSuccess: (state, { payload }) => {
-      state.comments = payload
+      console.log('getSuccess ', payload)
+      state.comments = payload.data
+      state.nextPageURL = payload.nextlink
+      state.prevPageURL = payload.prevlink
+      state.numPages = payload.numpages
+      state.count = payload.count
+      state.pageNumber = payload.pagenumber
       state.loading = false
       state.hasErrors = false
     },
+
     getCommentsFailure: state => {
       state.loading = false
       state.hasErrors = true
@@ -40,10 +53,10 @@ export function fetchComments(postId) {
 
     try {
       const response = await axios.get(
-        `http://localhost:8000/api/postcomments/${postId}`
+        `${API_URL}/api/postcomments/${postId}`
       )
-      //console.log(response)
-      const data = await response.data.data
+      console.log(response)
+      const data = await response.data
 
       dispatch(getCommentsSuccess(data))
     } catch (error) {
@@ -52,3 +65,15 @@ export function fetchComments(postId) {
   }
 }
 
+export function getCommentsByURL(link) {
+  return async dispatch => {
+    dispatch(getComments())
+    try {
+      const response = await axios.get(`${API_URL}${link}`)
+      const data = await response.data
+      dispatch(getCommentsSuccess(data))
+    } catch (error) {
+      dispatch(getCommentsFailure())
+    }
+  }
+}

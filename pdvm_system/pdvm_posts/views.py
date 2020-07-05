@@ -1,53 +1,3 @@
-"""from django.shortcuts import render
-
-# Create your views here.
-
-from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from .models import pdvm_posts, pdvm_comments 
-from .serializers import postsSerializer, commentSerializer
-
-
-class postlist(APIView):
-
-    def get(self,request):
-        data = pdvm_posts.objects.all()
-        serializer = postsSerializer(data, many= True)
-        return Response(serializer.data) # Return JSON
-
-    def post(self):
-        pass
-    
-class commentlist(APIView):
-    
-    def get(self,request):
-        data = pdvm_comments.objects.all()
-        seralizer = commentSerializer(data, many = True)
-        return Response(seralizer.data) # Return JSON
-    
-    def psst(self):
-        pass
-    
-    
-# todos/views.py
-#from rest_framework import generics
-#
-#from .models import Todo
-#from .serializers import TodoSerializer
-#
-#
-#class ListTodo(generics.ListCreateAPIView):
-#    queryset = Todo.objects.all()
-#    serializer_class = TodoSerializer
-#
-#
-#class DetailTodo(generics.RetrieveUpdateDestroyAPIView):
-#    queryset = Todo.objects.all()
-#    serializer_class = TodoSerializer
-"""
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from rest_framework import status
@@ -56,6 +6,7 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from .models import pdvm_posts, pdvm_comments 
 from .serializers import postsSerializer, commentSerializer
 
+maxline = 4 
 
 @api_view(['GET', 'POST'])
 def postlist(request):
@@ -68,7 +19,7 @@ def postlist(request):
         previousPage = 1
         posts = pdvm_posts.objects.all()
         page = request.GET.get('page', 1)
-        paginator = Paginator(posts, 5)
+        paginator = Paginator(posts, maxline)
         try:
             data = paginator.page(page)
         except PageNotAnInteger:
@@ -81,8 +32,17 @@ def postlist(request):
             nextPage = data.next_page_number()
         if data.has_previous():
             previousPage = data.previous_page_number()
+        else:
+            previousPage = paginator.num_pages
 
-        return Response({'data': serializer.data , 'count': paginator.count, 'numpages' : paginator.num_pages, 'nextlink': '/api/posts/?page=' + str(nextPage), 'prevlink': '/api/posts/?page=' + str(previousPage)})
+        return Response({
+            'data': serializer.data, 
+            'count': paginator.count, 
+            'numpages': paginator.num_pages, 
+            'pagenumber': data.number,
+            'nextlink': '/api/posts/?page=' + str(nextPage), 
+            'prevlink': '/api/posts/?page=' + str(previousPage)
+        })
 
     elif request.method == 'POST':
         serializer = postsSerializer(data=request.data)
@@ -127,7 +87,7 @@ def commentlist(request):
         previousPage = 1
         comments = pdvm_comments.objects.all()
         page = request.GET.get('page', 1)
-        paginator = Paginator(comments, 5)
+        paginator = Paginator(comments, maxline)
         try:
             data = paginator.page(page)
         except PageNotAnInteger:
@@ -141,7 +101,14 @@ def commentlist(request):
         if data.has_previous():
             previousPage = data.previous_page_number()
 
-        return Response({'data': serializer.data , 'count': paginator.count, 'numpages' : paginator.num_pages, 'nextlink': '/api/comments/?page=' + str(nextPage), 'prevlink': '/api/comments/?page=' + str(previousPage)})
+        return Response({
+            'data': serializer.data , 
+            'count': paginator.count, 
+            'numpages' : paginator.num_pages, 
+            'pagenumber': data.number,
+            'nextlink': '/api/comments/postid?page=' + str(nextPage), 
+            'prevlink': '/api/comments/postid?page=' + str(previousPage)
+        })
 
     elif request.method == 'POST':
         serializer = commentSerializer(data=request.data)
@@ -153,6 +120,7 @@ def commentlist(request):
 @api_view(['GET'])
 def postcomment(request, pk):
     print("request "+ str(request.data))
+    print("pk"+str(pk))
     """
  List  comments for post.
  """
@@ -162,7 +130,7 @@ def postcomment(request, pk):
         previousPage = 1
         comments = pdvm_comments.objects.all().filter(postId=pk)
         page = request.GET.get('page', 1)
-        paginator = Paginator(comments, 5)  
+        paginator = Paginator(comments, maxline)  
         try:
             data = paginator.page(page)
         except PageNotAnInteger:
@@ -175,25 +143,47 @@ def postcomment(request, pk):
             nextPage = data.next_page_number()
         if data.has_previous():
             previousPage = data.previous_page_number()
-
-        return Response({'data': serializer.data , 'count': paginator.count, 'numpages' : paginator.num_pages, 'nextlink': '/api/postcomments/?page=' + str(nextPage), 'prevlink': '/api/postcomments/?page=' + str(previousPage)})
+        return Response({
+            'data': serializer.data , 
+            'count': paginator.count, 
+            'numpages' : paginator.num_pages, 
+            'pagenumber': data.number,
+            'nextlink': '/api/postcomments/'+str(pk)+'/?page=' + str(nextPage), 
+            'prevlink': '/api/postcomments/'+str(pk)+'/?page=' + str(previousPage)
+        })
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def commentdetail(request, pk):
     """
  Retrieve, update or delete a comment by id/pk.
  """
+    print('angekommen GET/PUT')
+    print(request.method)
     try:
         comment = pdvm_comments.objects.get(pk=pk)
+        print('try')
     except pdvm_comments.DoesNotExist:
+        print('except')
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
+        print('hier GET')
         serializer = commentSerializer(comment, context={'request': request})
         return Response(serializer.data)
 
     elif request.method == 'PUT':
+        print('hier PUT')
         serializer = commentSerializer(comment, data=request.data,context={'request': request})
+        print(serializer)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'POST':
+        print('hier PUT')
+        serializer = commentSerializer(comment, data=request.data,context={'request': request})
+        print(serializer)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)

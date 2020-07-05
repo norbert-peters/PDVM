@@ -198,9 +198,11 @@ body {
   }
   
   button {
+    float: left;
     display: block;
     appearance: none;
     margin-top: 40px;
+    margin-left: 10px;
     border: 1px solid #333;
     margin-bottom: 20px;
     text-transform: uppercase;

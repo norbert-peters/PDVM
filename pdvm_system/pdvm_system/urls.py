@@ -14,6 +14,6 @@ urlpatterns = [
     url(r'^api/posts/(?P<pk>[-a-zA-Z0-9_]+)$', views.postdetail),
     url(r'^api/comments/$', views.commentlist),
     url(r'^api/comments/(?P<pk>[-a-zA-Z0-9_]+)$', views.commentdetail),
-    url(r'^api/postcomments/(?P<pk>[-a-zA-Z0-9_]+)$', views.postcomment),
+    url(r'^api/postcomments/(?P<pk>[-a-zA-Z0-9_]+)/$', views.postcomment),
 ]
  

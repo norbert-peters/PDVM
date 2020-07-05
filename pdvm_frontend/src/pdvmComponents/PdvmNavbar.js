@@ -1,8 +1,12 @@
-import React from 'react'
+import React, {useState} from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 
 import { AppBar } from '@material-ui/core'
 import { darken } from '@material-ui/core/styles'
+import {selectedTheme} from '../components/Global'
+import MenuItem from '@material-ui/core/MenuItem';
+import Menu from '@material-ui/core/Menu';
+
 
 import styled from 'styled-components'
 //import { themes } from '../pdvmThemes/themes'
@@ -10,25 +14,91 @@ import styled from 'styled-components'
 import { PdvmButton } from '../pdvmComponents/PdvmButton'
 import { PdvmSection } from '../pdvmComponents/PdvmSection'
 
+import Toolbar from '@material-ui/core/Toolbar';
+import IconButton from '@material-ui/core/IconButton';
+import Typography from '@material-ui/core/Typography';
+import { makeStyles } from '@material-ui/core/styles';
+import MenuIcon from '@material-ui/icons/Menu';
+import SearchIcon from '@material-ui/icons/Search';
+import MoreIcon from '@material-ui/icons/MoreVert';
+import Paper from '@material-ui/core/Paper';
+import Grid from '@material-ui/core/Grid';
+
+import PropTypes from 'prop-types';
+import CssBaseline from '@material-ui/core/CssBaseline';
+import useScrollTrigger from '@material-ui/core/useScrollTrigger';
+import Box from '@material-ui/core/Box';
+import Container from '@material-ui/core/Container';
+
+
 const Nav = styled(AppBar)`
 background-color: ${props => props.theme.bgColor};
 color: ${props => props.theme.color};
 `
-const Header = styled.h1`
-  ${({ theme }) => `
-    color: ${darken(theme.palette.primary.main, 0.7)};
-    background-color: ${theme.palette.primary.main};
-    font-size: 2.5em;
-    text-align: center;
-    max-width: 1000px;
-    margin-left: auto;
-    margin-right: auto;
-    `}
-  `;
-     
+function ElevationScroll(props) {
+    const { children, window } = props;
+    // Note that you normally won't need to set the window ref as useScrollTrigger
+    // will default to window.
+    // This is only being set here because the demo is in an iframe.
+    const trigger = useScrollTrigger({
+      disableHysteresis: true,
+      threshold: 0,
+      target: window ? window() : undefined,
+    });
+  
+    return React.cloneElement(children, {
+      elevation: trigger ? 4 : 0,
+    });
+  }
+  
+  ElevationScroll.propTypes = {
+    children: PropTypes.element.isRequired,
+    /**
+     * Injected by the documentation to work in an iframe.
+     * You won't need it on your project.
+     */
+    window: PropTypes.func,
+  };
+  
+  
+  const useStyles = makeStyles((theme) => ({
+    root: {
+      flexGrow: 1,
+    },
+    paper: {
+      padding: theme.spacing(2),
+      textAlign: 'center',
+      color: theme.palette.text.secondary,
+    },
+  })); 
+
+  function getMuiTheme(pdvmThemeType) {
+    return selectedTheme(pdvmThemeType);
+  }; 
+   
 
 
-export const Navbar = () => {
+
+export const PdvmNavbar = () => {
+    const [theme, setTheme] = useState(getMuiTheme('common'))
+    const [auth, setAuth] = React.useState(true);
+    const [anchorEl, setAnchorEl] = React.useState(null);
+    const open = Boolean(anchorEl);
+  
+    const handleChange = (event) => {
+        setAuth(event.target.checked);
+      };
+    
+      const handleMenu = (event) => {
+        setAnchorEl(event.currentTarget);
+      };
+    
+      const handleClose = () => {
+        setAnchorEl(null);
+      };
+    
+      const classes = useStyles();
+    
   return (
     <Box>
                         <Nav static >

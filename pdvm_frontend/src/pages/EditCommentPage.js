@@ -7,6 +7,9 @@ import { fetchComment, commentSelector } from '../slices/comment'
 import { Post } from '../components/Post'
 import  CommentEdit  from '../components/CommentEdit'
 
+import { PdvmSection } from '../pdvmComponents/PdvmSection'
+
+
 const EditCommentPage = ({ match }) => {
   const dispatch = useDispatch()
   const { 
@@ -14,20 +17,22 @@ const EditCommentPage = ({ match }) => {
     loading: postLoading, 
     hasErrors: postHasErrors 
   } = useSelector(postSelector)
-  const {
+  var {
     comment,
+    creating: commentCreating,
     loading: commentLoading,
     hasErrors: commentHasErrors,
   } = useSelector(commentSelector)
 
   useEffect(() => {
-    const { id, postId } = match.params
+    var { id, postId } = match.params
     console.log(id)
     console.log(postId)
-
-    dispatch(fetchComment(id))
     
+    dispatch(fetchComment(id))
+
     dispatch(fetchPost(postId))
+
   }, [dispatch, match])
 
   const renderPost = () => {
@@ -39,15 +44,25 @@ const EditCommentPage = ({ match }) => {
   const renderComment = () => {
     if (commentLoading) return <p>Loading comment...</p>
     if (commentHasErrors) return <p>Unable to display comment.</p>
+    if (commentCreating) {
+      comment = {
+        id: match.params.id,
+        postId: match.params.postId,
+        name: '',
+        email: '',
+        body: '',
+      }
+    }
     return <CommentEdit comment={comment} />
   }
 
   return (
-    <section>
-      {renderPost()}
+    <PdvmSection>
+      <br />
+    {renderPost()}
       <h2>Kommentar modifizieren</h2>
       {renderComment()}
-    </section>
+    </PdvmSection>
   )
 }
 
