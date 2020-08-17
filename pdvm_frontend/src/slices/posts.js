@@ -23,7 +23,6 @@ const postsSlice = createSlice({
       state.loading = true
     },
     getPostsSuccess: (state, { payload }) => {
-      console.log('getSuccess ', payload)
       state.posts = payload.data
       state.nextPageURL = payload.nextlink
       state.prevPageURL = payload.prevlink

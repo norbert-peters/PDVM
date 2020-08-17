@@ -1,48 +1,44 @@
-import React, { useEffect } from 'react'
-import { useDispatch, useSelector } from 'react-redux'
+import React from 'react'
 
-import { fetchPost, postSelector } from '../slices/post'
-
-import  PostEdit  from '../components/PostEdit'
+import PostEdit from '../components/PostEdit'
 import { PdvmSection } from '../pdvmComponents/PdvmSection'
 
 
 const EditPostPage = ({ match }) => {
-  const dispatch = useDispatch()
-  var { 
-    post, 
-    creating: postCreating,
-    loading: postLoading, 
-    hasErrors: postHasErrors 
-  } = useSelector(postSelector)
-
-  useEffect(() => {
-    var { id } = match.params
-    console.log(id)
-    
-    dispatch(fetchPost(id))
-
-}, [dispatch, match])
-
-  const renderPost = () => {
-    if (postLoading) return <p>Loading post...</p>
-    if (postHasErrors) return <p>Unable to display post.</p>
-    if (postCreating) {
-      post = {
-        id: match.params.id,
-        userId: '99',
-        title: '',
-        body: '',
-      }
+console.log('Match: ',match)
+  const post = {
+      id: match.params.id,
+      userId: match.params.userId,
+      title: match.params.title,
+      body: match.params.body,
+      pdvm: match.params.pdvm,
     }
-    return <PostEdit post={post} />
+
+
+  const renderPost = (
+    <PostEdit 
+      id={post.id} 
+      userId={post.userId} 
+      title={post.title} 
+      body={post.body} 
+      pdvm={post.pdvm}
+    />
+  )
+
+  function renderTitel(pdvm) {
+    if (pdvm === 'mod') {
+      return <h1>Artikel modifizieren</h1>
+    } else if (pdvm === 'new') {
+      return <h1>Artikel anlegen</h1>
+    } else {
+      return <h1>Die Art des Artikels konnte nicht ermittelt werden</h1>
+    }
   }
 
   return (
     <PdvmSection>
-        <br />
-        <h1>Artikel modifizieren</h1>
-        {renderPost()}
+        {renderTitel(post.pdvm)}
+        {renderPost}
     </PdvmSection>
   )
 }

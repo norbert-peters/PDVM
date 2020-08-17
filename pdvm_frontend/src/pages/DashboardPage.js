@@ -1,14 +1,8 @@
 import React from 'react'
 import { Link as RouterLink } from 'react-router-dom';
 import {PdvmButton} from '../pdvmComponents/PdvmButton'
-import Paper from '@material-ui/core/Paper';
-import styled from 'styled-components';
+import {PdvmPaper} from '../pdvmComponents/PdvmPaper'
 
-
-const PdvmPaper = styled(Paper)`
-    paperColor: '#000';
-    background: 'yellow';
-`
 
 const DashboardPage = () => (
   <div>
@@ -19,9 +13,11 @@ const DashboardPage = () => (
       <div>
       <h2 >Artikel und Kommentare</h2>
       </div>
-      <PdvmButton display='normaly' component={RouterLink} to="/post/posts/">
-        Zeige Artikel
-      </PdvmButton>
+      <RouterLink to="/post/posts/">
+        <PdvmButton >
+          Zeige Artikel
+        </PdvmButton>
+      </RouterLink>
     </PdvmPaper>
   </div>
 )

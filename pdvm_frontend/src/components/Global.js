@@ -1,19 +1,15 @@
-//import { createMuiTheme } from '@material-ui/core/styles';
-//import { red, blue, } from '@material-ui/core/colors';
-import {PdvmCommonTheme} from '../pdvmThemes/pdvmCommonTheme'
-import {PdvmDarkTheme} from '../pdvmThemes/pdvmDarkTheme'
-import {PdvmLightTheme} from '../pdvmThemes/pdvmLightTheme'
+import {theme} from '../theme'
 
 
 export function selectedTheme(themeType) {
   switch (themeType) {
     case 'common':
-      return PdvmCommonTheme
+      return theme
     case 'light':
-      return PdvmLightTheme
+      return theme
     case 'dark':
-      return PdvmDarkTheme
+      return theme
     default:
-      return PdvmCommonTheme
+      return theme
   }
 }

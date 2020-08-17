@@ -4,25 +4,25 @@ import ArrowBackIosTwoTone from '@material-ui/icons/ArrowBackIos'
 import ArrowForwardIosTwoTone from '@material-ui/icons/ArrowForwardIos'
 
 import {PdvmText} from './PdvmText'
-//import {PdvmFlexBox} from './PdvmFlexBox'
-import { Box } from '@material-ui/core'
-import Paper from '@material-ui/core/Paper';
+import {PdvmPaper} from './PdvmPaper'
 import Tooltip from '@material-ui/core/Tooltip';
+import { Grid, Row, Col } from '../pdvmComponents/PdvmRaster';
 
 
 
 const PdvmPagination = ( props ) => {
   const nextPage = props.nextPage
   const prevPage = props.prevPage
-  const pageNumber = props.pageNumber
-  const numPages = props.numPages
+  const pageNumber = props.pagenumber
+  const numPages = props.numpages
   const count = props.count
   const art = props.art
   
   return(
-    <Paper>
-    <Box component="span" display="flex" marginTop='1em' marginBottom='1em' >
-        <Box left="0%" p={1} >
+    <PdvmPaper>
+    <Grid >
+      <Row>
+        <Col size={1} >
         <Tooltip title="Seite zurück" interactive>
         <IconButton
             color="inherit"
@@ -32,12 +32,12 @@ const PdvmPagination = ( props ) => {
             <ArrowBackIosTwoTone />
           </IconButton>    
           </Tooltip>             
-        </Box>
+        </Col>
         
-        <Box p={2} >
+        <Col size={4} >
           <PdvmText>Seite {pageNumber} von {numPages} - {count} {art}</PdvmText>
-        </Box>
-        <Box right="0%" p={1} >       
+        </Col>
+        <Col size={1} >       
         <Tooltip title="Seite vor" interactive>
           <IconButton
             color="inherit"
@@ -47,9 +47,10 @@ const PdvmPagination = ( props ) => {
             <ArrowForwardIosTwoTone />
           </IconButton>
           </Tooltip>
-        </Box> 
-        </Box>
-        </Paper>
+        </Col> 
+        </Row>
+        </Grid>
+        </PdvmPaper>
 )}
 
 export default PdvmPagination

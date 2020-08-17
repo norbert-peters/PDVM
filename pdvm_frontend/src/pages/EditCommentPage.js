@@ -58,7 +58,6 @@ const EditCommentPage = ({ match }) => {
 
   return (
     <PdvmSection>
-      <br />
     {renderPost()}
       <h2>Kommentar modifizieren</h2>
       {renderComment()}

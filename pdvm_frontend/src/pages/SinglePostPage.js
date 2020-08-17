@@ -1,13 +1,9 @@
-import React, { useEffect } from 'react'
+import React, { useState } from 'react'
 import { Link as RouterLink} from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
-
-import { fetchPost, postSelector } from '../slices/post'
-import { fetchComments, getCommentsByURL, commentsSelector } from '../slices/comments'
+import { GetPost } from '../dataapi/Post'
 
 import { Post } from '../components/Post'
 import { Comment } from '../components/Comment'
-//import { PdvmButton } from '../pdvmComponents/PdvmButton'
 import { PdvmSection } from '../pdvmComponents/PdvmSection'
 import PdvmPagination from '../pdvmComponents/PdvmPagination'
 
@@ -16,90 +12,94 @@ import AddIcon from '@material-ui/icons/Add';
 import Fab from '@material-ui/core/Fab';
 import Tooltip from '@material-ui/core/Tooltip';
 import { Box } from '@material-ui/core'
+import { Row, Col } from '../pdvmComponents/PdvmRaster';
+
 
 import * as uuid from 'uuid'
+import usePostComment from '../dataapi/usePostComment'
 
-const SinglePostPage = ({ match }) => {
-  const dispatch = useDispatch()
-  const { 
-    post, 
-    loading: postLoading, 
-    hasErrors: postHasErrors 
-  } = useSelector(postSelector)
-  const art = 'Kommentare' 
-  const { 
-    comments, 
-    loading: commentsLoading,
-    hasErrors: commentsHasErrors,
-    nextPageURL,
-    prevPageURL,
-    numPages, 
-    count,
-    pageNumber, 
-  } = useSelector(commentsSelector)
+function SinglePostPage(props) {
+  const [nlink, setNlink] = useState('')
+  const startPostid = props.match.params.id
+  const [postid] = useState(startPostid)
+  const post = GetPost(postid)
+  
+const { isLoading, data, isError, error } = usePostComment(postid, nlink)
 
-  useEffect(() => {
-    const { id } = match.params
+if (isError) {
+  return <div>{error.message}</div> // error state
+}
 
-    dispatch(fetchComments(id))
-    dispatch(fetchPost(id))
-  }, [dispatch, match])
+if (isLoading) {
+  return <div>loading...</div> // loading state
+}
+  
+  const art_s = 'Kommentar'
+  const art_p = 'Kommentare'
+  const pcomments = data.data 
+  const pagenumber = data.pagenumber
+  const numpages = data.numpages
+  const count = data.count
+  const pdvm = 'new'
 
-  const renderPost = () => {
-    if (postLoading) return <p>Loading post...</p>
-    if (postHasErrors) return <p>Unable to display post.</p>
-    return <Post post={post} />
-  }
+  const renderPost = (
+    <Post post={post} />
+  )
+
+  const renderComments = (
+    pcomments.map(comment => <Comment key={comment.id} comment={comment} excerpt />)
+  ) 
 
   function prevPage(){
-    dispatch(getCommentsByURL(prevPageURL))
+    setNlink(data.prevlink)
   }
   
   function nextPage(){
-    dispatch(getCommentsByURL(nextPageURL))
-  }
-
-  const renderComments = () => {
-    if (commentsLoading) return <p>Loading comments...</p>
-    if (commentsHasErrors) return <p>Unable to display comments.</p>
-
-    return comments.map(comment => <Comment key={comment.id} comment={comment} excerpt />)
+    setNlink(data.nextlink)
   }
 
   const renderPdvmPagination = () => {
     return <PdvmPagination 
       nextPage={nextPage}
       prevPage={prevPage}
-      pageNumber={pageNumber}
-      numPages={numPages}
+      pagenumber={pagenumber}
+      numpages={numpages}
       count={count}
-      art={art}
+      art={art_p}
     />
-}
+  }
 
   return (
-    <PdvmSection>
-      <br />
-      {renderPost()}
+    <div>
+      {renderPost}
       <PdvmFlexBox>
-        <h1>Kommentare</h1>
+        <Row>
+        <Col size={1}>
+        <h1>{art_p}</h1>
+        </Col>
+        <Col size={2}></Col>
+        <Col size={1}>
         <Box marginLeft='5em' padding='1em'>
           <Tooltip 
-            title="Kommentar hinzufügen" 
+            title={`${art_s} hinzufügen`} 
             aria-label="add" 
             component={RouterLink} 
-            to={`/post/postsedit/${uuid.v4()}/${post.id}`}
+            to={`/post/postsedit/${uuid.v4()}/${pdvm}`}
           >
             <Fab color="secondary" >
               <AddIcon />
             </Fab>
           </Tooltip>
         </Box>
+        </Col>
+        </Row>
       </PdvmFlexBox>
+    <PdvmSection>
       {renderPdvmPagination()}
-      {renderComments()}
+      {renderComments}
       {renderPdvmPagination()}
     </PdvmSection>
+    </div>
   )
 }
 

@@ -1,93 +1,91 @@
-import React, { useEffect } from 'react'
+import React, {useState} from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 
-import { useDispatch, useSelector } from 'react-redux'
-
-import { fetchPosts, getPostsByURL, postsSelector } from '../slices/posts'
-
 import { Post } from '../components/Post'
+import  usePosts  from '../dataapi/usePosts'
 
 import * as uuid from 'uuid'
 import PdvmPagination from '../pdvmComponents/PdvmPagination'
-//import {PdvmButton} from '../pdvmComponents/PdvmButton'
 import {PdvmSection} from '../pdvmComponents/PdvmSection'
 import {PdvmFlexBox} from '../pdvmComponents/PdvmFlexBox'
 import AddIcon from '@material-ui/icons/Add';
 import Fab from '@material-ui/core/Fab';
 import Tooltip from '@material-ui/core/Tooltip';
-import { Box } from '@material-ui/core'
-//import Paper from '@material-ui/core/Paper';
+import { Box } from '@material-ui/core';
 
+import { Row, Col } from '../pdvmComponents/PdvmRaster';
 
+function PostsPage({post, excerpt} ) {
+    const [nlink, setNlink] = useState('')
+    const { isLoading, isError, data, error } = usePosts(nlink)
+  
+    if (isError) {
+      return <div>{error.message}</div> // error state
+    }
+  
+    if (isLoading) {
+        return <div>loading...</div> // loading state
+    }
 
+  const art = 'Artikel'
+  const posts = data.data
+  const pagenumber = data.pagenumber
+  const numpages = data.numpages
+  const count = data.count
 
-const PostsPage = () => {
-  const art = 'Artikel' 
-  const dispatch = useDispatch()
-  const { 
-    posts, 
-    loading, 
-    hasErrors,
-    nextPageURL,
-    prevPageURL,
-    numPages, 
-    count,
-    pageNumber, 
-  } = useSelector(postsSelector)
+  const renderPosts = (
+    posts.map(post => <Post key={post.id} post={post} excerpt />)
+  )
 
-  useEffect(() => {
-
-    dispatch(fetchPosts())
-  }, [dispatch])
+  const renderPdvmPagination = () => {
+    return <PdvmPagination 
+      nextPage={nextPage}
+      prevPage={prevPage}
+      pagenumber={pagenumber}
+      numpages={numpages}
+      count={count}
+      art={art}
+    />
+}
 
   function prevPage(){
-    dispatch(getPostsByURL(prevPageURL))
+    setNlink(data.prevlink)
   }
   
   function nextPage(){
-    dispatch(getPostsByURL(nextPageURL))
-  }
-  
-  const renderPosts = () => {
-    if (loading) return <p>Loading posts...</p>
-    if (hasErrors) return <p>Unable to display posts.</p>
-    return posts.map(post => <Post key={post.id} post={post} excerpt />)
-  }
-
-  const renderPdvmPagination = () => {
-      return <PdvmPagination 
-        nextPage={nextPage}
-        prevPage={prevPage}
-        pageNumber={pageNumber}
-        numPages={numPages}
-        count={count}
-        art={art}
-      />
+    setNlink(data.nextlink)
   }
 
   return (
-    <PdvmSection>
-      <br />
+    <div>
       <PdvmFlexBox>
-    <h1>Artikel</h1>
-    <Box marginLeft='5em' padding='1em'>
-      <Tooltip 
-        title="Artikel hinzufügen" 
-        aria-label="add" 
-        component={RouterLink} 
-        to={`/post/postedit/${uuid.v4()}`}
-      >
-        <Fab color="secondary" >
-          <AddIcon />
-        </Fab>
-      </Tooltip>
-      </Box>
+        <Row>
+          <Col size={1}>
+            <h1>{art}</h1>
+          </Col>
+          <Col size={2}></Col>
+          <Col size={1}>
+            <Box marginLeft='5em' padding='1em'>
+              <Tooltip 
+                title={art + " hinzufügen"} 
+                aria-label="add" 
+                component={RouterLink} 
+                to={`/post/postedit/${uuid.v4()}/new`}
+              >
+                <Fab color="secondary" >
+                  <AddIcon />
+                </Fab>
+              </Tooltip>
+            </Box>
+          </Col>
+        </Row>
       </PdvmFlexBox>
-      {renderPdvmPagination()}
-      {renderPosts()}
-      {renderPdvmPagination()}
-    </PdvmSection>
-   
+      <PdvmSection>
+        {renderPdvmPagination()}
+        {renderPosts}
+        {renderPdvmPagination()}
+      </PdvmSection>
+    </div>  
   )
 }
 

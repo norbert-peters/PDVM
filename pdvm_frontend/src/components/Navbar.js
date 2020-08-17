@@ -9,6 +9,7 @@ import styled from 'styled-components'
 
 import { PdvmButton } from '../pdvmComponents/PdvmButton'
 import { PdvmSection } from '../pdvmComponents/PdvmSection'
+import { Grid, Row, Col } from './pdvmComponents/PdvmRaster';
 
 const Nav = styled(AppBar)`
 background-color: ${props => props.theme.bgColor};
@@ -30,7 +31,9 @@ const Header = styled.h1`
 
 export const Navbar = () => {
   return (
-    <Box>
+    <PdvmPage>
+    <Grid>
+      <Row>
                         <Nav static >
                           <Toolbar >
                             <IconButton
@@ -85,6 +88,7 @@ export const Navbar = () => {
                             </Menu>
                           </Toolbar>
                         </Nav>
-
-     </Box>
+                        </Row>
+     </Grid>
+     </PdvmPage>
   )}

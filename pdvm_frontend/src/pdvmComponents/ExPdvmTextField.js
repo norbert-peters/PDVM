@@ -2,7 +2,7 @@ import styled from 'styled-components';
 import TextField from '@material-ui/core/TextField';
 //import {darken} from '@material-ui/core/styles';
 
-export const PdvmTextField = styled(TextField)`
+export const ExPdvmTextField = styled(TextField)`
 ${({ theme }) => `
   label.focused {
     color: green; 
@@ -13,7 +13,7 @@ ${({ theme }) => `
   }, 
 
   label {
-    color: ${theme.palette.text.label};
+    color: ${theme.primaryLight};
   }
   margin-bottom: 0.4em;
   .MuiOutlinedInput-root {

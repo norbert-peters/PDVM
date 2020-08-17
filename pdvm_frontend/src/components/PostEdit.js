@@ -1,84 +1,60 @@
-import React from "react";
-import { useForm } from "react-hook-form";
-import { useDispatch } from 'react-redux'
+import React, { useState } from "react"
 
-import { putPost, postPost } from '../slices/post'
+import { GetPost } from '../dataapi/Post'
 
-import { PdvmButton } from '../pdvmComponents/PdvmButton'
-import  {PdvmTextField } from '../pdvmComponents/PdvmTextField'
-//import { getThemeProps } from "@material-ui/styles";
-//import { themes } from "../pdvmThemes/themes";
-//import { themes } from "../pdvmThemes/themes";
-//import Label from '@material-ui/core/FormLabel'
-//import TextField from '@material-ui/core/TextField'
+import {PostEditForm}  from '../components/PostEditForm'
+
+
+function checkCreate(pdvm, isCreate, setIsCreate) {
+  if (pdvm==='new' && !isCreate) {
+    console.log('check angekommen')
+    setIsCreate(true) 
+  }
+  return
+}
+
 
 export default function PostEdit(props) {
-  const dispatch = useDispatch()
+  const [isCreate, setIsCreate] = useState(false)
 
-  const { register, handleSubmit, errors } = useForm({
-      defaultValues: {
-        id: props.post.id,
-        userId: props.post.userId,
-        title: props.post.title,
-        body: props.post.body,
-      },
-  })
+  var post = {}
 
-  const createFlag = props.post.body === '' ? true : false
+  checkCreate(props.pdvm, isCreate, setIsCreate)
 
-  const onSubmit = (data) => {
-    const npres = {
-      id: props.post.id,
-      userId: props.post.userId,
-      title: data.title,
-      body: data.body,    
+  if (!isCreate) {
+    const { query, status, isLoading, data, isError, error } = GetPost(props.id)
+    console.log('Bestand GetPost',
+      query, '||',
+      status, '||',
+      isLoading, '||',
+      data, '||',
+      isError, '||',
+      error, '||'
+    )
+
+    if (isError) {
+      return <div>{error.message}</div> // error state
     }
-    
-    if (createFlag) {
-      dispatch(postPost(npres))
-    } else {
-      dispatch(putPost(npres["id"], npres))
+
+    if (isLoading) {
+      return <div>Daten werden geladen...</div> // loading state
     }
-    alert("Die Änderung wurde gespeichert");
+
+    post = data
+
+  } else {
+    post = props
   }
 
-  return (
-    <>
-    <form onSubmit={handleSubmit(onSubmit)}>
-      <PdvmTextField
-        fullWidth
-        size="small"
-        aria-invalid={errors.title ? "true" : "false"}
-        aria-describedby="nameError"
-        id="outlined-required"
-        name="title"
-        label='Titel'
-        variant='outlined'
-        inputRef={register({ required: true })}
-      />
-      <span id="NameError" style={{ display: errors.title ? "block" : "none" }}>
-        Das Feld Name ist erforderlich
-      </span>
-      <br />
-      <PdvmTextField
-          id="outlined-multiline"
-          label="Artikel"
-          multiline
-          fullWidth
-          variant="outlined"
-          aria-invalid={errors.body ? "true" : "false"}
-          aria-describedby="bodyError"
-          name="body"
-          inputRef={register({ required: true })}
-        />
-      <span id="bodyError" style={{ display: errors.body ? "block" : "none" }}>
-        Das Feld Artikel ist erforderlich
-      </span>
-      <br />
+  console.log('Mitte', post)
 
-      <PdvmButton pdvmstyle='text' display='attention' type="submit" >
-        Daten speichern
-      </PdvmButton>
-    </form>
-  </>  );
-} 
+  //initialFormFields(formFields, post, props)
+
+  return (
+    <PostEditForm 
+      post={post} 
+      isCreate={isCreate}
+    />
+  )
+
+}

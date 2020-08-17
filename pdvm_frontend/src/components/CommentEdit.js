@@ -5,11 +5,17 @@ import { useDispatch } from 'react-redux'
 import { putComment, postComment } from '../slices/comment'
  
 import { PdvmButton } from '../pdvmComponents/PdvmButton'
-import  {PdvmTextField}  from '../pdvmComponents/PdvmTextField'
-import { red } from "@material-ui/core/colors";
+import  {ExPdvmTextField}  from '../pdvmComponents/ExPdvmTextField'
+import { PdvmInput } from '../pdvmComponents/PdvmInput'
+//import { StyledPdvmTextField } from '../pdvmComponents/PdvmTextField/styles';
+
+//import { red } from "@material-ui/core/colors";
+
 
 
 export default function CommentEdit(props) {
+  console.log(props)
+  console.log(props.comment.name)
   const dispatch = useDispatch()
 
   const { register, handleSubmit, errors } = useForm({
@@ -33,9 +39,6 @@ export default function CommentEdit(props) {
       body: data.body,    
     }
     
-    console.log(npres["id"])
-    console.log(npres)
-    console.log(createFlag)
     if (createFlag) {
       dispatch(postComment(npres))
     } else {
@@ -44,24 +47,16 @@ export default function CommentEdit(props) {
     alert("Die Änderung wurde gespeichert");
   }
 
-
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
-      <PdvmTextField
-        fullWidth
-        size="small"
-        aria-invalid={errors.name ? "true" : "false"}
-        aria-describedby="nameError"
-        name="name"
-        label="Name"
-        variant="outlined"        
-        inputRef={register({ required: true })}
-      />
-      <span id="nameError" style={{ display: errors.name ? "block" : "none", color:red[500]}}>
-        Das Feld Name ist erforderlich
-      </span>
-      <br />
-      <PdvmTextField
+    <PdvmInput
+      value={props.comment.name}
+      type="data"
+      name="name"
+      label="Name"
+      setRef={register({ required: true })}
+    />
+      <ExPdvmTextField
         fullWidth
         size="small"
         aria-invalid={errors.email ? "true" : "false"}
@@ -75,7 +70,7 @@ export default function CommentEdit(props) {
         Das Feld Mail ist erforderlich
       </span>
       <br />
-      <PdvmTextField
+      <ExPdvmTextField
           id="outlined-multiline-static"
           label='Kommentar'
           multiline

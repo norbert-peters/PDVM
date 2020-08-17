@@ -100,14 +100,16 @@ def commentlist(request):
             nextPage = data.next_page_number()
         if data.has_previous():
             previousPage = data.previous_page_number()
-
+        else:
+            previousPage = paginator.num_pages
+            
         return Response({
             'data': serializer.data , 
             'count': paginator.count, 
             'numpages' : paginator.num_pages, 
             'pagenumber': data.number,
-            'nextlink': '/api/comments/postid?page=' + str(nextPage), 
-            'prevlink': '/api/comments/postid?page=' + str(previousPage)
+            'nextlink': '/api/comments/postid/?page=' + str(nextPage), 
+            'prevlink': '/api/comments/postid/?page=' + str(previousPage)
         })
 
     elif request.method == 'POST':
@@ -116,7 +118,7 @@ def commentlist(request):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
 @api_view(['GET'])
 def postcomment(request, pk):
     print("request "+ str(request.data))
@@ -143,6 +145,9 @@ def postcomment(request, pk):
             nextPage = data.next_page_number()
         if data.has_previous():
             previousPage = data.previous_page_number()
+        else:
+            previousPage = paginator.num_pages
+            
         return Response({
             'data': serializer.data , 
             'count': paginator.count, 
