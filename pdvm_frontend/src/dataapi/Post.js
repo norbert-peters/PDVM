@@ -27,33 +27,19 @@ const postPost = async (post) => {
   return data
 }
 
-
 function GetPost(id) {
   return useQuery(['post', id ], getPost)
 }
 
-/*function PdvmPost(post) {
-  const [popu, setPopu] = useState(false)
-  if (post.title === '' && post.body === '') {
-    setPopu(true)
-  } 
-  console.log('PdvmPost_create', popu)
-  if (popu) {
-    return PostPost(post)
-  } else {
-    return PutPost(post)
-  }
-}*/
- 
 function PutPost(post) {
   return useMutation(
     post => putPost(post),
     {
       // bei Fehler
-      onError: (err, variables, previousValue) => {
+      onError: (err, variables, previousValue ) => {
         queryCache.setQueryData('posts', previousValue)
         alert('Fehler beim Speichern\n'+err)
-        console.log('onError')
+        post.ret= "-1"
       },
 
       // wird so immer ausgeführt
@@ -64,9 +50,8 @@ function PutPost(post) {
 
       // wenn es gespeichert wurde
       onSuccess: () => {
-        console.log('geändert')
         alert('Daten geändert')
-
+        post.ret = "0"
       },
     } 
   )
@@ -83,7 +68,7 @@ function PostPost(post) {
       onError: (err, variables, previousValue) => {
         queryCache.setQueryData('posts', previousValue)
         alert('Fehler beim Speichern\n'+err)
-        console.log('onError')
+        post.ret= "-1"
       },
 
       // wird so immer ausgeführt
@@ -94,12 +79,12 @@ function PostPost(post) {
 
       // wenn es gespeichert wurde
       onSuccess: () => {
-        console.log('geändert', post)
         alert('Daten hinzugefügt')
+        post.ret="0"
       },
     }
-    )
-  }
+  )
+}
 
 function returnGetPost(id) {
   const { isLoading, data, isError, error } = GetPost(id)
