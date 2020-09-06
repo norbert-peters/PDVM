@@ -4,10 +4,10 @@ import { Grid } from '../pdvmComponents/PdvmRaster';
 
 export const PdvmPaper = styled(Grid)`
 ${({ theme }) => `
-  color: ${theme.primaryLight}} ;
-  background-color: ${theme.palette.text.secondary} ;
+  color: ${theme.front.text}} ;
+  background-color: ${theme.back.paper} ;
   padding: 0.3em 0.7em ;
-  box-shadow: 5px 5px 3px #888888;
+  box-shadow: 3px 3px 1px ${theme.shadow.default};
   margin-bottom: 0.5em;
 ​​  `}
 `;

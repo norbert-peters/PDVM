@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Link as RouterLink} from 'react-router-dom'
-import { GetPost } from '../dataapi/Post'
+import { returnGetPost } from '../dataapi/Post'
 
 import { Post } from '../components/Post'
 import { Comment } from '../components/Comment'
@@ -16,15 +16,15 @@ import { Row, Col } from '../pdvmComponents/PdvmRaster';
 
 
 import * as uuid from 'uuid'
-import usePostComment from '../dataapi/usePostComment'
+import useComments from '../dataapi/useComments'
 
 function SinglePostPage(props) {
   const [nlink, setNlink] = useState('')
   const startPostid = props.match.params.id
   const [postid] = useState(startPostid)
-  const post = GetPost(postid)
+  const post = returnGetPost(postid)
   
-const { isLoading, data, isError, error } = usePostComment(postid, nlink)
+const { isLoading, data, isError, error } = useComments(postid, nlink)
 
 if (isError) {
   return <div>{error.message}</div> // error state
@@ -84,7 +84,7 @@ if (isLoading) {
             title={`${art_s} hinzufügen`} 
             aria-label="add" 
             component={RouterLink} 
-            to={`/post/postsedit/${uuid.v4()}/${pdvm}`}
+            to={`/post/postsedit/${uuid.v4()}/${postid}/${pdvm}`}
           >
             <Fab color="secondary" >
               <AddIcon />

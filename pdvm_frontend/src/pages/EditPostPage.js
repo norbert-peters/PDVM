@@ -14,7 +14,7 @@ function checkCreate(pdvm, isCreate, setIsCreate) {
 /*
 Hier beginnt die Seite. Der Bereich zum eigentlichen Editieren befindet sich in PostEditForm.
 
-*/
+*/ 
 const EditPostPage = ({ match }) => {
 console.log('Match: ',match)
   let post = {

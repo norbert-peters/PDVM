@@ -1,94 +1,113 @@
-import React from "react";
-import { useForm } from "react-hook-form";
-import { useDispatch } from 'react-redux'
+import React, { useState } from "react"
 
-import { putComment, postComment } from '../slices/comment'
- 
+import { PostComment, PutComment } from '../dataapi/Comment'
 import { PdvmButton } from '../pdvmComponents/PdvmButton'
-import  {ExPdvmTextField}  from '../pdvmComponents/ExPdvmTextField'
-import { PdvmInput } from '../pdvmComponents/PdvmInput'
-//import { StyledPdvmTextField } from '../pdvmComponents/PdvmTextField/styles';
+import PdvmInputControl  from '../pdvmComponents/PdvmInputControl'
 
-//import { red } from "@material-ui/core/colors";
+function useFormFields(initialValues) {
+    const [formFields, setFormFields] = useState(initialValues);
+    
+    const createChangeHandler = (key) => (
+      val: React.ChangeEvent<HTMLInputElement>,
+    ) => {
+      const value = val;
+      setFormFields((prev) => ({ ...prev, [key]: value }));
+    };
+  
+    return { formFields, createChangeHandler };
+  }
 
+  const initialFormFields = (formFields, comment) =>{
+    formFields.id = comment.id === undefined ? "" : comment.id
+    formFields.postId = comment.postId=== undefined ? "88" : comment.postId
+    formFields.name = comment.name=== undefined ? "" : comment.name
+    formFields.email = comment.email===undefined ? "" : comment.email
+    formFields.body = comment.body=== undefined ? "" : comment.body
+    formFields.pdvm = comment.pdvm
+    formFields.ret = comment.ret
+  }
 
+/*
+Hier beginnt die default Funktion
+*/
 
 export default function CommentEdit(props) {
-  console.log(props)
-  console.log(props.comment.name)
-  const dispatch = useDispatch()
-
-  const { register, handleSubmit, errors } = useForm({
-      defaultValues: {
-        id: props.comment.id,
-        postId: props.comment.postId,
-        name: props.comment.name,
-        email: props.comment.email,
-        body: props.comment.body,
-      },
-  })
-
-  const createFlag = props.comment.body === '' ? true : false
-
-  const onSubmit = (data) => {
-    const npres = {
-      id: props.comment.id,
-      postId: props.comment.postId,
-      name: data.name,
-      email: data.email,
-      body: data.body,    
-    }
+  const { formFields, createChangeHandler } = useFormFields({
+      id: "",
+      postId: "",
+      name: "",
+      email: "",
+      body: "",
+      pdvm: "",
+      ret: "-1",
+      })
     
-    if (createFlag) {
-      dispatch(postComment(npres))
+  const [mutate_post] = PostComment(formFields)
+  const [mutate_put] = PutComment(formFields)
+
+  const [firstPdvm, setFirstPdvm] = useState(true)
+  const [isFirst, setIsFirst] = useState(true)
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (props.isCreate) {
+      if (formFields.ret === "0" && firstPdvm) {
+        setFirstPdvm(false)
+        mutate_put(formFields)
+      } else {
+      if (firstPdvm) {
+        mutate_post(formFields)
+      } else {
+        mutate_put(formFields)
+      }}
     } else {
-      dispatch(putComment(npres["id"], npres))
+      mutate_put(formFields)
     }
-    alert("Die Änderung wurde gespeichert");
+  }
+
+
+  if (isFirst) {
+    initialFormFields(formFields, props.comment)
+    setIsFirst(false) 
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)}>
-    <PdvmInput
-      value={props.comment.name}
-      type="data"
-      name="name"
-      label="Name"
-      setRef={register({ required: true })}
-    />
-      <ExPdvmTextField
-        fullWidth
-        size="small"
-        aria-invalid={errors.email ? "true" : "false"}
-        aria-describedby="mailError"
-        variant="outlined"
-        name="email"
-        label="Email-Adresse"
-        inputRef={register({ required: true })}
+    <form onSubmit={handleSubmit}>
+      <PdvmInputControl
+        autoFocus={true}
+        pdvmType='textonly'
+        maxLength="50"
+        type="text"
+        label="Name"
+        value={formFields.name}
+        onChange={createChangeHandler("name")}
+        num="0"
+        id="1"
       />
-      <span id="mailError" style={{ display: errors.email ? "block" : "none" }}>
-        Das Feld Mail ist erforderlich
-      </span>
-      <br />
-      <ExPdvmTextField
-          id="outlined-multiline-static"
-          label='Kommentar'
-          multiline
-          fullWidth
-          variant="outlined"
-          aria-invalid={errors.body ? "true" : "false"}
-          aria-describedby="bodyError"
-          name="body"
-          inputRef={register({ required: true })}
+      <PdvmInputControl
+        autoFocus={false}
+        pdvmType='textonly'
+        maxLength="50"
+        type="email"
+        label="Email"
+        value={formFields.email}
+        onChange={createChangeHandler("email")}
+        num="1"
+        id="2"
       />
-      <span id="bodyError" style={{ display: errors.body ? "block" : "none" }}>
-        Das Feld Kommentar ist erforderlich
-      </span>
-      <br />
-
-      <PdvmButton display='attention' type="submit" >
-        Daten speichern
+      <PdvmInputControl
+        autoFocus={false}
+        pdvmType="textarea"
+        type="text"
+        label="Kommentar"
+        value={formFields.body}
+        onChange={createChangeHandler("body")}
+        num="2"
+        id="3"
+      />
+      <PdvmButton >
+        Speichern
       </PdvmButton>
     </form>
   );
-} 
+}

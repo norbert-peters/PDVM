@@ -28,38 +28,38 @@ const queryConfig = {
 function App() {
 
   return (
-    <ReactQueryConfigProvider config={queryConfig}>
-  <ThemeProvider theme={theme}>
-    <Router>
-      <PdvmPage>
-        <div className='App'>
-          <Grid>
-            <Row>
-              <Col size={1}>
-               <PdvmNavbar />
-              </Col>
-            </Row>
-            <Row>
-              <Col size={1} collapse='xs'>  
-                Wir sind nun links
-              </Col>
-              <Col size={3}>
-                <Switch>
-                  <Route exact path="/" component={DashboardPage} />
-                  <Route path="/post" component={PostRoutes} />
-                  <Redirect to="/" />
-                </Switch>
-              </Col>
-              <Col size={1} collapse='xs'>
-                Wir sind nun rechts
-              </Col>
-            </Row>
-          </Grid>
-        </div>
-      </PdvmPage>
-    </Router>
-    <ReactQueryDevtools initialIsOpen />
-  </ThemeProvider>
+  <ReactQueryConfigProvider config={queryConfig}>
+    <ThemeProvider theme={theme}>
+      <Router>
+        <PdvmPage>
+          <div className='App'>
+            <Grid>
+              <Row>
+                <Col size={1}>
+                <PdvmNavbar />
+                </Col>
+              </Row>
+              <Row>
+                <Col size={1} collapse='xs'>  
+                  Wir sind nun links
+                </Col>
+                <Col size={3}>
+                  <Switch>
+                    <Route exact path="/" component={DashboardPage} />
+                    <Route path="/post" component={PostRoutes} />
+                    <Redirect to="/" />
+                  </Switch>
+                </Col>
+                <Col size={1} collapse='xs'>
+                  Wir sind nun rechts
+                </Col>
+              </Row>
+            </Grid>
+          </div>
+        </PdvmPage>
+      </Router>
+      <ReactQueryDevtools initialIsOpen />
+    </ThemeProvider>
   </ReactQueryConfigProvider>
   );
 }

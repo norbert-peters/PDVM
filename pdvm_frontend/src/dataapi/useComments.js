@@ -11,6 +11,6 @@ const getPostComments = async (key, id, nlink) => {
   return data
 }
 
-export default function usePostComment(postId, nlink) {
+export default function useComments(postId, nlink) {
  return useQuery(['comments', postId, nlink ], getPostComments)
 }

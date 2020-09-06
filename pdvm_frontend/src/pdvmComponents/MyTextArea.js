@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef } from 'react'
 import Textarea from 'react-expanding-textarea'
 
-export const MyTextarea = () => {
+export const MyTextArea = () => {
   const textareaRef = useRef(null)
 
   const handleChange = useCallback(e => {

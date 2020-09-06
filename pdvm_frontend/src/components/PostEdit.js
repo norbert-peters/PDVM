@@ -71,7 +71,7 @@ export default function PostEdit(props) {
   return (
     <form onSubmit={handleSubmit}>
         <PdvmInputControl
-          pdvmType='text'
+          pdvmType='textonly'
           maxLength="50"
           type="text"
           label="Titel"
@@ -79,7 +79,7 @@ export default function PostEdit(props) {
           onChange={createChangeHandler("title")}
         />
         <PdvmInputControl
-          pdvmType="textaria"
+          pdvmType="textarea"
           type="text"
           label="Artikel"
           value={formFields.body}

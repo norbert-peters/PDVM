@@ -4,9 +4,9 @@ import { Grid } from '../pdvmComponents/PdvmRaster';
 
 export const PdvmFlexBox = styled(Grid)`
 ${({ theme }) => `
-  color: ${theme.primaryDark}} ;
-  background-color: ${theme.primaryLight} ;
-  box-shadow: 5px 5px 3px #888888;
+  color: ${theme.palette.text.secondary.light}} ;
+  background-color: ${theme.palette.text.secondary.dark} ;
+  box-shadow: 3px 3px 1px ${theme.palette.primary.dark};
   margin-bottom: 0.5em;
 ​​  `}
 `;

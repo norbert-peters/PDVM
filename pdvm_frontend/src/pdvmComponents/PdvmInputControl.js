@@ -1,46 +1,58 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import styled from "styled-components";
  
 import Textarea from 'react-expanding-textarea'
+import { theme } from '../theme';
+
 
 const InputContainer = styled.div`
   display: flex;
   flex-direction: column;
-  background-color: #fff;
-  margin: 15px 0;
   position: relative;
-  margin-top: 30px;
+  background-color: ${props => (
+    props.focused ? `${theme.back.inputHover}` 
+    : `${theme.back.input}`)};
+  border: 0.2rem solid ${props => (
+    props.error ? `${theme.error.main}` 
+    : `${theme.back.input}`)};
+  border-radius: 0.25rem;
+  margin-top: 2px;
+ 
+  & > textarea {
+    background-color: ${props => (
+      props.isShown ? `${theme.back.inputHover}`
+        : props.focused ? `${theme.back.inputActiv}` 
+      : `${theme.back.input}`)};
+    color: ${props => (
+      props.focused ? `${theme.front.text}` 
+      : `${theme.front.text}`)};
+    }
 
-  & > input {
-    border: 1px solid ${props => (props.error ? "#e77674" : "#eee")};
-    border-radius: 0.25rem;
-    background-color: transparent;
-    outline: none;
-    padding: 20px 3px 12px 15px;
-    font-family: 'Arial';
-    font-size: 15px;
-    transition: all 0.2s ease;
-    z-index: 500;
-  }
-  & > label {
-    color: #7575ff;
+  & > label {    
+    background-color: ${props => (
+      props.focused ? `${theme.back.inputActiv}` 
+      : `${theme.back.input}`)};
+    color: ${props => (
+      props.error ? `${theme.error.main}` 
+      : props.isActiv ? `${theme.front.label}` 
+        : `${theme.front.labelLight}`)};
     position: absolute;
     top: 15px;
     left: 15px;
-    font-family: 'Arial';
-    font-weight:bold;
-    font-size: 15px;
-    transition: all 0.2s ease;
-    z-index: 500;
+    font-weight:${theme.typography.fontWeightBold};
+
+    ${props => 
+      props.isShown &&
+      `background-color: ${theme.back.inputHover};
+      `}
+
 
     ${props =>
-      props.focused &&
+      props.isActiv &&
       `
-      font-size: 14px;
+      font-size: ${theme.typography.fontSizeSmall};
       outline: none;
-      transform: translateY(-13px) translateX(-5px);
-      z-index: 501;
-      background: #fff;
+      transform: translateY(-15px) translateX(-15px);
       padding: 1px 1px;
     `}
   }
@@ -56,7 +68,6 @@ const MyTextarea = (props) => {
   return (
     <>
       <Textarea
-        className="textarea"
         ref={textareaRef}
         {...props}
       />
@@ -65,15 +76,24 @@ const MyTextarea = (props) => {
 }
 
 const MyTextareaS = styled(MyTextarea)`
-  border: 1px solid ${props => (props.error ? "#e77674" : "#eee")};
-  border-radius: 0.25rem;
-  background-color: transparent;
+${({ theme }) => `
+  border: 1em ;
   outline: none;
   padding: 20px 0 0 15px;
-  font-family: 'Arial';
-  font-size: 16px;
+  background-color: ${theme.back.input};
+  color: ${theme.front.input};
+  font-family: ${theme.typography.fontFamily};
+  font-size: ${theme.typography.fontSize};
   resize: none;
-  z-index: 503;
+  `}
+`;
+const MyTextareaT = styled(MyTextarea)`
+  border: 0rem ;
+  outline: none;
+  padding: 20px 0 0 15px;
+  font-family: ${theme.typography.fontFamily};
+  font-size: ${theme.typography.fontSize};
+  resize: none;
 `
 
 /**
@@ -98,11 +118,14 @@ const PdvmInputControl = ({
   onFocus,
   onBlur,
   setRef,
+  num,
+  ref,
   ...props
 }) => {
-  const [focused, setFocused] = React.useState(false);
-  const [error, setError] = React.useState(null);
-
+  const [focused, setFocused] = useState(false);
+  const [error, setError] = useState(null);
+  const [isShown, setIsShown] = useState(false);
+  
   const handleOnFocus = () => {
     setFocused(true);
     onFocus();
@@ -117,7 +140,7 @@ const PdvmInputControl = ({
     if (type === "email") {
       // VERY simple email validation
       if (val.indexOf("@") === -1) {
-        setError("email is invalid");
+        setError("Email ist nicht korrekt");
       } else {
         setError(null);
       }
@@ -147,33 +170,51 @@ const PdvmInputControl = ({
   const isFocused = focused || String(value).length || type === "date";
 
   function pdvmControl(props) {
-//    console.log('pdvmControl: ',pdvmType)
-    if (pdvmType === "text"){
-      return <MyTextareaS
+    switch (pdvmType) {
+      case 'textonly':
+        return <MyTextareaS
           value={value}   
           type={type} 
           rows={1}
           onChange={e => handleOnChange(e.target.value)} 
           onFocus={handleOnFocus} 
           onBlur={handleOnBlur} 
+          num={num}
+          setref={ref}
           {...props}
-      />
-    } else if (pdvmType === "textaria"){
-      return <MyTextareaS
+        />
+        case 'textarea':
+          return <MyTextareaS
           value={value}   
           type={type} 
           onChange={e => handleOnChange(e.target.value)} 
           onFocus={handleOnFocus} 
           onBlur={handleOnBlur} 
+          num={num}
+          setref={ref}
           {...props}
-      />
-    } else {
-      return console.log('pdvmType', pdvmType, 'nicht bekannt')
-    }
+        />      
+        case 'readonly':
+          return <MyTextareaT
+          defaultValue={value}   
+          type={type} 
+          num={num}
+          {...props}
+        />      
+        default:
+         return console.log('pdvmType', pdvmType, 'nicht bekannt')
+      }
   }
 
   return (
-    <InputContainer focused={isFocused} error={error}>
+    <InputContainer 
+      focused={focused} 
+      isActiv={isFocused} 
+      error={error}
+      onMouseEnter={() => setIsShown(true)}
+      onMouseLeave={() => setIsShown(false)}
+      isShown={isShown}
+    >
       {renderLabel()}
       {pdvmControl(props)}
     </InputContainer>
@@ -184,7 +225,7 @@ PdvmInputControl.defaultProps = {
   type: "text",
   label: "",
   onChange: text => {
-    console.error(`Missing onChange prop: ${text}`);
+    console.error(`Vermisse die onChange Eigenschaft: ${text}`);
   },
   onFocus: () => {},
   onBlur: () => {},

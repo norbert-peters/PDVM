@@ -1,25 +1,27 @@
 import styled from 'styled-components';
 import {
   darken,
+  lighten,
 } from '@material-ui/core/styles';
-//import Button from '@material-ui/core/Button';
 
 export const PdvmButton = styled.button`
   ${({ theme }) => `
   text-transform: none ;
-  background-color: ${theme.primaryDark} ;
-  box-shadow: 0 4px 6px rgba(50, 50, 93, 0.11), 0 1px 3px rgba(0, 0, 0, 0.08) ;
+  background-color: ${theme.back.button} ;
+  box-shadow: 0 4px 6px ${theme.shadow.main}, 0 1px 3px ${theme.shadow.dark};
   padding: 4px 10px ;
   margin-left: 0.4em;
   margin-top: 0.2em ;
   margin-bottem: 0.2em ;
-  fontFamily: ${theme.typography.fontFamily}} ;
-  fontSize: ${theme.typography.fontSize}} ;
-  fontWeight: ${theme.typography.fontWeight}} ;
-  letterSpacing: ${theme.typography.letterSpacing}};
-  lineHeight: ${theme.typography.lineHeight}} ;
+  font-family: ${theme.typography.fontFamily}} ;
+  font-size: ${theme.typography.fontSize}} ;
+  font-weight: ${theme.typography.fontWeightBold}} ;
+  letter-spacing: ${theme.typography.letterSpacing}};
+  line-height: ${theme.typography.lineHeight}} ;
   &:hover {
-    background-color: ${darken(theme.primaryDark, 0.2)} ;
+    background-color: ${darken(theme.back.buttonHover, 0.3)} ;
+    color: ${lighten(theme.front.buttonHover, 0.8)}
+    font-weight: ${theme.typography.fontWeightMedium}} ;
   }
   `}
 `;

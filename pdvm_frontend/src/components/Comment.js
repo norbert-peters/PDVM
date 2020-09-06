@@ -1,26 +1,39 @@
 import React from 'react'
 import { PdvmPaper } from '../pdvmComponents/PdvmPaper'
 import EditTwoTone from '@material-ui/icons/Edit'
-import { Box } from '@material-ui/core'
-import { PdvmIconButton } from '../pdvmComponents/PdvmIconButton';
+import PdvmInputControl from '../pdvmComponents/PdvmInputControl';
+import { PdvmHeader } from '../pdvmComponents/PdvmHeader'
+
+function myButton(comment) {  
+  return [
+  {
+    "id": 0,
+    "ttitle" : "Kommentar ändern", 
+    "togo" : `/post/postsedit/${comment.id}/${comment.postId}/mod`, 
+    "nicon" : <EditTwoTone /> 
+  },
+]
+}
 
 export const Comment = ({ comment }) => (
   <PdvmPaper >
-    <Box>
-  <Box component="span" display="flex" >
-      <Box left="0%" p={0} >
-      <h2>{comment.name}</h2>
-      </Box>
-      <Box p={1} >
-      <PdvmIconButton 
-            ttitle = "Kommentar ändern" 
-            togo = {`/post/postsedit/${comment.id}/${comment.postId}`} 
-            nicon = {<EditTwoTone />} />
-          </Box>
-          </Box>
-    <h3>{comment.email}</h3>
-    <p>{comment.body}</p>
-    </Box>
+    <PdvmHeader
+      phType='h1'
+      phTitle={comment.name}
+      phButton={myButton(comment)}
+      phPost={comment}
+      phExcerpt='true'
+    />
+    <PdvmHeader
+      phType='h3'
+      phTitle={comment.email}
+      phPost={comment}
+    />
+    <PdvmInputControl
+      pdvmType="textonly"
+      value={comment.body}
+      readOnly
+    />
   </PdvmPaper>
 )
 

@@ -5,9 +5,13 @@ export const Grid = styled.div`
 `
 
 export const Row = styled.div`
+${({ theme }) => `
+    font-family: ${theme.typography.fontFamily};
+    margin-left: 15px;
     display: flex;
-`
-
+    `}
+    `;
+    
 const media = {
     xs: (styles) => `
     @media only screen and (max-width: 480px) {

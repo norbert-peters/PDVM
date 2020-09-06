@@ -16,7 +16,7 @@ const PostRoutes = () => {
       <Switch>
         <Route exact path="/post/posts/" component={PostsPage} />
         <Route exact path="/post/posts/:id" component={SinglePostPage} />
-        <Route exact path="/post/postsedit/:id/:postId" component={EditCommentPage} />
+        <Route exact path="/post/postsedit/:id/:postId/:pdvm" component={EditCommentPage} />
         <Route exact path="/post/postedit/:id/:pdvm" component={EditPostPage} />
       </Switch>
   )

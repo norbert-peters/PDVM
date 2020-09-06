@@ -29,10 +29,12 @@ import { PdvmIconButton } from './PdvmIconButton';
 
 
 const Nav = styled(Grid)`
-background-color: ${({ theme }) => theme.palette.primary.dark};
-color: ${({ theme }) => theme.primaryDark};
-margin-bottom: 0.5em;
-`
+  ${({ theme }) => `
+    background-color: ${theme.back.navbar};
+    color: ${theme.front.navbar};
+    margin-bottom: 0.5em;
+  `}
+`;
 
 export const PdvmNavbar = (props) => {
     const [opendr, setOpendr] = React.useState(false);
