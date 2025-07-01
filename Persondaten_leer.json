@@ -1,0 +1,40 @@
+{"PersDaten": 
+	{"Personalnummer": 
+		{"1.0": null}, 
+	"Familienname": 
+		{"1.0": null}, 
+	"Vorname": 
+		{"1.0": null}, 
+	"Titel": 
+		{"1.0": null}, 
+	"Vorsatzwort": 
+		{"1.0": null}, 
+	"Anrede": 
+		{"1.0": null}, 
+	"Geschlecht": 
+		{"1.0": null}, 
+	"Familienstand": 
+		{"1.0": null}, 
+	"Geburtsdatum": 
+		{"1.0": null}, 
+"Kommunikation": {		
+	"Telefon": 
+		{"1.0": null}, 
+	"Mobil":
+		{"1.0": null},
+	"Telefax": 
+		{"1.0": null},
+	"Email": 
+		{"1.0": null}}, 
+"Anschrift": 
+	{"Strasse": {"1.0": null"}, 
+	"Hausnummer": {"1.0": null}, 
+	"Zusatz": {"1.0": null}, 
+	"Postleitzahl": {"1.0": null}, 
+	"Ort": {"1.0": null}, 
+	"Teilort": {"1.0": null}, 
+	"Anmerkung": {"1.0": null}}, 
+"Sozialversicherung": 
+	{"Versicherungsnummer": {"1.0": null}}, 
+"Steuer": 
+	{"Steuernummer": {"1.0": null}}}

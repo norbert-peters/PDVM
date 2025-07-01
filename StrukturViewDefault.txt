@@ -1,0 +1,75 @@
+{
+  "stichtag": 3000001.0,
+  "view_tables": ["persondaten"],
+  "historisch": true,
+  "display_width": "0",
+  "metadata": {
+    "persondaten": {
+	  "felder": [
+		{
+		  "gruppe":        "PersDaten",
+		  "feld":          "FAMILIENNAME",
+		  "name":          "Familienname",
+		  "type":          "string",
+		  "default":       "",
+		  "lookup":        null,
+		  "ui": {
+			"searchable":     true,           
+			"sortable":       true,           
+			"sortDirection":  "asc",          
+			"width":          "20%",          
+			"filterType":     "contains"      
+		  }
+		},
+		{
+		  "gruppe":        "PersDaten",
+		  "feld":          "VORNAME",
+		  "name":          "Vorname",
+		  "type":          "string",
+		  "default":       "",
+		  "lookup":        null,
+		  "ui": {
+			"searchable":     true,           
+			"sortable":       true,           
+			"sortDirection":  "asc",          
+			"width":          "20%",          
+			"filterType":     "contains"      
+		  }
+		},
+		{
+		  "gruppe":   "PersDaten",
+		  "feld":     "GEBURTSDATUM",
+		  "name":     "Geburtsdatum",
+		  "type":     "date",
+		  "default":  null,
+		  "lookup":   null,
+		  "ui": {
+			"searchable":    false,          
+			"sortable":      true,
+			"sortDirection": "desc",
+			"width":         "15%",
+			"filterType":    "dateRange"     
+		  }
+		},
+		{
+		  "gruppe":   "PersDaten",
+		  "feld":     "ANREDE",
+		  "name":     "Anrede",
+		  "type":     "lookup",
+		  "default":  null,
+		  "lookup": {
+			"table":    "anreden_lu",
+			"key":      "guid",
+			"value":    "bezeichnung"
+		  },
+		  "ui": {
+			"searchable":    true,           
+			"sortable":      false,
+			"width":         "10%",
+			"filterType":    "dropdown"
+		  }
+		}
+	  ]
+    }
+  }
+}

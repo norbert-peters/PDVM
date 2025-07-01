@@ -1,0 +1,307 @@
+import tkinter as tk
+from tkinter import messagebox
+from tkcalendar import DateEntry
+from pdvm_datenbank import PdvmDatenbank
+from pd_datetime import Pdvm_DateTime
+from pdvm_date_time_picker import PdvmDateTimePicker
+import json
+import importlib
+
+def get_pdvm_instance(class_name, guid):
+    """
+    Importiert dynamisch die Klasse mit dem gegebenen Namen aus einem Modul,
+    dessen Name der Klasse in Kleinbuchstaben entspricht.
+    Beispiel: class_name="PdvmPerson" -> Modul "pdvmperson".
+    """
+    print(f"[DEBUG] Importiere Klasse {class_name} aus Modul {class_name.lower()}")
+    # Hier wird der Modulname aus dem Klassennamen abgeleitet
+    module_name = class_name.lower()
+    try:
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+        return cls(guid)
+    except (ImportError, AttributeError) as e:
+        print(f"Fehler beim dynamischen Import von {class_name}: {e}")
+        return None
+
+class PdvmInputFrame(tk.Frame):
+    def __init__(self, parent, config, **kwargs):
+        """
+        Erzeugt ein dynamisches Input-Frame. Die Daten werden in den jeweiligen
+        Instanzen (z.B. PdvmPerson, PdvmFinanzen) gepflegt, deren Klassenname
+        im Key (erstes Segment) enthalten ist. Die get_value/set_value Methoden sind
+        vereinheitlicht (Parameter: gruppe, feld, wert, ab_zeit=None).
+        """
+        super().__init__(parent, **kwargs)
+        self.config_dict = config
+        self.stichtag = self.config_dict.get("stichtag", {})
+
+        print(f"config_dict: {json.dumps(self.config_dict, indent=4)}")
+
+        # Dynamische Instanziierung aller pdvm-Klassen (z.B. "pdvmperson", "pdvmfinanzen")
+        self.instances = {}
+        for key, cfg in self.config_dict.items():
+            if key.startswith("pdvm") and key not in ["framedaten", "protokolldaten", "anwendungsdaten", "checksdaten"]:
+                # Beispiel: key "pdvmperson" -> Klasse PdvmPerson
+                class_name = "Pdvm" + key[4:].capitalize()
+                #class_name = key
+                guid = cfg.get("GUID")
+                if guid is None:
+                    print(f"Keine GUID für {class_name} angegeben.")
+                    continue
+                # Dynamische Instanziierung der Klasse
+                print(f"[DEBUG] Erzeuge Instanz von {class_name} mit GUID {guid}")
+                # Hier wird die Klasse dynamisch importiert und instanziiert
+                instance = get_pdvm_instance(class_name, guid)
+                if instance is not None:
+                    self.instances[key] = instance
+
+        # Framedaten aus der DB laden
+        self.framedaten = PdvmDatenbank("PdvmManager.db", "framedaten", False).lesen(self.config_dict["framedaten"]["GUID"])
+        print(f"\nframedaten: {json.dumps(self.framedaten, indent=4)}")
+
+        # Speicherung der Anzeige-Widget-Referenzen
+        self.input_controls = {}
+
+        # Header
+        header_text = "Daten bearbeiten – Framedaten"
+        header = tk.Label(self, text=header_text, font=("Helvetica", 16, "bold"), justify="left")
+        header.pack(pady=10, anchor="w")
+
+        # Container für Input-Controls
+        self.controls_frame = tk.Frame(self)
+        self.controls_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.create_input_controls()
+
+        # Buttons zum Speichern/Abbrechen
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(pady=10)
+        self.btn_speichern = tk.Button(btn_frame, text="Speichern", command=self.speichern,
+                                       font=("Helvetica", 12), bg="green", fg="white")
+        self.btn_speichern.pack(side=tk.LEFT, padx=10)
+        self.btn_abbrechen = tk.Button(btn_frame, text="Abbrechen", command=self.abbrechen,
+                                       font=("Helvetica", 12), bg="red", fg="white")
+        self.btn_abbrechen.pack(side=tk.LEFT, padx=10)
+
+    def create_input_controls(self):
+        """
+        Erzeugt für jeden Key in den Framedaten ein Control.
+        Der Key beginnt nun mit dem Klassennamen (z.B. "pdvmperson_...").
+        Historische Felder (historical: True, abdatum: True) zeigen das Abdatum (FormTimeStamp) an.
+        """
+        for key, conf in self.framedaten.items():
+            row = tk.Frame(self.controls_frame, bd=2, relief="groove", padx=5, pady=5)
+            row.pack(fill=tk.X, pady=5)
+            self.input_controls[key] = {"row": row}
+
+            # Label
+            lbl = tk.Label(row, text=conf.get("label", key), font=("Helvetica", 12), width=25, anchor="w")
+            lbl.grid(row=0, column=0, sticky="w")
+
+            # Hole aktuellen Wert und ggf. Abdatum aus der entsprechenden Instanz
+            curr_val, curr_abdatum = self.get_field_value_with_abdatum(key)
+            print(f"[DEBUG] Wert für {key}: {curr_val}, Abdatum: {curr_abdatum}")
+
+            # Anzeige des Hauptwerts
+            field_type = conf.get("type", "text")
+            if field_type == "text":
+                self.display_text(curr_val, row, key)
+            elif field_type == "datetime":
+                self.display_datetime(curr_val, row, key)
+            else:
+                self.display_text(curr_val, row, key)
+
+            # Historische Felder: Falls "historical" dann Instanz für Abdatum
+            # wenn "abdatum" True -> zeige Abdatum an
+            if conf.get("historical", False):
+                pd_ab_inst = Pdvm_DateTime('DEU')
+                try:
+                    pd_ab_inst.PdvmDateTime = float(curr_abdatum)
+                except ValueError:
+                    pd_ab_inst.PdvmDateTime = 1001.0
+                if conf.get("abdatum", False):
+                    abdatum_disp = pd_ab_inst.FormTimeStamp
+                    abdatum_var = tk.StringVar(value=str(abdatum_disp))
+                    tk.Label(row, text="Ab-Datum:", font=("Helvetica", 10)).grid(row=1, column=0, sticky="w")
+                    abdatum_entry = tk.Entry(row, textvariable=abdatum_var, font=("Helvetica", 10), state="readonly")
+                    abdatum_entry.grid(row=1, column=1, sticky="ew", padx=5)
+                    self.input_controls[key]["abdatum_var"] = abdatum_var
+                    self.input_controls[key]["datetime_inst"] = pd_ab_inst
+
+            # Button "Bearbeiten"
+            btn = tk.Button(row, text="Bearbeiten", command=lambda k=key: self.edit_field(k),
+                            font=("Helvetica", 10), width=10)
+            btn.grid(row=0, column=2, padx=5)
+
+    def display_text(self, curr_val, row, key):
+        var = tk.StringVar(value=str(curr_val))
+        entry = tk.Entry(row, textvariable=var, font=("Helvetica", 12), state="readonly")
+        entry.grid(row=0, column=1, sticky="ew", padx=5)
+        row.columnconfigure(1, weight=1)
+        self.input_controls[key]["var"] = var
+
+    def display_datetime(self, curr_val, row, key):
+        var = tk.StringVar(value=str(curr_val))
+        entry = DateEntry(row, textvariable=var, date_pattern="dd.MM.yyyy",
+                          font=("Helvetica", 12), state="readonly")
+        entry.grid(row=0, column=1, sticky="ew", padx=5)
+        row.columnconfigure(1, weight=1)
+        self.input_controls[key]["var"] = var
+
+    def split_key(self, key):
+        """
+        Zerlegt den Schlüssel (z.B. "PdvmPerson_PersDaten_Familienname")
+        in: class_key, gruppe, feld.
+        """
+        parts = key.split("_", 2)
+        if len(parts) != 3:
+            return None, None, None
+        class_key, group, field = parts
+        return class_key.lower(), group.upper(), field.upper()
+
+    def get_field_value_with_abdatum(self, key):
+        """
+        Liest den aktuellen Wert und das Abdatum aus der entsprechenden Instanz.
+        Erwartet wird ein Dictionary, z.B. {"wert": <value>, "ab_zeit": <abdatum>}.
+        """
+        class_key, group, field = self.split_key(key)
+        print(f"[DEBUG] get_field_value_with_abdatum: class_key={class_key}, group={group}, field={field}")
+        instance = self.instances.get(class_key.lower())
+        if instance is None:
+            return "", "1001.0"
+        print(f"[DEBUG] Stichtag: {self.stichtag}")
+        result = instance.get_value(group, field, self.stichtag)
+        print(f"[DEBUG] get_field_value_with_abdatum: {result}")
+        if result is None:
+            return "", "1001.0"
+        return result.get("wert", ""), result.get("ab_zeit", "1001.0")
+
+    def set_field_value(self, key, value, ab_date=None):
+        """
+        Setzt den neuen Wert in der entsprechenden Instanz.
+        Da alle Instanzen eine einheitliche Schnittstelle haben, wird ab_date (oder None)
+        als Parameter übergeben.
+        """
+        class_key, group, field = self.split_key(key)
+        instance = self.instances.get(class_key)
+        if instance is None:
+            return
+        instance.set_value(group, field, value, ab_zeit=ab_date)
+
+    def edit_field(self, key):
+        """
+        Öffnet einen Dialog zum Bearbeiten eines Feldes.
+        Bei historischen Feldern (historical und abdatum True) wird zusätzlich ein
+        PdvmDateTimePicker eingebunden, um das Abdatum zu ändern.
+        """
+        class_key, group, field = self.split_key(key)
+        # Hole den ursprünglichen Label-Text aus den Framedaten (falls vorhanden)
+        label_text = self.framedaten[key].get("label", f"{group} - {field}")
+        current_val, current_abdatum = self.get_field_value_with_abdatum(key)
+
+        dialog = tk.Toplevel(self)
+        dialog.title(label_text)
+
+        tk.Label(dialog, text=f"{label_text}:", font=("Helvetica", 12))\
+            .grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        new_val_var = tk.StringVar(value=current_val)
+        entry_widget = tk.Entry(dialog, textvariable=new_val_var, font=("Helvetica", 12))
+        entry_widget.grid(row=0, column=1, padx=10, pady=10)
+
+        conf = self.framedaten[key]
+        if conf.get("historical", False) and conf.get("abdatum", False):
+            tk.Label(dialog, text="Ab-Datum/Zeit:", font=("Helvetica", 12))\
+                .grid(row=1, column=0, padx=10, pady=10, sticky="w")
+            pd_dt_inst = self.input_controls[key].get("datetime_inst", Pdvm_DateTime('DEU'))
+            try:
+                pd_dt_inst.PdvmDateTime = float(current_abdatum)
+            except ValueError:
+                pd_dt_inst.PdvmDateTime = 0.0
+            dt_picker = PdvmDateTimePicker(dialog, pd_dt_inst,
+                                        display=conf.get("display_ab", "all"),
+                                        display_time_short=conf.get("display_ti_ab_short", False))
+            dt_picker.grid(row=1, column=1, padx=10, pady=10)
+            self.input_controls[key]["datetime_picker"] = dt_picker
+
+        def save_changes():
+            new_value = new_val_var.get().strip()
+            if new_value == "":
+                messagebox.showwarning("Warnung", f"{label_text} darf nicht leer sein!")
+                return
+
+            if conf.get("historical", False) and conf.get("abdatum", False):
+                updated_pd_dt = self.input_controls[key]["datetime_picker"].get_pdvm_datetime()
+                new_abdatum = updated_pd_dt.PdvmDateTime
+                print(f"[DEBUG] Speichere historischen Wert: {new_value}, Abdatum: {new_abdatum}")
+                class_key, group, field = self.split_key(key)
+                instance = self.instances.get(class_key)
+                if instance:
+                    instance.set_value(group, field, new_value, ab_zeit=new_abdatum)
+                else:
+                    print(f"[ERROR] Instanz für {class_key} nicht gefunden.")
+                self.input_controls[key]["var"].set(new_value)
+                self.input_controls[key]["abdatum_var"].set(str(updated_pd_dt.FormTimeStamp))
+            else:
+                print(f"[DEBUG] Speichere normalen Wert: {new_value}")
+                class_key, group, field = self.split_key(key)
+                instance = self.instances.get(class_key)
+                if instance:
+                    instance.set_value(group, field, new_value)
+                else:
+                    print(f"[ERROR] Instanz für {class_key} nicht gefunden.")
+                self.input_controls[key]["var"].set(new_value)
+            dialog.destroy()
+
+        def cancel_changes():
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        tk.Button(btn_frame, text="Speichern", command=save_changes, font=("Helvetica", 10))\
+            .pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Abbrechen", command=cancel_changes, font=("Helvetica", 10))\
+            .pack(side=tk.LEFT, padx=5)
+
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+
+    def speichern(self):
+        """
+        Ruft in allen Instanzen dynamisch deren save_values()-Methode auf.
+        """
+        print("[DEBUG] Speichervorgang gestartet...")
+        for key, instance in self.instances.items():
+            try:
+                print(f"[DEBUG] {key}: {json.dumps(instance.get_all_values(), indent=4)}")
+                instance.save_values()   # speichert die Instanz in der DB
+                # Hier könnte auch eine Methode zum Speichern in eine Datei o.ä. aufgerufen werden  
+            except Exception as e:
+                print(f"Fehler beim Speichern von {key}: {e}")
+        print("[DEBUG] Speichervorgang abgeschlossen.")
+
+    def abbrechen(self):
+        """
+        Bricht den Vorgang ab.
+        """
+        print("[DEBUG] Änderungen abgebrochen.")
+        self.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("PdvmDataFrame Beispiel")
+
+    call_daten = {
+        "stichtag": "2025059.7",
+        "anwendungsdaten": {"GUID": None, "HIST": False},
+        "checksdaten": {"GUID": None, "HIST": False},
+        "pdvmfinanzen": {"GUID": "74352176-bd00-4254-8ff7-6dab9a466e84", "HIST": False},
+        "framedaten": {"GUID": "4078079f-4028-45ed-879c-3c779ecf3d0d", "HIST": False},
+        "pdvmperson": {"GUID": "58c0acaa-fd40-4444-b516-c162f17a39b8", "HIST": True},
+        "protokolldaten": {"GUID": None, "HIST": True},
+    }
+
+    input_frame = PdvmInputFrame(root, call_daten)
+    input_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    root.mainloop()

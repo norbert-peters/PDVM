@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../MyBonKasse"
+		}
+	],
+	"settings": {
+		"powershell.cwd": "MyApplication"
+	}
+}
