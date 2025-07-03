@@ -5,7 +5,6 @@ from pd_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 
 import logging
 logger = logging.getLogger(__name__)
-logger.info("🔹 PdvmDateTimePicker gestartet")
 
 
 class PdvmDateTimePicker(QWidget):

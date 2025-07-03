@@ -12,7 +12,6 @@ from pdvm_view_manager import PdvmViewManager
 import logging
 
 logger = logging.getLogger(__name__)
-logger.info("🔹 PdvmDialogWidget gestartet")
 
 SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000"
 TEMPLATE_GUID = "00000000-0000-0000-0000-000000000000"
@@ -20,6 +19,7 @@ TEMPLATE_GUID = "00000000-0000-0000-0000-000000000000"
 
 class PdvmDialogManager:
     def __init__(self, base_call: dict):
+        logger.info("🔹 PdvmDialogManager gestartet")
         # Basis-Call-Daten
         self.base_call  = base_call.copy()
         self.user_guid  = self.base_call['user_guid']
@@ -71,9 +71,13 @@ class PdvmDialogManager:
             table_name="framedaten",
             guid=self.frame_guid
         )
-        logger.debug(f"🔹 74 framedaten[{self.frame_guid}] = {frm.lesen()}")
-        self.view_guid = frm.get_value('ROOT', 'view_guid')
-        logger.debug(f"🔹 76 view_guid = {self.view_guid}" )
+        # view_guid holen und ggf. Dict bereinigen
+        vg = frm.get_value('ROOT', 'view_guid')
+        if isinstance(vg, dict):
+            self.view_guid = vg.get('wert')
+        else:
+            self.view_guid = vg
+        logger.debug(f"🔹 im PdvmDialogManager view_guid = {self.view_guid}" )
         if not self.view_guid:
             raise ValueError("🔴 view_guid in framedaten fehlt")
 
@@ -132,6 +136,7 @@ class PdvmDialogManager:
 class PdvmDialogWidget(QWidget):
     def __init__(self, call_data: dict, parent=None):
         super().__init__(parent)
+        logger.info("🔹 PdvmDialogWidget gestartet")
         self.manager      = PdvmDialogManager(call_data)
         self.layout       = QVBoxLayout(self)
         self.search       = None
@@ -191,6 +196,9 @@ class PdvmDialogWidget(QWidget):
             btn = QPushButton("Auswahl")
             btn.clicked.connect(lambda: (self.manager.clear(), self._init_ui()))
             self.layout.addWidget(btn)
+        # Prüfe, ob root_guid im call_data vorhanden und gültig ist
+        if not call_data.get('root_guid'):
+            raise ValueError("PdvmDialogWidget: call_data muss ein gültiges 'root_guid' enthalten, bevor das InputWidget erzeugt wird!")
         # Input-Widget: KEIN Manager mehr übergeben, nur call_data und parent!
         iw = PdvmInputWidget(call_data, parent=self)
         for btn in iw.findChildren(QPushButton):
@@ -221,6 +229,9 @@ class PdvmDialogWidget(QWidget):
         iw_mgr = self.input_widget.manager
         iw_mgr.stichtag = new_inst.PdvmDateTime
         iw_mgr.st_inst.PdvmDateTime = new_inst.PdvmDateTime
+        # 4a) Stichtagsgenaue Instanzen neu laden
+        if hasattr(iw_mgr, 'refresh_instances_for_stichtag'):
+            iw_mgr.refresh_instances_for_stichtag()
         # 5) UI neu aufbauen
         self.input_widget._on_refresh()
         self.input_widget.ts_display.setText(new_inst.FormTimeStamp)

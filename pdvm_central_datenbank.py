@@ -513,3 +513,34 @@ class PdvmCentralDatenbank:
             except:
                 grp_dict = {}
         return grp_dict.get(feld)
+
+    def is_dirty(self) -> bool:
+        """
+        Gibt True zurück, wenn die Instanz ungespeicherte Änderungen hat.
+        TODO: Implementiere echte Dirty-Logik!
+        """
+        # Hier ggf. mit einem echten Dirty-Flag arbeiten
+        return getattr(self, '_dirty', False)
+
+    def save(self):
+        """
+        Speichert die aktuellen Änderungen der Instanz in die Datenbank.
+        TODO: Implementiere echte Save-Logik!
+        """
+        # Hier echte Persistenz-Logik einbauen
+        self._dirty = False
+        logger.info(f"[PdvmCentralDatenbank] Speichern für GUID {self.guid} aufgerufen (Platzhalter).")
+
+    def reload_instance_from_db(self, table: str, guid: str):
+        """
+        Lädt die Instanz mit der angegebenen GUID neu aus der Datenbank.
+        TODO: Implementiere echte Reload-Logik!
+        """
+        logger.info(f"[PdvmCentralDatenbank] Reload aus DB für {table}.{guid} (Platzhalter).")
+        # Hier echte Reload-Logik einbauen
+        if guid:
+            raw = self._lesen_rogue(guid)
+            if raw is not None:
+                self.data = raw
+                self.guid = guid
+                self._dirty = False

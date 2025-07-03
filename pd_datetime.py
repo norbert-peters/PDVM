@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Test-Meldung mit Unicode
-logger.info("🔹 PdvmInputManager gestartet")
+# logger.info("🔹 PdvmInputManager gestartet")
 #logger.warning("⚠ Achtung, etwas ist schiefgelaufen!")                                       # Wird benutzt um die aktuelle Zeit zu ermitteln
 
 # E i n s t e l l u n g e n

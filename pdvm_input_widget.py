@@ -4,21 +4,18 @@
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QLineEdit, QPushButton, QHBoxLayout, QVBoxLayout,
     QScrollArea, QMessageBox, QSizePolicy, QSpacerItem, QDialog,
-    QDialogButtonBox, QFormLayout, QComboBox, QGridLayout
+    QDialogButtonBox, QFormLayout, QGridLayout
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from pdvm_input_manager import PdvmInputManager, FieldMeta
 from pd_datetime import Pdvm_DateTime
 from pdvm_date_time_picker import PdvmDateTimePicker
 from pdvm_dropdown_picker import PdvmDropdownPicker
-from pdvm_object_search_widget import PdvmObjectSearchWidget
-from pdvm_search_list_widget  import PdvmSearchListWidget
 from pdvm_field_widget import PdvmFieldWidget
 
 import logging
 import uuid
 logger = logging.getLogger(__name__)
-logger.info("🔹 PdvmInputWidget gestartet")
 
 TEMPLATE_GUID = "11111111-1111-1111-1111-111111111111"  # Dummy-GUID für Template
 
@@ -26,13 +23,10 @@ TEMPLATE_GUID = "11111111-1111-1111-1111-111111111111"  # Dummy-GUID für Templa
 class PdvmInputWidget(QWidget):
     selectionChanged = pyqtSignal()
 
-    def __init__(self, call_data: dict, parent=None, manager=None):
+    def __init__(self, call_data: dict, parent=None):
         super().__init__(parent)
-        # Manager explizit übernehmen, sonst wie bisher erzeugen
-        if manager is not None:
-            self.manager = manager
-        else:
-            self.manager = PdvmInputManager(call_data)
+        # Manager explizit erzeugen da widget für sich autonom ist.
+        self.manager = PdvmInputManager(call_data)
         logger.debug(f"🔹 PdvmInputWidget - PdvmInputManager gestartet mit call_data: {call_data}")
         self.st_inst = call_data['stichtag_inst']
         # Keine feste frame_width mehr, alles dynamisch
@@ -43,12 +37,16 @@ class PdvmInputWidget(QWidget):
         self._load_values()
 
     def _build_ui(self):
+        # Komplett alten Layout-Baum entfernen (auch Hauptlayout!)
+        old_layout = self.layout() if hasattr(self, 'layout') else None
+        if old_layout is not None:
+            QWidget().setLayout(old_layout)  # Detach from self
         self.controls = {}
-        main = QVBoxLayout(self)
+        main = QVBoxLayout()
         main.setContentsMargins(20,20,20,20)
         main.setSpacing(10)
 
-        # Header
+        # Header (direkt, da immer vorhanden)
         header = QLabel(self.manager.header_text)
         header.setStyleSheet("font-size:18px; font-weight:bold;")
         main.addWidget(header, alignment=Qt.AlignLeft)
@@ -56,12 +54,13 @@ class PdvmInputWidget(QWidget):
         # Stichtag + Buttons
         st_layout = QHBoxLayout()
         st_layout.addWidget(QLabel("Stichtag:"), alignment=Qt.AlignLeft)
+        display_st = self.manager.display_st
         self.st_picker = PdvmDateTimePicker(
             self, self.st_inst,
-            display=self.manager.display_st,
+            display = display_st,
             default_date=None
         )
-        w = self.width_ts_picker_full if self.manager.display_st=="all" else self.width_ts_picker_only
+        w = self.width_ts_picker_full if display_st=="all" else self.width_ts_picker_only
         self.st_picker.setFixedWidth(w)
         st_layout.addWidget(self.st_picker)
         btn_ref = QPushButton("Refresh")
@@ -115,40 +114,27 @@ class PdvmInputWidget(QWidget):
 
         # Eingabefelder
         for meta in self.manager.get_fields():
-            table, grp, fld = self.manager._normalize_key(meta.key)
-            # GUID für das Feld bestimmen (klassisch: aus Manager oder Root)
-            guid = getattr(self.manager, 'get_guid_for_field', lambda t, g: self.manager.root_guid)(table, grp)
-            field_widget = PdvmFieldWidget(
-                table, grp, fld, guid, meta=meta,
-                readOnly=getattr(self, 'readOnly', True),
-                parent=self,
-                manager=self.manager
-            )
+            control = self.manager.get_control_object(meta)
+            field_widget = PdvmFieldWidget(control, parent=self)
             self.form_layout.addWidget(field_widget)
-            self.controls[meta.key] = {
-                "meta": meta,
-                "main_ctl": field_widget,
-                "field_widget": field_widget,
-                "table": table,
-                "gruppe": grp,
-                "feld": fld,
-                "guid": guid
-            }
+            self.controls[meta.key] = {"control": control, "main_ctl": field_widget, "field_widget": field_widget, "meta": meta}
 
         main.addStretch()
-        # Entferne das doppelte self.setLayout(main)!
-        # self.setLayout(main)  # ENTFERNT!
+        self.setLayout(main)
 
     def _load_values(self):
+        # Anzeige immer aus der Instanz
         self.ts_display.setText(self.st_inst.FormTimeStamp)
-        self.st_picker.pdvm_datetime.PdvmDateTime = self.st_inst.PdvmDateTime
-        self.st_picker.initial.PdvmDateTime = self.st_inst.PdvmDateTime  # Synchronisiere initial mit Instanz
+        # Picker zeigt immer die Instanz
+        self.st_picker.pdvm_datetime = self.st_inst
+        self.st_picker.initial.PdvmDateTime = self.st_inst.PdvmDateTime
         print(f"[DEBUG] _load_values: st_inst.PdvmDateTime={self.st_inst.PdvmDateTime}, st_picker.pdvm_datetime={self.st_picker.pdvm_datetime.PdvmDateTime}, st_picker.initial={self.st_picker.initial.PdvmDateTime}")
         self.st_picker.update_display()
         for key, entry in self.controls.items():
             meta = entry["meta"]
             ctl = entry["main_ctl"]
             val, ab = self.manager.get_value(key)
+            logger.debug(f"[DEBUG] XXXXXXXXX_load_values: key={key}, val={val}, ab={ab}, ctl={ctl}")
             # Für datetime: Wert aus Datenstruktur in value_inst und Widget schreiben
             if meta.type == "datetime":
                 if "value_inst" in entry:
@@ -167,21 +153,24 @@ class PdvmInputWidget(QWidget):
                 ctl.setText(display_val)
             elif isinstance(ctl, QLineEdit):
                 ctl.setText(str(val))
-            # Für abdatum: Wert der bestehenden Instanz setzen
-            if "ab_ctl" in entry and "ab_inst" in entry:
-                try:
-                    entry["ab_inst"].PdvmDateTime = float(ab)
-                    entry["ab_ctl"].setText(entry["ab_inst"].FormTimeStamp)
-                except:
-                    entry["ab_ctl"].setText("")
+            # Für abdatum: Wert direkt in die Instanz schreiben
+            if hasattr(entry["field_widget"], "abdatum_inst") and entry["field_widget"].abdatum_inst is not None:
+                entry["field_widget"].abdatum_inst.PdvmDateTime = ab
+            try:
+                if "field_widget" in entry and hasattr(entry["field_widget"], "_update_abdatum_display"):
+                    entry["field_widget"]._update_abdatum_display()
+            except Exception as e:
+                logger.warning(f"[PdvmInputWidget] Fehler beim Aktualisieren des Abdatums für key={key}: {e}")
 
     def _on_refresh(self):
-        self.st_picker.save()
-        self.st_inst.PdvmDateTime = self.st_picker.get_pdvm_datetime().PdvmDateTime
-        for entry in self.controls.values():
-            ctl = entry['main_ctl']
-            if isinstance(ctl, PdvmDropdownPicker):
-                ctl.refresh_options(self.st_inst.PdvmDateTime)
+        # Save schreibt direkt in die Instanz!
+        self.st_picker.save()  # Wert wird direkt in self.st_inst geschrieben
+        # Nach Save: Anzeige aktualisieren
+        self.ts_display.setText(self.st_inst.FormTimeStamp)
+        # Stichtagsgenaue Instanzen neu laden
+        if hasattr(self.manager, 'refresh_instances_for_stichtag'):
+            self.manager.refresh_instances_for_stichtag()
+        self._build_ui()
         self._load_values()
 
     def _on_new_guid(self, key):
@@ -244,22 +233,17 @@ class PdvmInputWidget(QWidget):
         dlg = EditFieldDialog(
             self, meta, val, ab,
             value_inst=self.controls[key].get('value_inst'),
-            ab_inst=self.controls[key].get('ab_inst')
+            ab_value=ab
         )
         if dlg.exec_() == QDialog.Accepted:
             new_val, new_ab = dlg.get_results()
             ab_to_use = self.manager.get_abdatum_for_field(key, new_ab)
-            # Debug: IDs und Werte der Instanzen vor dem Setzen
-            if meta.type == "datetime" and "value_inst" in self.controls[key]:
-                print(f"[DEBUG] Vor Bearbeiten: value_inst id={id(self.controls[key]['value_inst'])} Wert={self.controls[key]['value_inst'].PdvmDateTime}")
-                print(f"[DEBUG] Vor Bearbeiten: Picker id={id(dlg.value_ctl.pdvm_datetime)} Wert={dlg.value_ctl.pdvm_datetime.PdvmDateTime}")
             # Für datetime: Wert aus Picker explizit in value_inst schreiben
             if meta.type == "datetime" and "value_inst" in self.controls[key]:
                 self.controls[key]["value_inst"].PdvmDateTime = dlg.value_ctl.get_pdvm_datetime().PdvmDateTime
                 new_val = self.controls[key]["value_inst"].PdvmDateTime
                 print(f"[DEBUG] Nach Bearbeiten: value_inst id={id(self.controls[key]['value_inst'])} Wert={self.controls[key]['value_inst'].PdvmDateTime}")
-            if meta.has_abdatum and "ab_inst" in self.controls[key]:
-                ab_to_use = self.controls[key]["ab_inst"].PdvmDateTime
+            # Kein ab_inst mehr, ab_to_use ist direkt das Datum
             self.manager.set_value(key, new_val, ab_to_use)
             # Robustes Instanz-Update für viewtable (korrekte Tabelle/Gruppe aus Verweis holen)
             if meta.type == "viewtable":
@@ -312,12 +296,12 @@ class PdvmInputWidget(QWidget):
 class EditFieldDialog(QDialog):
     def __init__(self, parent, meta: FieldMeta,
                  current_value, current_ab,
-                 value_inst=None, ab_inst=None):
+                 value_inst=None, ab_value=None):
         super().__init__(parent)
         self.meta       = meta
         self.current_ab = current_ab
         self.value_inst = value_inst  # Instanz aus Mapping!
-        self.ab_inst    = ab_inst     # Instanz aus Mapping!
+        self.ab_value   = ab_value    # float-Wert, kein Objekt mehr
         self.manager    = parent.manager
         self.setWindowTitle(f"{meta.label} bearbeiten")
         self.setModal(True)
@@ -329,8 +313,8 @@ class EditFieldDialog(QDialog):
 
         # — Ab-Datum-Widget nur wenn abdatum:true —
         if meta.has_abdatum:
-            ab_inst = self.ab_inst
-            self.ab_picker = PdvmDateTimePicker(self, ab_inst)
+            ab_val = self.ab_value if self.ab_value is not None else self.current_ab
+            self.ab_picker = PdvmDateTimePicker(self, ab_val)
             self.ab_picker.update_display()
             form.addRow("Ab-Datum:", self.ab_picker)
         else:
@@ -351,8 +335,6 @@ class EditFieldDialog(QDialog):
         if self.meta.has_abdatum and self.ab_picker:
             self.ab_picker.save()
             new_ab = self.ab_picker.get_pdvm_datetime().PdvmDateTime
-            if self.ab_inst:
-                self.ab_inst.PdvmDateTime = new_ab
         else:
             new_ab = self.current_ab or 1001.0
         logger.debug(f"[EditFieldDialog.get_results] Rückgabe: new_val={new_val} (type={type(new_val)}), new_ab={new_ab}")
