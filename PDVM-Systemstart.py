@@ -26,7 +26,7 @@ logger.info("🔹 Hauptanwendung gestartet")
 from pdvm_login import LoginApp
 from pdvm_menu_editor import PdvmMenuEditor
 from pdvm_view_manager import PdvmViewManager
-from pdvm_search_list_widget import SearchListWidget
+from pdvm_search_list_widget import PdvmSearchListWidget
 from pdvm_dialog_widget import PdvmDialogWidget
 import json
 from PyQt5.QtWidgets import (
@@ -217,7 +217,7 @@ class MainApp(QMainWindow):
         self.view_manager = PdvmViewManager(call_daten=call_daten)
         table_name = self.view_manager.view_table
         # 2) Erzeuge dein SearchListWidget für eine Tabelle, z.B. 'persondaten'
-        search_widget = SearchListWidget(self.view_manager, table_name=table_name)
+        search_widget = PdvmSearchListWidget(self.view_manager, table_name=table_name)
         self.content_layout.addWidget(search_widget)
 
     def pdvm_test(self):

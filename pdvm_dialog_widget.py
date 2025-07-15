@@ -1,9 +1,10 @@
-# pdvm_dialog_widget.py
+ # pdvm_dialog_widget.py
 # -*- coding: utf-8 -*-
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QMessageBox, QPushButton,
-    QHBoxLayout, QGroupBox
+    QWidget, QVBoxLayout, QPushButton,
+    QHBoxLayout, QGroupBox, QLabel, QSizePolicy
 )
+from PyQt5.QtCore import Qt
 from pdvm_input_widget import PdvmInputWidget
 from pdvm_search_list_widget import PdvmSearchListWidget
 from pdvm_central_datenbank import PdvmCentralDatenbank
@@ -134,6 +135,13 @@ class PdvmDialogManager:
 
 
 class PdvmDialogWidget(QWidget):
+    def on_field_edited(self, meta, new_val, new_ab):
+        """
+        Wird von PdvmInputWidget oder PdvmFieldWidget aufgerufen, wenn ein Feld editiert oder ein History-Eintrag gelöscht wurde.
+        Führt einen vollständigen Refresh durch (wie Refresh-Button).
+        """
+        logger.info(f"[PdvmDialogWidget] on_field_edited: meta={getattr(meta, 'key', meta)}, new_val={new_val}, new_ab={new_ab}")
+        self._on_refresh()
     def __init__(self, call_data: dict, parent=None):
         super().__init__(parent)
         logger.info("🔹 PdvmDialogWidget gestartet")
@@ -142,6 +150,8 @@ class PdvmDialogWidget(QWidget):
         self.search       = None
         self.view_mgr     = None
         self.input_widget = None
+        self.input_frame  = None
+        self.view_frame   = None
         self._init_ui()
 
     def _init_ui(self):
@@ -151,17 +161,16 @@ class PdvmDialogWidget(QWidget):
             if w:
                 w.setParent(None)
 
-        # Aktionstasten
+        # Aktionstasten NUR für die View (Suchliste)
         frame_data = self.manager.frame_data
-        btn_frame = QGroupBox("Aktionen")
-        btn_layout = QHBoxLayout(btn_frame)
-        btn_select = QPushButton("Auswahl übernehmen")
-        btn_select.clicked.connect(self._trigger_selection)
-        btn_layout.addWidget(btn_select)
-        btn_new = QPushButton("Neuanlage")
-        btn_new.clicked.connect(self._on_create_new)
-        btn_layout.addWidget(btn_new)
-        self.layout.addWidget(btn_frame)
+        self.btn_frame = QGroupBox("Aktionen")
+        self.btn_layout = QHBoxLayout(self.btn_frame)
+        self.btn_select = QPushButton("Auswahl übernehmen")
+        self.btn_select.clicked.connect(self._trigger_selection)
+        self.btn_layout.addWidget(self.btn_select)
+        self.btn_new = QPushButton("Neuanlage")
+        self.btn_new.clicked.connect(self._on_create_new)
+        self.btn_layout.addWidget(self.btn_new)
 
         # Entscheide, ob Search oder Input
         lr = frame_data.get('last_root_guid', SYSTEM_USER_ID)
@@ -171,11 +180,38 @@ class PdvmDialogWidget(QWidget):
             self.view_mgr = vm
             w = PdvmSearchListWidget(vm, vm.view_table)
             w.selectionChanged.connect(self._on_search_selected)
-            self.layout.addWidget(w)
+            self.view_frame = w
+            self.layout.addWidget(self.btn_frame)
+            self.layout.addWidget(self.view_frame)
             self.search = w
+            self.input_frame = None
         else:
             cd = self.manager.get_call(root_guid=lr)
-            self._show_input(cd, show_back=True)
+            mode = cd.get('mode', 0)
+            if mode == 0:
+                self.input_frame = PdvmInputWidget(cd, parent=self)
+                self.layout.addWidget(self.input_frame)
+                self.input_frame.backToSelection.connect(self._on_back_to_view)
+                self.view_frame = None
+            else:
+                placeholder = QWidget(self)
+                vbox = QVBoxLayout(placeholder)
+                vbox.setContentsMargins(20, 20, 20, 20)
+                vbox.setSpacing(20)
+                btn_back = QPushButton("Zur Auswahl")
+                btn_back.setMinimumWidth(0)
+                btn_back.setMaximumWidth(600)
+                btn_back.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                btn_back.setStyleSheet("font-size: 15px; font-weight: bold; padding: 8px 0;")
+                btn_back.clicked.connect(self._on_back_to_view)
+                vbox.addWidget(btn_back, alignment=Qt.AlignHCenter)
+                guid = cd.get('root_guid', '-')
+                label = QLabel(f"Für den Mode {mode} ist noch kein Frame vorhanden.\nAktuelle GUID: {guid}")
+                label.setStyleSheet("font-size: 16px; color: #888; padding: 20px;")
+                vbox.addWidget(label, alignment=Qt.AlignHCenter)
+                self.layout.addWidget(placeholder)
+                self.input_frame = placeholder
+                self.view_frame = None
 
     def _on_search_selected(self, guids: list):
         if not guids:
@@ -192,29 +228,49 @@ class PdvmDialogWidget(QWidget):
             if w:
                 w.setParent(None)
         # Back-Button
-        if show_back:
-            btn = QPushButton("Auswahl")
-            btn.clicked.connect(lambda: (self.manager.clear(), self._init_ui()))
-            self.layout.addWidget(btn)
-        # Prüfe, ob root_guid im call_data vorhanden und gültig ist
-        if not call_data.get('root_guid'):
+        # Kein zusätzlicher Auswahl-Button mehr – Umschalten erfolgt nur noch über den Button im InputWidget
+        # Immer ein vollständiges call_data mit root_guid aus dem Manager holen!
+        root_guid = call_data.get('root_guid')
+        if not root_guid:
             raise ValueError("PdvmDialogWidget: call_data muss ein gültiges 'root_guid' enthalten, bevor das InputWidget erzeugt wird!")
-        # Input-Widget: KEIN Manager mehr übergeben, nur call_data und parent!
-        iw = PdvmInputWidget(call_data, parent=self)
-        for btn in iw.findChildren(QPushButton):
-            if btn.text() == "Refresh":
-                btn.clicked.disconnect()
-                # statt iw._on_refresh, rufe hier dialog._on_refresh
-                btn.clicked.connect(self._on_refresh)
-                break
-        self.layout.addWidget(iw)
-        self.input_widget = iw
-        # Refresh-Handler umleiten
-        for btn in iw.findChildren(QPushButton):
-            if btn.text() == "Refresh":
-                btn.clicked.disconnect()
-                btn.clicked.connect(self._on_refresh)
-                break
+        mode = call_data.get('mode', 0)
+        if mode == 0:
+            # Wenn das InputFrame schon existiert, nur reload, sonst neu anlegen
+            if self.input_frame is not None and isinstance(self.input_frame, PdvmInputWidget):
+                self.input_frame.reload_with_root_guid(root_guid)
+                self.layout.addWidget(self.input_frame)
+                self.view_frame = None
+            else:
+                full_call_data = self.manager.get_call(root_guid=root_guid)
+                self.input_frame = PdvmInputWidget(full_call_data, parent=self)
+                self.layout.addWidget(self.input_frame)
+                self.input_frame.backToSelection.connect(self._on_back_to_view)
+                self.view_frame = None
+        else:
+            placeholder = QWidget(self)
+            vbox = QVBoxLayout(placeholder)
+            vbox.setContentsMargins(20, 20, 20, 20)
+            vbox.setSpacing(20)
+            btn_back = QPushButton("Zur Auswahl")
+            btn_back.setMinimumWidth(0)
+            btn_back.setMaximumWidth(600)
+            btn_back.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            btn_back.setStyleSheet("font-size: 15px; font-weight: bold; padding: 8px 0;")
+            btn_back.clicked.connect(self._on_back_to_view)
+            vbox.addWidget(btn_back, alignment=Qt.AlignHCenter)
+            guid = call_data.get('root_guid', '-')
+            label = QLabel(f"Für den Mode {mode} ist noch kein Frame vorhanden.\nAktuelle GUID: {guid}")
+            label.setStyleSheet("font-size: 16px; color: #888; padding: 20px;")
+            vbox.addWidget(label, alignment=Qt.AlignHCenter)
+            self.layout.addWidget(placeholder)
+            self.input_frame = placeholder
+            self.view_frame = None
+
+    def _on_back_to_view(self):
+        # Setze last_root_guid in der Systemsteuerung auf SYSTEM_USER_ID (keine Auswahl)
+        self.manager.save(root_guid=SYSTEM_USER_ID)
+        self._init_ui()
+        self.view_frame = None
 
     def _on_refresh(self):
         logger.debug("🔹 Refresh im Dialog-Knopf gedrückt")

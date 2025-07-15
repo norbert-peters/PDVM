@@ -182,3 +182,39 @@ class PdvmDateTimePicker(QWidget):
         logger.debug(f"🔹 PdvmDateTimePicker.setReadOnly({readonly})")
         self._readonly = readonly
         self.update_display()
+
+    def update_with_new_instance(self, new_pdvm_datetime: Pdvm_DateTime):
+        """
+        Aktualisiert das Widget mit einer neuen PdvmDateTime-Instanz.
+        Diese Methode wird verwendet, wenn sich die zugrunde liegende Instanz geändert hat.
+        """
+        logger.debug(f"🔹 PdvmDateTimePicker.update_with_new_instance aufgerufen - neuer Wert: {new_pdvm_datetime.PdvmDateTime}")
+        
+        # Die neue Instanz übernehmen
+        self.pdvm_datetime = new_pdvm_datetime
+        
+        # Initial-Werte aus der neuen Instanz setzen
+        try:
+            raw_val = float(self.pdvm_datetime.pdvmdatetime)
+        except Exception:
+            raw_val = 1001.0  # Fallback auf Sentinel
+            
+        # Prüfen, ob es ein Sentinel ist
+        if raw_val in (1001.0, 9999365.0):
+            # Sentinel → verwende aktuelles Datum als Default
+            if hasattr(self, 'default_date') and self.default_date is not None:
+                if isinstance(self.default_date, (int, float)):
+                    self.initial.PdvmDateTime = float(self.default_date)
+                else:
+                    now_val = PdvmDateTimeUtils.PdvmDateTimeNow()
+                    self.initial.PdvmDateTime = now_val
+            else:
+                now_val = PdvmDateTimeUtils.PdvmDateTimeNow()
+                self.initial.PdvmDateTime = now_val
+        else:
+            # Kein Sentinel → aus der neuen Instanz übernehmen
+            self.initial.PdvmDateTime = raw_val
+            
+        # UI aktualisieren
+        self.update_display()
+        logger.debug(f"🔹 PdvmDateTimePicker.update_with_new_instance abgeschlossen - initial jetzt: {self.initial.FormTimeStamp}")

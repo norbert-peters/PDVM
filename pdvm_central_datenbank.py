@@ -26,20 +26,26 @@ class PdvmCentralDatenbank:
         self,
         db_name: str = "PdvmManager.db",
         table_name: str = "menudaten",
-        guid: Optional[str] = None
-#        historisch: bool = False
+        guid: Optional[str] = None,
+        path: Optional[str] = None,
+        source_path: Optional[str] = None
     ):
+        """
+        Nach der Initialisierung ist jede Instanz eindeutig für (table, guid, path).
+        Nach der Zuordnung zu den InputControls (ICs) wird die GUID im Tabellennamen nicht mehr benötigt.
+        Um Daten für eine andere GUID bereitzustellen, wird read_guid(guid) verwendet.
+        Es dürfen keine doppelten Instanzen für dieselbe (table, guid, path) erzeugt werden.
+        """
         self.db_name = db_name
         self.table_name = table_name
-        logger.info(f"🔹 Initialisiere PdvmCentralDatenbank für {self.table_name} in {self.db_name}."  )
+        self.path = path
+        self.source_path = source_path  # Eindeutiger Pfad für Instanzzuordnung
+        logger.info(f"🔹 Initialisiere PdvmCentralDatenbank für {self.table_name} in {self.db_name} (path={self.path}).")
+        logger.info(f"🔹 source_path gesetzt auf {self.source_path}.")
         self.guid = guid
         logger.info(f"🔹 GUID gesetzt auf {self.guid}.")
-    #    self.historisch = historisch  --- wird auomatisch aus der Tabelle abgeleitet
-
-
         # Im Konstruktor prüfen wir, ob die Tabelle existiert, und laden (falls GUID gegeben) die Daten
         self._ensure_table_exists()
-
         # Wenn eine GUID übergeben wurde, lade das JSON‐Diktat in self.data;
         # sonst setze self.data auf {} (für get_value_all o.ä.).
         self.data: Dict[str, Any] = {}
@@ -51,6 +57,9 @@ class PdvmCentralDatenbank:
                 self.data = {}
             else:
                 self.data = raw
+        # Nach der Initialisierung sollte die Instanz für (table, guid, path) eindeutig sein.
+        # Nach der IC-Zuordnung wird die GUID im Tabellennamen nicht mehr benötigt.
+        # Für Datenwechsel: self.read_guid(guid)
 
     def _ensure_table_exists(self):
         """
@@ -114,6 +123,34 @@ class PdvmCentralDatenbank:
                     return None
             return row[0]
 
+    class DropdownGroup:
+        def __init__(self, gruppe, options=None):
+            self.gruppe = gruppe
+            self.options = options if options is not None else []
+
+    def get_fields(self):
+        """
+        Gibt alle Gruppen/Felder zurück, die in self.data liegen.
+        Für Dropdowns: Gibt eine Liste von Objekten mit Attributen 'gruppe' (Gruppenname) und 'options' (Liste der Optionen).
+        """
+        if hasattr(self, 'data') and isinstance(self.data, dict):
+            result = []
+            for gruppe in self.data.keys():
+                # Versuche, Optionen für diese Gruppe zu extrahieren (falls vorhanden)
+                options = []
+                gruppe_dict = self.data.get(gruppe, {})
+                if isinstance(gruppe_dict, str):
+                    try:
+                        gruppe_dict = json.loads(gruppe_dict)
+                    except Exception:
+                        gruppe_dict = {}
+                # Sammle alle Feldnamen als Optionen, falls sinnvoll
+                if isinstance(gruppe_dict, dict):
+                    options = list(gruppe_dict.keys())
+                result.append(self.DropdownGroup(gruppe, options))
+            return result
+        return []
+
     def get_value(self, gruppe: str, feld: str, ab_zeit: Optional[float] = None) -> Dict[str, Any]:
         """
         Liefert genau einen Wert für (gruppe, feld). Falls historisch=True, wird:
@@ -156,6 +193,9 @@ class PdvmCentralDatenbank:
             except:
                 # Wenn es kein JSON ist, gehen wir davon aus, dass es ein Skalar ist
                 raw_val = raw_val
+
+        # --- TRACE: Logge den kompletten Feldinhalt, Stichtag und die spätere Ausgabe ---
+#        logger.info(f"[TRACE:get_value] {self.table_name}.{self.guid} Gruppe={gruppe} Feld={feld} ab_zeit={ab_zeit} raw_val={raw_val}")
 
         # 4) Aktuellen Pdvm-Timestamp ermitteln, falls historisch und ab_zeit nicht gesetzt
         if self.historisch:
@@ -362,9 +402,15 @@ class PdvmCentralDatenbank:
         - Persistiert wird erst mit save_values().
         """
         print(f"[DEBUG] PdvmCentralDatenbank.set_value: gruppe={gruppe}, feld={feld}, wert={wert}, ab_zeit={ab_zeit}, self_id={id(self)}")
+        
+        # Prüfe ob der Wert tatsächlich geändert wird
+        old_value = None
+        value_changed = False
+        
         # 1) Gruppe anlegen, falls nicht vorhanden
         if gruppe not in self.data or self.data.get(gruppe) is None:
             self.data[gruppe] = {}
+        
         # 2) Historischer Zweig
         if self.historisch:
             # Falls ab_zeit nicht übergeben, aktuellen Pdvm‒Timestamp verwenden
@@ -378,24 +424,47 @@ class PdvmCentralDatenbank:
                 self.data[gruppe][feld] = {}
             self._normalize_historic_keys(gruppe, feld)
             ts_key = format(ab_zeit, ".5f")
+            
+            # Prüfe auf Änderung
+            old_value = self.data[gruppe][feld].get(ts_key)
+            value_changed = old_value != wert
+            
             print(f"[DEBUG] PdvmCentralDatenbank.set_value: Vorher self.data[{gruppe}][{feld}]={self.data[gruppe][feld]}")
             self.data[gruppe][feld][ts_key] = wert
             print(f"[DEBUG] PdvmCentralDatenbank.set_value: Nachher self.data[{gruppe}][{feld}]={self.data[gruppe][feld]}")
+        
         # 3) Nicht-historischer Zweig
         else:
+            # Prüfe auf Änderung
+            old_value = self.data[gruppe].get(feld)
+            value_changed = old_value != wert
+            
             # ab_zeit wird ignoriert, Wert als Skalar gespeichert
             print(f"[DEBUG] PdvmCentralDatenbank.set_value: (nicht historisch) Vorher self.data[{gruppe}][{feld}]={self.data[gruppe].get(feld, 'N/A')}")
             self.data[gruppe][feld] = wert
             print(f"[DEBUG] PdvmCentralDatenbank.set_value: (nicht historisch) Nachher self.data[{gruppe}][{feld}]={self.data[gruppe][feld]}")
-
+        
+        # Dirty-Flag setzen wenn sich der Wert geändert hat
+        if value_changed:
+            self._dirty = True
+            print(f"[DEBUG] PdvmCentralDatenbank.set_value: Dirty-Flag gesetzt für {gruppe}.{feld} (alt: {old_value}, neu: {wert})")
+        else:
+            print(f"[DEBUG] PdvmCentralDatenbank.set_value: Kein Wert-Änderung für {gruppe}.{feld} (bleibt: {wert})")
     def read_guid(self, guid: str):
         """
         Liest die Daten für die angegebene GUID und setzt self.guid und self.data entsprechend neu.
+        Lädt nur dann aus der Datenbank, wenn sich die GUID tatsächlich geändert hat.
         """
         old_guid = self.guid
+        if old_guid == guid:
+            print(f"[DEBUG] PdvmCentralDatenbank.read_guid: Tabelle={self.table_name}, GUID unverändert ({guid}), kein Reload nötig")
+            return
+        
         self.guid = guid
         self.data = self._lesen_rogue(guid) or {}
-        print(f"[DEBUG] PdvmCentralDatenbank.read_guid: Tabelle={self.table_name}, alte GUID={old_guid}, neue GUID={guid}, geladene Daten={self.data}")
+        # Dirty-Flag zurücksetzen nach erfolgreichem Laden
+        self._dirty = False
+        print(f"[DEBUG] PdvmCentralDatenbank.read_guid: Tabelle={self.table_name}, alte GUID={old_guid}, neue GUID={guid}, geladene Daten={self.data}, dirty=False")
 
     def lesen_gruppe(self, gruppe: str) -> dict:
         """
@@ -525,11 +594,17 @@ class PdvmCentralDatenbank:
     def save(self):
         """
         Speichert die aktuellen Änderungen der Instanz in die Datenbank.
-        TODO: Implementiere echte Save-Logik!
         """
-        # Hier echte Persistenz-Logik einbauen
-        self._dirty = False
-        logger.info(f"[PdvmCentralDatenbank] Speichern für GUID {self.guid} aufgerufen (Platzhalter).")
+        if hasattr(self, '_dirty') and self._dirty:
+            # Echte Persistenz-Logik einbauen
+            if self.guid:
+                self.save_values()  # Verwende die existierende save_values Methode
+                self._dirty = False
+                logger.info(f"[PdvmCentralDatenbank] Instanz für GUID {self.guid} erfolgreich gespeichert.")
+            else:
+                logger.warning(f"[PdvmCentralDatenbank] Kann nicht speichern - keine GUID gesetzt.")
+        else:
+            logger.debug(f"[PdvmCentralDatenbank] Keine Änderungen zu speichern für GUID {self.guid}.")
 
     def reload_instance_from_db(self, table: str, guid: str):
         """

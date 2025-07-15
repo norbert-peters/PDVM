@@ -733,10 +733,27 @@ class Pdvm_DateTime(object):
             return self.Date + " - " + self.Time
 
     def __getTimeStamp(self):
-        if self.vChr:
-            return "-"+self.Date + " - " + self.TimeAll
+        # Standardverhalten: vollständiger Zeitstempel (Datum + Zeit)
+        # Für spezielle Anzeige (z.B. nur Datum), sollte die Anzeige-Logik
+        # im aufrufenden Code (z.B. PdvmFieldWidget) angepasst werden, sodass
+        # bei display_val == "only_date" nur self.Date verwendet wird.
+        #
+        # Hier bieten wir eine optionale Unterstützung für "only_date" an,
+        # indem wir einen Parameter erlauben (default: False, für Rückwärtskompatibilität).
+        #
+        # Die Methode bleibt aber property-kompatibel (ohne Parameter),
+        # daher muss die eigentliche Logik im Widget erfolgen.
+        if hasattr(self, '_display_only_date') and self._display_only_date:
+            # Nur Datum anzeigen (z.B. für display_val == "only_date")
+            if self.vChr:
+                return "-" + self.Date
+            else:
+                return self.Date
         else:
-            return self.Date + " - " + self.TimeAll
+            if self.vChr:
+                return "-"+self.Date + " - " + self.TimeAll
+            else:
+                return self.Date + " - " + self.TimeAll
 
     FormTimeStamp = property(__getFormTimeStamp, __setFormTimeStamp)
     TimeStamp = property(__getTimeStamp)    

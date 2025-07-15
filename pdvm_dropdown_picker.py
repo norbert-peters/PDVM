@@ -1,89 +1,85 @@
-# pdvm_dropdown_picker.py
-# -*- coding: utf-8 -*-
-
 from PyQt5.QtWidgets import QWidget, QComboBox, QHBoxLayout
 from PyQt5.QtCore import pyqtSignal, Qt
 
-class PdvmDropdownPicker(QWidget):
+import logging
+logger = logging.getLogger(__name__)
 
-    def refresh_from_instance(self):
-        """
-        Aktualisiert die Anzeige des Dropdowns aus der zugehörigen Instanz (z.B. PdvmCentralDatenbank),
-        sodass der aktuelle Wert (Key) gesetzt und übersetzt angezeigt wird.
-        """
-        # Versuche, die Instanz und das Feld zu finden
-        # Annahme: drop_inst hat Attribute data_inst, meta oder ähnlich
-        try:
-            # Für Kompatibilität: Suche nach data_inst und meta
-            data_inst = getattr(self.drop_inst, 'data_inst', None)
-            meta = getattr(self.drop_inst, 'meta', None)
-            if data_inst and meta:
-                table, grp, fld = meta.key.split('_', 2)
-                val_dict = data_inst.get_value(grp, fld)
-                key = val_dict.get('wert', '') if isinstance(val_dict, dict) else val_dict
-                self.set_selected_key(key)
-        except Exception:
-            pass
-    """
-    Qt-Widget für historischen/aktuellen Dropdown.
-    Konstruktor:
-      PdvmDropdownPicker(parent, drop_inst, section_key,
-                         language="de", stichtag=1001.0)
-    """
+class PdvmDropdownPicker(QWidget):
     selectionChanged = pyqtSignal(str, name="selectionChanged")
 
-    def __init__(self, parent, drop_inst, section_key,
-                 language="de", stichtag=1001.0, *args, **kwargs):
+    def __init__(self, parent, drop_inst, section_key, value=None, language="de", stichtag=1001.0, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.drop_inst     = drop_inst
         self.section_key   = section_key
         self.language      = language
         self.stichtag      = float(stichtag)
+        self.value         = value
 
-        # Layout
+        self.setObjectName("PdvmDropdownPicker")
+
+        # Debug-Ausgabe: Zeige alle Gruppen und deren Optionen explizit
+        debug_groups = []
+        for g in drop_inst.get_fields():
+            debug_groups.append({'gruppe': getattr(g, 'gruppe', None), 'options': getattr(g, 'options', None)})
+        logger.debug(f"🔹 PdvmDropdownPicker: Gruppen/Optionen={debug_groups}, section_key={section_key}, language={language}, stichtag={stichtag}, value={value}")
+
+        # Debug: Zeige explizit die Optionen für die aktuelle section_key
+        options_for_section = None
+        for g in drop_inst.get_fields():
+            if getattr(g, 'gruppe', None) == section_key:
+                options_for_section = getattr(g, 'options', None)
+                break
+        logger.debug(f"🔹 PdvmDropdownPicker: Optionen für section_key='{section_key}': {options_for_section}")
+
         self.combo = QComboBox()
         self.combo.currentIndexChanged.connect(self._on_index_changed)
         lo = QHBoxLayout(self); lo.setContentsMargins(0,0,0,0)
         lo.addWidget(self.combo, stretch=1)
 
-        # Maps
         self.key2disp = {}
         self.disp2key = {}
 
-        # initial
         self.refresh_options(self.stichtag)
+        if self.value is not None:
+            self.set_selected_key(str(self.value))
 
     def _load_options(self):
-        # Holt alle Optionen aus dem Manager-Cache
-        fm = next((f for f in self.drop_inst.get_fields()
-                   if f.dropdown_section == self.section_key), None)
-        if not fm:
+        # Holt die Werte-Liste direkt aus der Instanzdatenstruktur
+        try:
+            gruppe_dict = self.drop_inst.data.get('ROOT', {}).get(self.section_key, {})
+            opts = gruppe_dict.get('werte', [])
+            logger.debug(f"🔹 PdvmDropdownPicker: _load_options für section_key='{self.section_key}': {opts}")
+            return opts
+        except Exception as e:
+            logger.error(f"Fehler beim Laden der Dropdown-Optionen für {self.section_key}: {e}")
             return []
-        opts = fm.dropdown_options
-        if fm.historical:
-            opts = [w for w in opts if float(w.get("abdatum","1001.0")) <= self.stichtag]
-            opts.sort(key=lambda w: float(w.get("abdatum","1001.0")))
-        return opts
 
     def refresh_options(self, stichtag: float):
         self.stichtag = float(stichtag)
         opts = self._load_options()
         self.combo.clear(); self.key2disp.clear(); self.disp2key.clear()
         for w in opts:
-            key  = w.get("key")
-            disp = w.get(self.language) or key
-            self.key2disp[key]  = disp
+            key = w.get("key") if isinstance(w, dict) else w
+            disp = w.get(self.language) if isinstance(w, dict) and self.language in w else (w.get("de") if isinstance(w, dict) else str(w))
+            disp = disp or key
+            self.key2disp[key] = disp
             self.disp2key[disp] = key
             self.combo.addItem(disp)
         if self.combo.count():
             self.combo.setCurrentIndex(0)
 
     def set_selected_key(self, key: str):
+        if key is None:
+            key = ''
+        key = str(key)
         disp = self.key2disp.get(key)
         if disp:
             idx = self.combo.findText(disp, Qt.MatchExactly)
             if idx>=0:
                 self.combo.setCurrentIndex(idx)
+        else:
+            if self.combo.count():
+                self.combo.setCurrentIndex(0)
 
     def get_selected_key(self) -> str:
         return self.disp2key.get(self.combo.currentText(), "")

@@ -11,7 +11,7 @@ from pdvm_input_manager import PdvmInputManager, FieldMeta
 from pd_datetime import Pdvm_DateTime
 from pdvm_date_time_picker import PdvmDateTimePicker
 from pdvm_dropdown_picker import PdvmDropdownPicker
-from pdvm_field_widget import PdvmFieldWidget
+from pdvm_input_control_widget import PdvmInputControlWidget
 
 import logging
 import uuid
@@ -21,23 +21,82 @@ TEMPLATE_GUID = "11111111-1111-1111-1111-111111111111"  # Dummy-GUID für Templa
 
 
 class PdvmInputWidget(QWidget):
+    backToSelection = pyqtSignal()
+    def on_field_edited(self, meta, new_val, new_ab):
+        """
+        Wird nach dem Editieren eines Feldes vom FieldWidget aufgerufen.
+        Führt einen vollständigen Refresh durch, damit alle Felder (inkl. GUID-/Stichtags-Änderungen) korrekt angezeigt werden.
+        """
+        logger.info(f"[PdvmInputWidget] on_field_edited: meta={getattr(meta, 'key', meta)}, new_val={new_val}, new_ab={new_ab}")
+        self._on_refresh()
     selectionChanged = pyqtSignal()
 
     def __init__(self, call_data: dict, parent=None):
         super().__init__(parent)
-        # Manager explizit erzeugen da widget für sich autonom ist.
-        self.manager = PdvmInputManager(call_data)
-        logger.debug(f"🔹 PdvmInputWidget - PdvmInputManager gestartet mit call_data: {call_data}")
+        self._init_with_call_data(call_data)
+
+    def _init_with_call_data(self, call_data: dict):
+        from pdvm_instance_manager import PdvmInstanceManager
+        from pdvm_central_datenbank import PdvmCentralDatenbank
+        from pdvm_input_manager import PdvmInputManager
+        
+        # call_data als Attribut speichern für spätere Verwendung
+        self.call_data = call_data
+        
         self.st_inst = call_data['stichtag_inst']
-        # Keine feste frame_width mehr, alles dynamisch
-        self.width_ts_picker_only = 120  # Fallback-Wert, kann angepasst werden
-        self.width_ts_picker_full = 200  # Fallback-Wert, kann angepasst werden
+        frame_guid = call_data.get("frame_guid")
+        frm_db = PdvmCentralDatenbank(db_name="PdvmManager.db", table_name="framedaten", guid=frame_guid)
+        raw_frame = frm_db.lesen() or {}
+        metadaten = raw_frame.get("Metadaten", {})
+        root_table = raw_frame.get("ROOT", {}).get("root_table")
+        root_guid = call_data.get("root_guid")
+        instance_manager = PdvmInstanceManager(root_table, root_guid, self.st_inst.PdvmDateTime, metadaten)
+        self.manager = PdvmInputManager(call_data, instance_manager=instance_manager)
+        self.manager.st_inst = self.st_inst
+        logger.debug(f"🔹 PdvmInputWidget - PdvmInputManager gestartet mit call_data: {call_data}")
+        self.width_ts_picker_only = 120
+        self.width_ts_picker_full = 200
+        self.build_fields_and_values()
+        if hasattr(self, 'ts_display'):
+            self.ts_display.setText(self.st_inst.FormTimeStamp)
 
-        self._build_ui()
-        self._load_values()
+    def reload_with_root_guid(self, root_guid):
+        # Holt aktuelle call_data, setzt neue root_guid und lädt neu
+        call_data = dict(self.manager.call_data)
+        call_data['root_guid'] = root_guid
+        self._init_with_call_data(call_data)
 
-    def _build_ui(self):
-        # Komplett alten Layout-Baum entfernen (auch Hauptlayout!)
+    def cleanup(self):
+        """Deregistriere alle ControlObjects beim Manager"""
+        if hasattr(self, 'controls') and hasattr(self, 'manager'):
+            for control_data in self.controls.values():
+                if 'control' in control_data:
+                    self.manager.unregister_control_object(control_data['control'])
+
+    def __del__(self):
+        """Cleanup beim Zerstören des Widgets"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup
+
+    def build_fields_and_values(self):
+        # Vor jedem Build: Stichtag im Manager synchronisieren
+        self.manager.st_inst = self.st_inst
+        if hasattr(self.manager, 'refresh_instances_for_stichtag'):
+            self.manager.refresh_instances_for_stichtag()
+
+        # --- Logging: Metadaten und Feldliste für Debug ---
+        try:
+            # Metadaten aus Manager extrahieren, falls möglich
+            metadaten = getattr(self.manager, 'fields', {})
+            logger.debug(f"[DEBUG] Aktuelle Metadaten-Keys: {list(metadaten.keys())}")
+            for k, meta in metadaten.items():
+                logger.debug(f"[DEBUG] FieldMeta: key={getattr(meta, 'key', None)}, type={getattr(meta, 'type', None)}, data_instance={getattr(meta, 'data_instance', None)}, abdatum={getattr(meta, 'abdatum', None)}")
+        except Exception as e:
+            logger.warning(f"[DEBUG] Fehler beim Logging der Metadaten: {e}")
+
+        # Remove old layout tree (including main layout)
         old_layout = self.layout() if hasattr(self, 'layout') else None
         if old_layout is not None:
             QWidget().setLayout(old_layout)  # Detach from self
@@ -46,12 +105,21 @@ class PdvmInputWidget(QWidget):
         main.setContentsMargins(20,20,20,20)
         main.setSpacing(10)
 
-        # Header (direkt, da immer vorhanden)
+        # Button zum Wechsel in die Auswahl (View)
+        btn_back = QPushButton("Zur Auswahl")
+#        btn_back.setMinimumWidth(0)
+#        btn_back.setMaximumWidth(600)  # Begrenze auf typische Framebreite
+#        btn_back.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+#        btn_back.setStyleSheet("font-size: 15px; font-weight: bold; padding: 8px 0;")
+        btn_back.clicked.connect(self.backToSelection.emit)
+        main.addWidget(btn_back)
+
+        # Header (always present)
         header = QLabel(self.manager.header_text)
         header.setStyleSheet("font-size:18px; font-weight:bold;")
         main.addWidget(header, alignment=Qt.AlignLeft)
 
-        # Stichtag + Buttons
+        # Stichtag + Input-Buttons (immer im InputFrame!)
         st_layout = QHBoxLayout()
         st_layout.addWidget(QLabel("Stichtag:"), alignment=Qt.AlignLeft)
         display_st = self.manager.display_st
@@ -78,7 +146,7 @@ class PdvmInputWidget(QWidget):
         st_layout.addItem(QSpacerItem(0,0, QSizePolicy.Expanding, QSizePolicy.Minimum))
         main.addLayout(st_layout)
 
-        # Verwendeter Stichtag
+        # Used Stichtag
         ts_layout = QHBoxLayout()
         lbl_ts = QLabel("Verwendeter Stichtag:")
         lbl_ts.setFixedWidth(self.manager.width_label or 150)
@@ -90,7 +158,7 @@ class PdvmInputWidget(QWidget):
         ts_layout.addStretch()
         main.addLayout(ts_layout)
 
-        # Scroll Area für Felder
+        # Scroll Area for fields
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -103,23 +171,34 @@ class PdvmInputWidget(QWidget):
         self.scroll.setWidget(self.container)
         main.addWidget(self.scroll, stretch=1)
 
-        # Layout leeren, damit keine alten Widgets übrig bleiben
+        # Clear layout so no old widgets remain
         while self.form_layout.count():
             child = self.form_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # Debug: Welche Felder werden angezeigt?
+        # Debug: Which fields are shown?
         print(f"[DEBUG] Felder im InputFrame: {[meta.key for meta in self.manager.get_fields()]}", flush=True)
 
-        # Eingabefelder
+        # --- Always use fresh FieldMeta from manager, never mutate meta ---
         for meta in self.manager.get_fields():
-            control = self.manager.get_control_object(meta)
-            field_widget = PdvmFieldWidget(control, parent=self)
+            # Log the meta flags for debug
+            print(f"[DEBUG] build_fields_and_values: key={meta.key} abdatum={getattr(meta, 'abdatum', None)} historical={getattr(meta, 'historical', None)}", flush=True)
+            # Always fetch value and abdatum from the correct instance
+            val, ab = self.manager.get_value(meta.key)
+            # Always create a fresh ControlObject from the current meta
+            control = self.manager.get_control_object(meta, value=val, abdatum=ab)
+            # Registriere ControlObject beim Manager für ViewTable-Refresh
+            self.manager.register_control_object(control)
+            field_widget = PdvmInputControlWidget(control, parent=self)
             self.form_layout.addWidget(field_widget)
-            self.controls[meta.key] = {"control": control, "main_ctl": field_widget, "field_widget": field_widget, "meta": meta}
+            self.controls[meta.key] = {"control": control, "main_ctl": field_widget, "field_widget": field_widget, "meta": meta, "data_instance": getattr(meta, 'data_instance', None)}
 
         main.addStretch()
+        self.setLayout(main)
+        # Nach Build: Verwendeter Stichtag immer aus Instanz anzeigen
+        if hasattr(self, 'ts_display'):
+            self.ts_display.setText(self.st_inst.FormTimeStamp)
         self.setLayout(main)
 
     def _load_values(self):
@@ -133,29 +212,25 @@ class PdvmInputWidget(QWidget):
         for key, entry in self.controls.items():
             meta = entry["meta"]
             ctl = entry["main_ctl"]
-            val, ab = self.manager.get_value(key)
-            logger.debug(f"[DEBUG] XXXXXXXXX_load_values: key={key}, val={val}, ab={ab}, ctl={ctl}")
-            # Für datetime: Wert aus Datenstruktur in value_inst und Widget schreiben
+            # Hole das ControlObject (mit Wert, Abdatum, Instanz etc.) zentral aus dem Manager
+            control = self.manager.get_control_object(meta)
+            # Setze das ControlObject im Widget neu (UI-Logik)
+            entry["control"] = control
+            # Aktualisiere das Feld-Widget mit dem neuen ControlObject
+            if hasattr(ctl, "set_control_object"):
+                ctl.set_control_object(control)
+            # UI-Update je nach Typ
             if meta.type == "datetime":
-                if "value_inst" in entry:
-                    entry["value_inst"].PdvmDateTime = float(val or 1001.0)
-                if hasattr(ctl, "pdvm_datetime"):
-                    ctl.pdvm_datetime.PdvmDateTime = float(val or 1001.0)
-                    ctl.initial.PdvmDateTime = float(val or 1001.0)  # Synchronisiere initial mit Instanz
-                    print(f"[DEBUG] _load_values: key={key}, val={val}, ctl.pdvm_datetime={ctl.pdvm_datetime.PdvmDateTime}, ctl.initial={ctl.initial.PdvmDateTime}")
+                if hasattr(ctl, "update_display"):
                     ctl.update_display()
             elif isinstance(ctl, PdvmDropdownPicker):
                 ctl.refresh_options(self.st_inst.PdvmDateTime)
-                ctl.set_selected_key(val)
+                ctl.set_selected_key(control.value)
             elif meta.type == "dropdown" and isinstance(ctl, QLineEdit):
-                # Zeige immer die Übersetzung, nicht den Key
-                display_val = entry["field_widget"]._get_dropdown_display(val)
+                display_val = entry["field_widget"]._get_dropdown_display(control.value)
                 ctl.setText(display_val)
             elif isinstance(ctl, QLineEdit):
-                ctl.setText(str(val))
-            # Für abdatum: Wert direkt in die Instanz schreiben
-            if hasattr(entry["field_widget"], "abdatum_inst") and entry["field_widget"].abdatum_inst is not None:
-                entry["field_widget"].abdatum_inst.PdvmDateTime = ab
+                ctl.setText(str(control.value))
             try:
                 if "field_widget" in entry and hasattr(entry["field_widget"], "_update_abdatum_display"):
                     entry["field_widget"]._update_abdatum_display()
@@ -165,13 +240,31 @@ class PdvmInputWidget(QWidget):
     def _on_refresh(self):
         # Save schreibt direkt in die Instanz!
         self.st_picker.save()  # Wert wird direkt in self.st_inst geschrieben
-        # Nach Save: Anzeige aktualisieren
-        self.ts_display.setText(self.st_inst.FormTimeStamp)
-        # Stichtagsgenaue Instanzen neu laden
-        if hasattr(self.manager, 'refresh_instances_for_stichtag'):
-            self.manager.refresh_instances_for_stichtag()
-        self._build_ui()
-        self._load_values()
+        # Stichtag im Manager synchronisieren
+        self.manager.st_inst = self.st_inst
+        
+        # **WICHTIG**: Neuen Stichtag in der Systemsteuerung speichern
+        self._save_stichtag_to_systemsteuerung()
+        
+        # Nach Save: Anzeige immer aus Instanz aktualisieren
+        if hasattr(self, 'ts_display'):
+            self.ts_display.setText(self.st_inst.FormTimeStamp)
+            
+        # **NEUE EINHEITLICHE REFRESH-METHODE** (speichert Stichtag UND refresht alles)
+        if hasattr(self.manager, 'unified_refresh'):
+            self.manager.unified_refresh(skip_stichtag_save=False)  # False = wie Button-Refresh
+        else:
+            # Fallback zur alten Methode falls unified_refresh noch nicht existiert
+            # Stichtagsgenaue Instanzen neu laden
+            if hasattr(self.manager, 'refresh_instances_for_stichtag'):
+                self.manager.refresh_instances_for_stichtag()
+            
+            # **WICHTIG**: Alle ControlObjects refreshen (inkl. Abdatum-Anzeige)
+            if hasattr(self.manager, 'refresh_all_control_objects'):
+                self.manager.refresh_all_control_objects()
+            
+        # Felder und Werte komplett wie bei Initialisierung neu aufbauen
+        self.build_fields_and_values()
 
     def _on_new_guid(self, key):
         # Neue GUID generieren, Daten kopieren, GUID ersetzen, Instanzen und UI aktualisieren
@@ -188,14 +281,6 @@ class PdvmInputWidget(QWidget):
         self._load_values()
 
     def _on_save(self):
-        # Optional: Original-Instanz-Vergleich für Konfliktprüfung
-        original_instances = getattr(self.manager, 'original_instances', None)
-        if original_instances:
-            for key, inst in self.manager.instance_dict.items():
-                orig = original_instances.get(key)
-                if orig and inst.data != orig.data:
-                    QMessageBox.warning(self, "Konflikt", f"Instanz {key} wurde zwischenzeitlich geändert!")
-                    return
         # Validierung: Keine Speicherung unter Template-GUID
         for key, entry in self.controls.items():
             meta = entry["meta"]
@@ -203,7 +288,20 @@ class PdvmInputWidget(QWidget):
             if meta.type == "viewtable" and str(val) == TEMPLATE_GUID:
                 QMessageBox.warning(self, "Fehler", f"Feld '{meta.label}' ist noch ein Template (000...-GUID). Bitte zuerst 'Neu' klicken.")
                 return
-        self.manager.save_all()
+        # Speichere alle Instanzen, die in den Controls referenziert sind
+        already_saved = set()
+        for entry in self.controls.values():
+            data_instance = entry.get("data_instance")
+            if data_instance and id(data_instance) not in already_saved:
+                data_instance.save_values()
+                already_saved.add(id(data_instance))
+        
+        # ViewTable-Refresh nach Save durchführen
+        if hasattr(self.manager, 'unified_refresh'):
+            self.manager.unified_refresh(skip_stichtag_save=True, rebuild_ui_callback=self.build_fields_and_values)
+        elif hasattr(self.manager, 'force_viewtable_refresh'):
+            self.manager.force_viewtable_refresh()
+        
         QMessageBox.information(self, "Erfolg", "Daten erfolgreich gespeichert.")
 
     def show_history(self, key):
@@ -246,17 +344,7 @@ class PdvmInputWidget(QWidget):
             # Kein ab_inst mehr, ab_to_use ist direkt das Datum
             self.manager.set_value(key, new_val, ab_to_use)
             # Robustes Instanz-Update für viewtable (korrekte Tabelle/Gruppe aus Verweis holen)
-            if meta.type == "viewtable":
-                # Ziel-Tabelle und -Gruppe aus dem Verweis holen (z.B. meta.viewtable['table'], meta.viewtable['group'])
-                viewtable = getattr(meta, 'viewtable', None)
-                if viewtable and isinstance(viewtable, dict):
-                    table = viewtable.get('table')
-                    group = viewtable.get('group')
-                else:
-                    # Fallback: wie bisher aus Key ableiten
-                    table, group, _ = self.manager._normalize_key_from_view(key)
-                print(f"[DEBUG] reload_instance_guid: table={table}, group={group}, new_guid={new_val}")
-                self.manager.reload_instance_guid(table, group, new_val)
+            # Keine Spezialbehandlung für viewtable, alles wie Textfeld
             # Debug: Nach set_value
             if meta.type == "datetime" and "value_inst" in self.controls[key]:
                 print(f"[DEBUG] Nach set_value: value_inst id={id(self.controls[key]['value_inst'])} Wert={self.controls[key]['value_inst'].PdvmDateTime}")
@@ -293,28 +381,209 @@ class PdvmInputWidget(QWidget):
         self._setup_helptext()
         # ...bestehende Logik zur Aktualisierung der UI...
 
+    def _save_stichtag_to_systemsteuerung(self):
+        """
+        Speichert den aktuellen Stichtag (self.st_inst.PdvmDateTime) in der Systemsteuerung.
+        Dies stellt sicher, dass der Stichtag beim nächsten Programmstart wieder geladen wird.
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            # user_guid aus call_data holen
+            user_guid = self.call_data.get('user_guid')
+            frame_guid = self.call_data.get('frame_guid')
+            
+            if not user_guid:
+                logger.warning("[_save_stichtag_to_systemsteuerung] Keine user_guid in call_data gefunden!")
+                return
+                
+            # Systemsteuerung-Datenbank öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=user_guid
+            )
+            
+            # Aktuelle Daten laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(user_guid, {})
+            frame_data = raw_data.get(frame_guid, {}) if frame_guid else {}
+            
+            # Neuen Stichtag setzen
+            new_stichtag = self.st_inst.PdvmDateTime
+            user_data['stichtag'] = new_stichtag
+            
+            logger.info(f"🔹 Speichere neuen Stichtag {new_stichtag} ({self.st_inst.FormTimeStamp}) in Systemsteuerung für user_guid={user_guid}")
+            
+            # Daten zurückspeichern
+            sys_db.speichern(user_guid, {
+                user_guid: user_data,
+                frame_guid: frame_data
+            })
+            
+            logger.debug(f"🔹 Stichtag erfolgreich in Systemsteuerung gespeichert")
+            
+        except Exception as e:
+            logger.error(f"[_save_stichtag_to_systemsteuerung] Fehler beim Speichern des Stichtags: {e}")
+
+    def complete_rebuild_after_edit(self):
+        """
+        Vollständige Neuinitialisierung nach GUID-Änderungen über Edit.
+        Macht dasselbe wie bei einem Neuaufruf des Dialogs.
+        """
+        logger.debug("[PdvmInputWidget] complete_rebuild_after_edit: Starte vollständige Neuinitialisierung")
+        
+        # Debug: Zeige aktuelle ViewTable-GUIDs vor dem Refresh
+        self._debug_viewtable_guids("VOR Refresh")
+        
+        # Alle Instanzen neu laden
+        if hasattr(self.manager, 'refresh_instances'):
+            logger.debug("[PdvmInputWidget] complete_rebuild_after_edit: Rufe refresh_instances() auf")
+            self.manager.refresh_instances()
+        else:
+            logger.warning("[PdvmInputWidget] complete_rebuild_after_edit: refresh_instances() nicht verfügbar!")
+        
+        # Debug: Zeige ViewTable-GUIDs nach Instanz-Refresh
+        self._debug_viewtable_guids("NACH refresh_instances")
+        
+        # UI komplett neu aufbauen
+        logger.debug("[PdvmInputWidget] complete_rebuild_after_edit: Rufe build_fields_and_values() auf")
+        self.build_fields_and_values()
+        
+        # Debug: Zeige ViewTable-GUIDs nach UI-Neuaufbau
+        self._debug_viewtable_guids("NACH build_fields_and_values")
+        
+        logger.debug("[PdvmInputWidget] complete_rebuild_after_edit: Vollständige Neuinitialisierung abgeschlossen")
+
+    def _debug_viewtable_guids(self, phase):
+        """Debug-Methode um ViewTable-GUIDs zu protokollieren"""
+        try:
+            logger.debug(f"[DEBUG ViewTable GUIDs {phase}]")
+            for key, entry in getattr(self, 'controls', {}).items():
+                if 'meta' in entry:
+                    meta = entry['meta']
+                    current_value, _ = self.manager.get_value(key)
+                    data_instance = entry.get('data_instance')
+                    instance_guid = getattr(data_instance, 'guid', 'keine Instanz') if data_instance else 'keine Instanz'
+                    
+                    # Debug für ALLE Felder, nicht nur ViewTable-Typ
+                    if hasattr(meta, 'type'):
+                        logger.debug(f"[DEBUG] {key} (Typ: {meta.type}): Wert={current_value}, Instanz-GUID={instance_guid}")
+                    else:
+                        logger.debug(f"[DEBUG] {key} (Kein Typ): Wert={current_value}, Instanz-GUID={instance_guid}")
+        except Exception as e:
+            logger.debug(f"[DEBUG] Fehler beim ViewTable-GUID-Debug: {e}")
+
 class EditFieldDialog(QDialog):
-    def __init__(self, parent, meta: FieldMeta,
-                 current_value, current_ab,
-                 value_inst=None, ab_value=None):
+    def __init__(self, parent, control):
         super().__init__(parent)
-        self.meta       = meta
-        self.current_ab = current_ab
-        self.value_inst = value_inst  # Instanz aus Mapping!
-        self.ab_value   = ab_value    # float-Wert, kein Objekt mehr
-        self.manager    = parent.manager
-        self.setWindowTitle(f"{meta.label} bearbeiten")
+        self.control = control
+        self.meta = control.meta
+        self.current_value = control.display_value
+        self.current_ab = control.abdatum_inst.PdvmDateTime if control.abdatum_inst else 1001.0
+        self.value_inst = control.value_inst
+        self.manager = parent.manager
+        self.setWindowTitle(f"{self.meta.label} bearbeiten")
         self.setModal(True)
         form = QFormLayout(self)
 
-        # — Wert-Widget —
-        self.value_ctl = PdvmFieldWidget(self, meta, current_value, readOnly=False, manager=self.manager)
-        form.addRow(meta.label + ":", self.value_ctl)
+        # Für ViewTable-Felder: Auswahl-Button über der Eingabezeile
+        field_type = getattr(self.meta, 'type', 'text')
+        if field_type == 'viewtable':
+            # Auswahl-Button über die ganze Breite
+            auswahl_btn = QPushButton("Auswahl")
+            auswahl_btn.clicked.connect(self._on_auswahl_clicked)
+            form.addRow(auswahl_btn)
 
-        # — Ab-Datum-Widget nur wenn abdatum:true —
-        if meta.has_abdatum:
-            ab_val = self.ab_value if self.ab_value is not None else self.current_ab
-            self.ab_picker = PdvmDateTimePicker(self, ab_val)
+        # — Hauptfeld je nach Typ erstellen —
+        field_type = getattr(self.meta, 'type', 'text')
+        
+        if field_type == 'datetime':
+            # Für DateTime-Felder: PdvmDateTimePicker verwenden
+            display_val = getattr(self.meta, 'display_val', 'all')  # Aus Framedaten
+            self.value_edit = PdvmDateTimePicker(
+                self, 
+                control.value_inst,  # Die DateTime-Instanz mit dem aktuellen Wert
+                display=display_val
+            )
+            self.value_edit.setMinimumWidth(300)
+            print(f"[DEBUG] DateTime-Feld '{self.meta.key}': display_val={display_val}, value_inst={control.value_inst}", flush=True)
+        elif field_type == 'dropdown':
+            # Für Dropdown-Felder: QComboBox mit Optionen befüllen
+            from PyQt5.QtWidgets import QComboBox
+            self.value_edit = QComboBox()
+            self.value_edit.setMinimumWidth(300)
+            
+            # Dropdown-Optionen vom Manager holen
+            options = self.manager.get_dropdown_options(self.meta)
+            language = getattr(self.manager, 'language', 'de')
+            
+            print(f"[DEBUG] Dropdown-Feld '{self.meta.key}': Verfügbare Optionen:", flush=True)
+            for i, option in enumerate(options):
+                key = option.get('key', '')
+                display_text = option.get(language, key) or key
+                print(f"[DEBUG]   Option {i}: key='{key}', display='{display_text}'", flush=True)
+                self.value_edit.addItem(display_text, key)  # Display-Text sichtbar, Key als Data
+            
+            # Debug: Alle verfügbaren Werte loggen
+            print(f"[DEBUG] Dropdown '{self.meta.key}': control.value_inst='{control.value_inst}' (type={type(control.value_inst)})", flush=True)
+            print(f"[DEBUG] Dropdown '{self.meta.key}': self.current_value='{self.current_value}' (type={type(self.current_value)})", flush=True)
+            print(f"[DEBUG] Dropdown '{self.meta.key}': control.display_value='{control.display_value}' (type={type(control.display_value)})", flush=True)
+            
+            # Verschiedene Ansätze zum Finden des aktuellen Wertes
+            current_key = None
+            current_index = -1
+            
+            # Ansatz 1: control.value_inst verwenden (sollte der Raw-Key sein)
+            if control.value_inst:
+                current_key = str(control.value_inst)
+                current_index = self.value_edit.findData(current_key)
+                print(f"[DEBUG] Dropdown '{self.meta.key}': Ansatz 1 - Key='{current_key}', Index={current_index}", flush=True)
+            
+            # Ansatz 2: Falls nicht gefunden, versuche current_value als Key
+            if current_index < 0 and self.current_value:
+                current_key = str(self.current_value)
+                current_index = self.value_edit.findData(current_key)
+                print(f"[DEBUG] Dropdown '{self.meta.key}': Ansatz 2 - Key='{current_key}', Index={current_index}", flush=True)
+            
+            # Ansatz 3: Falls immer noch nicht gefunden, suche über Display-Text
+            if current_index < 0 and self.current_value:
+                current_index = self.value_edit.findText(str(self.current_value))
+                print(f"[DEBUG] Dropdown '{self.meta.key}': Ansatz 3 - Display-Text='{self.current_value}', Index={current_index}", flush=True)
+            
+            # Auswahl setzen wenn gefunden
+            if current_index >= 0:
+                self.value_edit.setCurrentIndex(current_index)
+                print(f"[DEBUG] Dropdown '{self.meta.key}': Index {current_index} ausgewählt", flush=True)
+            else:
+                print(f"[DEBUG] Dropdown '{self.meta.key}': Kein passender Wert gefunden!", flush=True)
+            
+            print(f"[DEBUG] Dropdown-Feld '{self.meta.key}': {len(options)} Optionen geladen, finaler Index={current_index}", flush=True)
+        else:
+            # Für alle anderen Felder: QLineEdit
+            self.value_edit = QLineEdit()
+            self.value_edit.setText(str(self.current_value) if self.current_value else "")
+            self.value_edit.setMinimumWidth(300)
+            if field_type == 'viewtable':
+                self.value_edit.setPlaceholderText("GUID eingeben oder über 'Auswahl' wählen")
+                
+        form.addRow(self.meta.label + ":", self.value_edit)
+
+        # — Ab-Datum-Widget - Korrigierte Logik —
+        # Prüfen ob das Feld historical ist UND abdatum_inst existiert
+        has_abdatum_inst = self.control.abdatum_inst is not None
+        is_historical = getattr(self.meta, 'historical', False)
+        has_abdatum_meta = getattr(self.meta, 'abdatum', False)
+        
+        # AbDatum anzeigen NUR wenn abdatum=true in Framedaten UND Instanz vorhanden
+        show_abdatum = has_abdatum_meta and has_abdatum_inst
+        
+        # Debug-Ausgabe für Abdatum-Logik
+        print(f"[DEBUG] Field '{self.meta.key}': has_abdatum_inst={has_abdatum_inst}, is_historical={is_historical}, has_abdatum_meta={has_abdatum_meta}, show_abdatum={show_abdatum}", flush=True)
+        
+        if show_abdatum:
+            # Die AbDatum-Instanz direkt an den DateTimePicker übergeben
+            self.ab_picker = PdvmDateTimePicker(self, self.control.abdatum_inst)
             self.ab_picker.update_display()
             form.addRow("Ab-Datum:", self.ab_picker)
         else:
@@ -325,19 +594,81 @@ class EditFieldDialog(QDialog):
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
         form.addRow(btn_box)
+    
+    def _on_auswahl_clicked(self):
+        """Öffnet den Auswahl-Dialog für ViewTable-Felder."""
+        try:
+            from pdvm_search_list_widget_dialog import PdvmSearchListWidgetDialog
+            
+            # ViewTable-GUID aus den Metadaten holen
+            viewtable_guid = getattr(self.meta, 'viewtable_guid', None)
+            if not viewtable_guid:
+                logger.warning(f"[EditFieldDialog] Keine ViewTable-GUID für Feld {self.meta.label}")
+                return
+            
+            logger.debug(f"[EditFieldDialog] Öffne Auswahl-Dialog für ViewTable-GUID: {viewtable_guid}")
+            
+            # call_data für den Dialog vorbereiten
+            manager = getattr(self.control, 'manager', None)
+            call_data = getattr(manager, 'call_data', {}) if manager else {}
+            
+            # Such-Dialog öffnen - korrekte Parameter verwenden
+            dlg = PdvmSearchListWidgetDialog(
+                parent=self,
+                view_guid=viewtable_guid,  # Korrekt: view_guid statt manager
+                user_guid=call_data.get('user_guid'),
+                frame_guid=call_data.get('frame_guid'),
+                call_data=call_data
+            )
+            
+            if dlg.exec_() == QDialog.Accepted:
+                selected_guid = dlg.get_selected_guid()
+                if selected_guid:
+                    self.value_edit.setText(selected_guid)
+                    logger.debug(f"[EditFieldDialog] Ausgewählte GUID: {selected_guid}")
+                    
+        except Exception as e:
+            logger.exception(f"[EditFieldDialog] Fehler beim Öffnen des Auswahl-Dialogs: {e}")
 
     def get_results(self):
-        # Wert extrahieren
-        new_val = self.value_ctl.get_value()
-        if self.value_inst:
-            self.value_inst.Value = new_val
-        # Ab-Datum
-        if self.meta.has_abdatum and self.ab_picker:
-            self.ab_picker.save()
-            new_ab = self.ab_picker.get_pdvm_datetime().PdvmDateTime
+        # Wert extrahieren je nach Feldtyp
+        field_type = getattr(self.meta, 'type', 'text')
+        
+        if field_type == 'datetime':
+            # Für DateTime-Felder: PdvmDateTimePicker.save() aufrufen
+            if hasattr(self.value_edit, 'save'):
+                self.value_edit.save()  # Schreibt in die value_inst
+                new_val = self.control.value_inst.PdvmDateTime  # Bereits als Float
+                print(f"[DEBUG] DateTime get_results: new_val={new_val}", flush=True)
+            else:
+                new_val = self.current_value
+        elif field_type == 'dropdown':
+            # Für Dropdown-Felder: Key aus ComboBox extrahieren
+            from PyQt5.QtWidgets import QComboBox
+            if isinstance(self.value_edit, QComboBox):
+                current_index = self.value_edit.currentIndex()
+                new_val = self.value_edit.itemData(current_index)  # Key zurückgeben
+                display_text = self.value_edit.currentText()
+                print(f"[DEBUG] Dropdown get_results: key='{new_val}', display='{display_text}', index={current_index}", flush=True)
+            else:
+                new_val = self.value_edit.text()
         else:
-            new_ab = self.current_ab or 1001.0
-        logger.debug(f"[EditFieldDialog.get_results] Rückgabe: new_val={new_val} (type={type(new_val)}), new_ab={new_ab}")
+            # Für andere Felder: Text aus QLineEdit
+            new_val = self.value_edit.text()
+            if self.value_inst:
+                self.value_inst.Value = new_val
+        
+        # Ab-Datum verarbeiten wenn AbDatum-Picker vorhanden
+        if hasattr(self, 'ab_picker') and self.ab_picker and self.control.abdatum_inst:
+            # PdvmDateTimePicker.save() schreibt direkt in die übergebene Instanz
+            self.ab_picker.save()
+            # Verwende die PdvmDateTime Eigenschaft (bereits als Float)
+            new_ab = self.control.abdatum_inst.PdvmDateTime
+        else:
+            # Fallback: current_ab ist bereits ein Float oder 1001.0
+            new_ab = self.current_ab
+        
+        logger.debug(f"[EditFieldDialog.get_results] Rückgabe: new_val={new_val} (type={type(new_val)}), new_ab={new_ab} (type={type(new_ab)})")
         return new_val, new_ab
 
 class HistoryDialog(QDialog):
@@ -430,73 +761,3 @@ class HistoryDialog(QDialog):
         # Dialog schließen und UI neu laden
         self.accept()
         self.parent_widget._load_values()
-
-class EditViewTableDialog(QDialog):
-    def __init__(self, parent, meta: FieldMeta, current_value, current_ab, value_inst=None, ab_inst=None):
-        super().__init__(parent)
-        self.meta = meta
-        self.current_ab = current_ab
-        self.value_inst = value_inst
-        self.ab_inst = ab_inst
-        self.manager = parent.manager
-        self.setWindowTitle(f"{meta.label} bearbeiten")
-        self.setModal(True)
-        form = QFormLayout(self)
-
-        # — Viewtable-Auswahl —
-        from pdvm_search_list_widget_dialog import PdvmSearchListWidgetDialog
-        self.guid = current_value
-        self.viewtable_guid = meta.viewtable_guid
-        self.select_dialog = PdvmSearchListWidgetDialog(self, self.viewtable_guid)
-        # Setze die aktuelle GUID als vorausgewählt, falls vorhanden
-        if self.guid:
-            try:
-                self.select_dialog.widget.set_selected_guid(self.guid)
-            except AttributeError:
-                pass  # Falls das Widget diese Methode nicht hat, ignorieren
-        form.addRow("Auswahl:", self.select_dialog.widget)
-
-        # — Ab-Datum —
-        if meta.historical and meta.has_abdatum:
-            if self.ab_inst:
-                abi = self.ab_inst
-                abi.PdvmDateTime = float(current_ab or self.manager.stichtag)
-                default_dt = abi.PdvmDateTime
-            else:
-                abi = Pdvm_DateTime("DEU")
-                default_dt = None
-            self.ab_picker = PdvmDateTimePicker(
-                self, abi,
-                display=meta.display_ab,
-                display_time_short=meta.display_ti_ab_short,
-                default_date=default_dt
-            )
-            self.ab_picker.update_display()
-            form.addRow("Ab-Datum:", self.ab_picker)
-
-        # — Buttons —
-        self.btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
-                                     Qt.Horizontal, self)
-        ok = self.btns.button(QDialogButtonBox.Ok)
-        ok.setText("Speichern")
-        self.btns.accepted.connect(self.accept)
-        self.btns.rejected.connect(self.reject)
-        form.addRow(self.btns)
-
-    def get_results(self):
-        # GUID
-        selected_guid = self.select_dialog.get_selected_guid()
-        if selected_guid is not None:
-            new_val = selected_guid
-        else:
-            # Wenn keine neue Auswahl, übernehme die aktuelle GUID
-            new_val = self.guid
-        # Ab-Datum
-        if self.meta.historical and self.meta.has_abdatum:
-            self.ab_picker.save()
-            new_ab = self.ab_picker.get_pdvm_datetime().PdvmDateTime
-            if self.ab_inst:
-                self.ab_inst.PdvmDateTime = new_ab
-        else:
-            new_ab = self.current_ab or 1001.0
-        return new_val, new_ab
