@@ -21,6 +21,12 @@ class PdvmCommandHandler:
         self.key = key
         command_str = self.app.menu_handler.menu.get_command(key)
 
+        # Spezielle Behandlung für Dialog-Funktionen wenn kein direkter Command gefunden wird
+        if not command_str and key.startswith("Dialog_"):
+            logger.info(f"🔹 PdvmCommandHandler: Dialog-Kommando erkannt, versuche zentrale Funktion: {key}")
+            if self._handle_dialog_command(key):
+                return
+        
         if command_str:
             logger.info(f"🔹 PdvmCommandHandler: Befehl für '{key}' gefunden: {command_str}")
             try:
@@ -36,9 +42,43 @@ class PdvmCommandHandler:
                     # eval für einfachere Befehle
                     eval(command_str, {"self": self.app})
             except Exception as e:
+                logger.error(f"❌ Fehler beim Ausführen von '{command_str}': {e}")
                 self.show_text_klein(f"⚠️ Fehler beim Ausführen von '{command_str}': {e}")
         else:
+            logger.warning(f"⚠️ Kein Kommando für Menüpunkt '{key}' hinterlegt.")
             self.show_text_klein(f"⚠️ Kein Kommando für Menüpunkt '{key}' hinterlegt.")
+    
+    def _handle_dialog_command(self, key):
+        """Behandelt spezielle Dialog-Kommandos direkt über das aktuelle Widget"""
+        widget = self.app.get_current_unified_widget()
+        if not widget:
+            logger.warning("⚠️ Kein aktives Dialog-Widget für Menü-Kommando gefunden")
+            self.show_text_klein("⚠️ Kein aktiver Dialog für diese Funktion")
+            return False
+            
+        # Mapping der Menü-Keys zu Widget-Funktionen
+        dialog_commands = {
+            "Dialog_🔍 Lupe-Modi_🔍 View-Lupe": "set_view_lupe",
+            "Dialog_🔍 Lupe-Modi_📝 Input-Lupe": "set_input_lupe", 
+            "Dialog_🔍 Lupe-Modi_⚖️ Position wiederherstellen": "set_normal_mode",
+            "Dialog_⚙️ Zentrale Funktionen_🗓️ Stichtag wechseln": "stichtag_wechsel",
+            "Dialog_⚙️ Zentrale Funktionen_🔄 View refreshen": "refresh_view",
+            "Dialog_⚙️ Zentrale Funktionen_💾 Daten speichern": "save_data",
+            "Dialog_⚙️ Zentrale Funktionen_📊 Daten exportieren": "export_data",
+            "Dialog_🎛️ Ansicht_🎛️ Menü ausblenden": "toggle_menu"
+        }
+        
+        function_name = dialog_commands.get(key)
+        if function_name:
+            logger.info(f"🔹 PdvmCommandHandler: Führe Dialog-Funktion aus: {function_name}")
+            try:
+                widget.execute_central_function(function_name)
+                return True
+            except Exception as e:
+                logger.error(f"❌ Fehler bei Dialog-Funktion {function_name}: {e}")
+                self.show_text_klein(f"⚠️ Fehler bei {function_name}: {e}")
+        
+        return False
 
     def show_text(self, text):
         """Zeigt eine normale Textmeldung an."""

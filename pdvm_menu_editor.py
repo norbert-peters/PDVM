@@ -64,6 +64,52 @@ class PdvmMenuEditor(QWidget):
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
 
+    def _validate_current_item(self):
+        """
+        Validiert das aktuelle Item und setzt es auf None wenn es ungültig ist.
+        
+        Returns:
+            bool: True wenn current_item gültig ist
+        """
+        if self.current_item is None:
+            return False
+        
+        try:
+            # Test ob das Qt-Objekt noch zugänglich ist
+            _ = self.current_item.text(0)
+            return True
+        except RuntimeError as e:
+            logger.error(f"❌ current_item Qt-Objekt wurde gelöscht: {e}")
+            self.current_item = None
+            return False
+
+    def _safe_get_item_property(self, item, property_name):
+        """
+        Sichere Methode um Eigenschaften von Qt-Items zu holen.
+        
+        Args:
+            item: Das Qt-Item
+            property_name: Name der Eigenschaft ('text', 'full_path', etc.)
+            
+        Returns:
+            Der Wert oder None wenn das Item ungültig ist
+        """
+        if item is None:
+            return None
+        
+        try:
+            if property_name == 'text':
+                return item.text(0)
+            elif property_name == 'full_path':
+                return item.full_path
+            elif property_name == 'parent':
+                return item.parent()
+            else:
+                return getattr(item, property_name, None)
+        except RuntimeError as e:
+            logger.error(f"❌ Fehler beim Zugriff auf Qt-Item-Eigenschaft '{property_name}': {e}")
+            return None
+
     def load_tree(self):
         """Lädt die Menüstruktur in den QTreeWidget."""
         self.tree.clear()
@@ -85,8 +131,19 @@ class PdvmMenuEditor(QWidget):
                 self._add_items(item, val)
 
     def on_select(self, item, col):
-        """Speichert das aktuell selektierte Item."""
-        self.current_item = item
+        """Speichert das aktuell selektierte Item mit Sicherheitsprüfung."""
+        try:
+            if item is not None:
+                # Test ob das Objekt zugänglich ist
+                _ = item.text(0)
+                self.current_item = item
+            else:
+                self.current_item = None
+        except RuntimeError as e:
+            logger.error(f"❌ Qt-Objekt beim Auswählen bereits gelöscht: {e}")
+            self.current_item = None
+            # Optional: Tree neu laden
+            self.load_tree()
 
     def _show_entry_dialog(self, mode, parent_item=None, item=None):
         """Dialog zum Hinzufügen/Bearbeiten mit Vorschlagssystem."""
@@ -151,25 +208,30 @@ class PdvmMenuEditor(QWidget):
                 idx = parent_item.indexOfChild(item) if parent_item else self.tree.indexOfTopLevelItem(item)
                 old = item.full_path
                 new_full = f"{parent_path}.{name}" if parent_path else name
-                self.menu_instance.rename_menu_entry(old, new_full, self.menu_type)
-                self.menu_instance.set_command(new_full, cmd)
-                self.load_tree()
-                # Selektiere neuen Knoten
-                def find(node):
-                    if node.full_path == new_full:
-                        return node
-                    for i in range(node.childCount()):
-                        r = find(node.child(i))
-                        if r:
-                            return r
-                    return None
-                for i in range(self.tree.topLevelItemCount()):
-                    top = self.tree.topLevelItem(i)
-                    found = find(top)
-                    if found:
-                        self.tree.setCurrentItem(found)
-                        self.current_item = found
-                        break
+                
+                # Umbenennung mit Fehlerbehandlung
+                success = self.menu_instance.rename_menu_entry(old, new_full, self.menu_type)
+                if success:
+                    self.menu_instance.set_command(new_full, cmd)
+                    self.load_tree()
+                    # Selektiere neuen Knoten
+                    def find(node):
+                        if node.full_path == new_full:
+                            return node
+                        for i in range(node.childCount()):
+                            r = find(node.child(i))
+                            if r:
+                                return r
+                        return None
+                    for i in range(self.tree.topLevelItemCount()):
+                        top = self.tree.topLevelItem(i)
+                        found = find(top)
+                        if found:
+                            self.tree.setCurrentItem(found)
+                            self.current_item = found
+                            break
+                else:
+                    QMessageBox.warning(self, "Fehler", f"Umbenennung von '{old}' nach '{new_full}' fehlgeschlagen!")
 
     def _sync_structure(self):
         """Synchronisiert den QTreeWidget-Baum zurück in menu_instance."""
@@ -197,20 +259,39 @@ class PdvmMenuEditor(QWidget):
             section[parts[-1]] = new_struct
 
     def add_entry(self):
-        self._show_entry_dialog('add', parent_item=self.current_item)
+        # Sichere Validierung für add_entry
+        if self.current_item and self._validate_current_item():
+            self._show_entry_dialog('add', parent_item=self.current_item)
+        else:
+            # Fallback: Hinzufügen auf Root-Ebene
+            self._show_entry_dialog('add', parent_item=None)
 
     def edit_entry(self):
-        if not self.current_item:
+        if not self._validate_current_item():
             return
-        parent = self.current_item.parent()
-        self._show_entry_dialog('edit', parent_item=parent, item=self.current_item)
+        
+        # Sichere Methode verwenden
+        try:
+            parent = self._safe_get_item_property(self.current_item, 'parent')
+            self._show_entry_dialog('edit', parent_item=parent, item=self.current_item)
+        except Exception as e:
+            logger.error(f"❌ Unerwarteter Fehler beim Bearbeiten: {e}")
+            QMessageBox.warning(self, "Fehler", "Fehler beim Bearbeiten des Elements. Bitte laden Sie die Ansicht neu.")
+            self.load_tree()
 
     def delete_entry(self):
-        if not self.current_item:
+        if not self._validate_current_item():
             return
-        path = self.current_item.full_path
-        if QMessageBox.question(self, "Löschen", f"Eintrag '{path}' wirklich löschen?") == QMessageBox.Yes:
-            self.menu_instance.delete_menu_entry(path, self.menu_type)
+        
+        # Sichere Methode verwenden
+        try:
+            path = self._safe_get_item_property(self.current_item, 'full_path')
+            if path and QMessageBox.question(self, "Löschen", f"Eintrag '{path}' wirklich löschen?") == QMessageBox.Yes:
+                self.menu_instance.delete_entry(path, self.menu_type)
+                self.load_tree()
+        except Exception as e:
+            logger.error(f"❌ Unerwarteter Fehler beim Löschen: {e}")
+            QMessageBox.warning(self, "Fehler", "Fehler beim Löschen des Elements. Bitte laden Sie die Ansicht neu.")
             self.load_tree()
 
     def move_up(self):
@@ -257,6 +338,7 @@ class PdvmMenuEditor(QWidget):
         self._sync_structure()
         try:
             self.menu_instance.save_to_db()
-        except AttributeError:
-            self.menu_instance.save(self.menu_type)
-        QMessageBox.information(self, "Gespeichert", "Änderungen wurden gespeichert.")
+            QMessageBox.information(self, "Gespeichert", "Änderungen wurden erfolgreich gespeichert.")
+        except Exception as e:
+            logging.error(f"❌ Fehler beim Speichern der Menüstruktur: {e}")
+            QMessageBox.critical(self, "Speicherfehler", f"Fehler beim Speichern:\n{str(e)}")

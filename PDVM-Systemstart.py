@@ -28,6 +28,7 @@ from pdvm_menu_editor import PdvmMenuEditor
 from pdvm_view_manager import PdvmViewManager
 from pdvm_search_list_widget import PdvmSearchListWidget
 from pdvm_dialog_widget import PdvmDialogWidget
+# from pdvm_unified_dialog_widget import UnifiedPdvmDialogWidget  # V2 auskommentiert
 import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QApplication, QDialog
@@ -190,7 +191,7 @@ class MainApp(QMainWindow):
             command_handler=self.command_handler
         )
         self.menu_handler.create_menus()
-        self.setWindowTitle("PDVM System - Hauptanwendung - {self.user_name}")
+        self.setWindowTitle(f"PDVM System - Hauptanwendung - {self.user_name}")
         self.show_text("🔹 Willkommen in der App Auswahl!")
 
     def pdvm_search(self, view_guid, frame_guid, mode):
@@ -237,6 +238,190 @@ class MainApp(QMainWindow):
         # Widget erzeugen und anzeigen
         widget = PdvmDialogWidget(call_daten, parent=self.content_frame)
         self.content_layout.addWidget(widget)
+
+    def pdvm_dialog(self, frame_guid, mode):
+        """
+        Lädt das UnifiedPdvmDialogWidget V3 mit den übergebenen Parametern.
+        frame_guid: GUID aus framedaten-Tabelle
+        mode: Modus für zukünftige Verwendung
+        """
+        call_daten = {
+            "app": self,  # Wichtig: Referenz zur Hauptanwendung
+            "user_guid": self.user_guid,
+            "frame_guid": frame_guid,
+            "language": "de",
+            "stichtag": "2025185",
+            "mode": mode  # Für zukünftige Verwendung
+        }
+
+        # Vorherigen Inhalt im Arbeitsbereich (content_layout) KOMPLETT löschen
+        self.clear_content_layout()
+
+        # DEBUG: Layout-Status
+        logger.info(f"🔧 DEBUG pdvm_dialog aufgerufen - frame_guid: {frame_guid}, mode: {mode}")
+        logger.info(f"🔧 DEBUG Layout-Elemente nach clear_content_layout(): {self.content_layout.count()}")
+
+        # UnifiedPdvmDialogWidget erstellen und in content_layout einbetten
+        try:
+            from pdvm_unified_dialog_widget_v3 import UnifiedPdvmDialogWidget
+            
+            # Widget erstellen
+            self.unified_widget = UnifiedPdvmDialogWidget(call_daten)
+            
+            # DEBUG: Content-Layout Info vor Widget-Einbettung
+            logger.info(f"🔧 DEBUG Content-Frame Größe: {self.content_frame.size().width()}x{self.content_frame.size().height()}")
+            
+            # Widget in den Arbeitsbereich einbetten (nicht als separates Fenster!)
+            # KRITISCH: Widget mit stretch=1 für volle Raumnutzung einbetten
+            self.content_layout.addWidget(self.unified_widget, 1)
+            
+            # KRITISCH: Force-Update der Layout-Größen
+            self.content_frame.updateGeometry()
+            self.unified_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # DEBUG: Final Widget-Größe
+            logger.info(f"🔧 DEBUG Widget finale Größe: {self.unified_widget.size().width()}x{self.unified_widget.size().height()}")
+            
+            # WICHTIG: Dialog-Widget persistent halten für Menü-Integration
+            self.current_dialog_widget = self.unified_widget
+            
+            # Status-Update
+            logger.info(f"🎨 UnifiedPdvmDialogWidget V3 geladen - Frame: {frame_guid}, Mode: {mode}")
+            logger.info("✅ UnifiedPdvmDialogWidget V3 erfolgreich in Arbeitsbereich integriert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des UnifiedPdvmDialogWidget: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden: {str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def dialog_zusatz(self, command: str, **kwargs) -> bool:
+        """
+        Flexible Dialog-Zusatz-Funktionen.
+        
+        Unterstützt sowohl direkte Kommandos als auch parameterisierte Aufrufe:
+        - dialog_zusatz('Input-Lupe')
+        - dialog_zusatz('Lupe', mode='input')
+        
+        Args:
+            command: Kommando-String oder Basis-Kommando
+            **kwargs: Zusätzliche Parameter
+            
+        Returns:
+            bool: True wenn erfolgreich
+        """
+        try:
+            # Dialog-Zusatz-Handler laden (lazy loading)
+            if not hasattr(self, '_dialog_zusatz_handler'):
+                from pdvm_dialog_zusatz import PdvmDialogZusatz
+                self._dialog_zusatz_handler = PdvmDialogZusatz(self)
+            
+            # Kommando ausführen
+            result = self._dialog_zusatz_handler.dialog_zusatz(command, **kwargs)
+            
+            # Logging
+            if result:
+                logger.info(f"Dialog-Zusatz-Kommando erfolgreich: {command}")
+            else:
+                logger.warning(f"Dialog-Zusatz-Kommando fehlgeschlagen: {command}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Fehler bei Dialog-Zusatz-Kommando '{command}': {e}")
+            return False
+
+    def get_current_unified_widget(self):
+        """
+        Holt das aktuell aktive Unified Widget.
+        
+        Returns:
+            UnifiedPdvmDialogWidget oder None
+        """
+        if hasattr(self, 'current_dialog_widget') and self.current_dialog_widget:
+            return self.current_dialog_widget
+        return None
+
+    def pdvm_unified_test(self):
+        """Test für das neue UnifiedPdvmDialogWidget mit schaltbarer View und Input-Tabs"""
+        # Beispielhafte Call-Daten (ohne Mode!)
+        call_daten = {
+            "app": self,  # Wichtig: Referenz zur Hauptanwendung
+            "user_guid":  self.user_guid,
+            "frame_guid": "4078079f-4028-45ed-879c-3c779ecf3d0d",
+            "language":   "de",
+            "stichtag": "2025185"
+        }
+
+        # Vorherigen Inhalt im Arbeitsbereich (content_layout) KOMPLETT löschen
+        self.clear_content_layout()  # Das entfernt ALLE Layout-Elemente inklusive Stretches!
+
+        # DEBUG: Prüfe was noch im Layout ist
+        logger.info(f"🔧 DEBUG Layout-Elemente nach clear_content_layout(): {self.content_layout.count()}")
+        for i in range(self.content_layout.count()):
+            item = self.content_layout.itemAt(i)
+            if item.widget():
+                logger.info(f"🔧 DEBUG Layout[{i}]: Widget {type(item.widget()).__name__}")
+            elif item.spacerItem():
+                logger.info(f"🔧 DEBUG Layout[{i}]: Spacer/Stretch-Element!")
+            else:
+                logger.info(f"🔧 DEBUG Layout[{i}]: {type(item).__name__}")
+
+        # UnifiedPdvmDialogWidget erstellen und in content_layout einbetten
+        try:
+            from pdvm_unified_dialog_widget_v3 import UnifiedPdvmDialogWidget
+            
+            # Widget erstellen
+            self.unified_widget = UnifiedPdvmDialogWidget(call_daten)
+            
+            # DEBUG: Content-Layout Info vor Widget-Einbettung
+            logger.info(f"🔧 DEBUG Content-Frame Größe: {self.content_frame.size().width()}x{self.content_frame.size().height()}")
+            logger.info(f"🔧 DEBUG Content-Layout Count vor Einbettung: {self.content_layout.count()}")
+            
+            # Widget in den Arbeitsbereich einbetten (nicht als separates Fenster!)
+            # KRITISCH: Widget mit stretch=1 für volle Raumnutzung einbetten
+            self.content_layout.addWidget(self.unified_widget, 1)
+            
+            # DEBUG: Layout Info nach Widget-Einbettung
+            logger.info(f"🔧 DEBUG Content-Layout Count nach Einbettung: {self.content_layout.count()}")
+            logger.info(f"🔧 DEBUG Widget in Layout Position: {self.content_layout.indexOf(self.unified_widget)}")
+            
+            # KRITISCH: Force-Update der Layout-Größen
+            self.content_frame.updateGeometry()
+            self.unified_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # DEBUG: Final Widget-Größe
+            logger.info(f"🔧 DEBUG Widget finale Größe: {self.unified_widget.size().width()}x{self.unified_widget.size().height()}")
+            
+            # WICHTIG: Dialog-Widget persistent halten für Menü-Integration
+            self.current_dialog_widget = self.unified_widget
+            
+            # Status-Update (ersetzt update_status)
+            logger.info("🎨 Unified Dialog Widget V3 - Bereit für Lupe-Tests!")
+            
+            logger.info("✅ UnifiedPdvmDialogWidget V3 erfolgreich in Arbeitsbereich integriert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des UnifiedPdvmDialogWidget: {e}")
+            # Fehler-Widget anzeigen (ersetzt show_error_widget)
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden: {str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+    
+    def get_current_unified_widget(self):
+        """Gibt das aktuelle Unified Widget zurück (für Menü-Integration)"""
+        if hasattr(self, 'current_dialog_widget') and self.current_dialog_widget:
+            return self.current_dialog_widget
+        elif hasattr(self, 'unified_widget') and self.unified_widget:
+            return self.unified_widget
+        else:
+            logger.warning("⚠️ Kein Unified Dialog Widget aktiv")
+            return None
 
     def logout(self):
         """Logout: schließt App und zeigt Login erneut."""

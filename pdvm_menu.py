@@ -9,7 +9,7 @@ from pdvm_datenbank import PdvmDatenbank
 class PdvmMenu:
     def __init__(self, menu_id, db_name="PdvmManager.db"):
         self.menu_id = menu_id
-        self.db = PdvmDatenbank(db_name, "menudaten", hist=False)
+        self.db = PdvmDatenbank(db_name, "menudaten", historisch=False)
         daten = self.db.lesen(menu_id)
         self.__pd_structure = self.normalize_menu_structure(daten)
         self.validate_and_normalize_structure()
@@ -143,21 +143,40 @@ class PdvmMenu:
         logger.info(f"🔄 Umbenennen: '{old_full_path}' → '{new_full_path}'")
         parts = old_full_path.split('.')
         current_section = self.menu_section(menu_type)
+        
+        # Sicherheitsprüfung: current_section darf nicht None sein
+        if current_section is None:
+            logger.error(f"❌ Menü-Sektion für Typ '{menu_type}' nicht gefunden")
+            return False
+        
         new_parts = new_full_path.split('.')
         for part in parts[:-1]:
-            if part in current_section:
+            if current_section is not None and isinstance(current_section, dict) and part in current_section:
                 current_section = current_section[part]
             else:
-                return
+                logger.error(f"❌ Pfad-Teil '{part}' nicht gefunden in aktueller Sektion")
+                return False
+        
+        # Finale Sicherheitsprüfung
+        if current_section is None or not isinstance(current_section, dict):
+            logger.error(f"❌ Ziel-Sektion ist None oder nicht iterierbar")
+            return False
+            
         old_leaf = parts[-1]
         new_leaf = new_parts[-1]
         if old_leaf not in current_section:
-            return
+            logger.error(f"❌ Alter Eintrag '{old_leaf}' nicht in aktueller Sektion gefunden")
+            return False
+            
+        # Umbenennung durchführen
         current_section[new_leaf] = current_section.pop(old_leaf)
         old_key_cmd = old_full_path.replace('.', '_')
         new_key_cmd = new_full_path.replace('.', '_')
         if old_key_cmd in self.__pd_structure["PD_commands"]:
             self.__pd_structure["PD_commands"][new_key_cmd] = self.__pd_structure["PD_commands"].pop(old_key_cmd)
+        
+        logger.info(f"✅ Umbenennung erfolgreich: '{old_full_path}' → '{new_full_path}'")
+        return True
 
     def move_entry(self, old_full_path, new_full_path, menu_type):
         """

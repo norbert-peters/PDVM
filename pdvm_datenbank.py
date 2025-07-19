@@ -61,6 +61,11 @@ class PdvmDatenbank:
         sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
         logging.log(logging.INFO,f"Systemsteuerung-Datensatz: {sys_record}")
 
+        # WICHTIG: Null-Prüfung für sys_record
+        if sys_record is None:
+            logging.log(logging.WARNING, f"Systemsteuerung-Datensatz für {self.SYSTEM_USER_ID} ist None, erstelle neuen Datensatz")
+            sys_record = {}
+        
         # Stelle sicher, dass der Eintrag für diese Tabelle existiert
         sys_record[self.table_name] = sys_record.get(self.table_name, {})
         # Setze Metriken
