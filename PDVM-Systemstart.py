@@ -33,7 +33,7 @@ import json
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QApplication, QDialog
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 from pdvm_command_handler import PdvmCommandHandler
 from pdvm_menu_handler import PdvmMenuHandler
@@ -61,8 +61,18 @@ class MainApp(QMainWindow):
                                                                              ("Benutzer").get("Name")}"
         self.setWindowTitle(f"PDVM System - Hauptanwendung - {self.user_name}")
 
+        # Startmenü-ID aus Benutzerdaten holen
         self.startmenu_id = self.user_daten.get("Anwendungen", {}).get("MeineApps")
+        if not self.startmenu_id:
+            logger.error("❌ Keine Startmenü-GUID in Benutzerdaten gefunden!")
+            raise ValueError("Startmenü-GUID fehlt in Benutzerdaten")
+            
         logging.log(logging.INFO, f"🔹 Starte mit Startmenu-ID: {self.startmenu_id}")
+        
+        # Debug: Verfügbare Anwendungen anzeigen
+        applications = self.user_daten.get("Anwendungen", {}).get("Application", {})
+        available_apps = [app for app, config in applications.items() if config.get("Menu")]
+        logger.info(f"🔹 Verfügbare Anwendungen für Benutzer: {available_apps}")
 
         # Zentrales Widget und Layout
         central = QWidget()
@@ -82,22 +92,11 @@ class MainApp(QMainWindow):
         self.content_frame.setLayout(self.content_layout)
         self.main_layout.addWidget(self.content_frame, 4)
 
-        # Platzhalterbegrüßung
-        self._show_label("🔹 Willkommen im PDVM-System!", small=False, 
-                        clear_content=True)
-        # Platzhalter für Anwendungsanleitung - ggf. mehrere Zeilen
-        self._show_label(["🔹 Bitte wählen Sie eine Anwendung aus dem Menü links."], 
-                 small=True, clear_content=False)        
-
         # Handler initialisieren
         self.command_handler = PdvmCommandHandler(self)
-        self.menu_handler = PdvmMenuHandler(
-            root=self,
-            menu_widget=self.menu_frame,
-            menu_id=self.startmenu_id,
-            command_handler=self.command_handler
-        )
-        self.menu_handler.create_menus()
+        
+        # Startmenü laden (DRY-Prinzip: Eine zentrale Methode für Startmenü)
+        self.open_start_menu()
 
     def _show_label(self, texts, small=False, clear_content=True):
         """
@@ -106,8 +105,10 @@ class MainApp(QMainWindow):
         """
         if clear_content:
             self.clear_content_layout()
-        # Abstand oben
-        self.content_layout.addStretch(1)
+        
+        # Größerer oberer Abstand (30px statt vorher zentriert)
+        self.content_layout.addSpacing(30)
+        
         # Labels
         if isinstance(texts, str):
             texts = [texts]
@@ -115,16 +116,13 @@ class MainApp(QMainWindow):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
             if small:
-                lbl.setStyleSheet("font-size: 12px;")
+                lbl.setStyleSheet("font-size: 12px; margin: 5px;")
             else:
-                lbl.setStyleSheet("font-size: 16px;")
+                lbl.setStyleSheet("font-size: 16px; margin: 10px;")
             self.content_layout.addWidget(lbl)
-        # Abstand unten
-        if clear_content:
-            self.content_layout.addStretch(1)
-        else:
-            # Wenn nicht geleert, dann nur unten Abstand
-            self.content_layout.addStretch(25)
+        
+        # Flexibler unterer Abstand (nimmt den restlichen Platz ein)
+        self.content_layout.addStretch(1)
 
     def show_text(self, text):
         """Normaler Text im Hauptbereich."""
@@ -170,20 +168,21 @@ class MainApp(QMainWindow):
         self.content_layout.addWidget(editor)
 
     def open_app_menu(self, user_app):
-        """Wechselt in die Menüstruktur einer anderen Anwendung."""
-        app_menu_id = self.user_daten.get("Anwendungen", {}).get(user_app, {}).get("Menu")
-        self.menu_handler = PdvmMenuHandler(
-            root=self,
-            menu_widget=self.menu_frame,
-            menu_id=app_menu_id,
-            command_handler=self.command_handler
-        )
-        self.menu_handler.create_menus()
-        self.setWindowTitle(f"PDVM {user_app} - {self.user_name}")
-        self.show_text(f"🔹 Willkommen in {user_app}!")
+        """
+        Wechselt in die Menüstruktur einer anderen Anwendung.
+        DEPRECATED: Wird durch pdvm_start() ersetzt - hier als Fallback für Kompatibilität
+        """
+        logger.warning(f"⚠️ open_app_menu() ist deprecated, verwende stattdessen pdvm_start('{user_app}')")
+        
+        # Fallback zur neuen Methode
+        self.pdvm_start(user_app)
 
     def open_start_menu(self):
         """Lädt erneut das Startmenü."""
+        # Handler nur initialisieren wenn noch nicht vorhanden (für __init__)
+        if not hasattr(self, 'command_handler'):
+            self.command_handler = PdvmCommandHandler(self)
+            
         self.menu_handler = PdvmMenuHandler(
             root=self,
             menu_widget=self.menu_frame,
@@ -192,7 +191,75 @@ class MainApp(QMainWindow):
         )
         self.menu_handler.create_menus()
         self.setWindowTitle(f"PDVM System - Hauptanwendung - {self.user_name}")
-        self.show_text("🔹 Willkommen in der App Auswahl!")
+        
+        # Zentraler Startbildschirm - wird sowohl im __init__ als auch beim Zurückkehren verwendet
+        self._show_label("🔹 Willkommen im PDVM-System!", small=False, 
+                        clear_content=True)
+        self._show_label([
+            "🔹 Bitte wählen Sie eine Anwendung aus dem Menü links.",
+            "📱 Multi-Tab mit Navigation: F4 für parallele Tab-Anzeige → Navigation erscheint",
+            "🔍 Lupe-Funktionen: F1 (View) | F2 (Input) | F3 (Reset)",
+            "⌨️ Tab-Navigation: Ctrl+←/→ oder Alt+1-9 für direkten Tab-Zugriff"
+        ], small=True, clear_content=False)
+        
+        # Startmenü: Menü immer anzeigen (Sicherheit)
+        self._ensure_menu_visible()
+        logger.info("🏠 Startmenü geladen - Menü automatisch eingeblendet")
+
+    def pdvm_start(self, application_name):
+        """
+        Startet eine Anwendung basierend auf den Benutzer-Berechtigungen.
+        
+        Args:
+            application_name: Name der Anwendung aus den Benutzerdaten
+        """
+        try:
+            logger.info(f"🚀 Starte Anwendung: {application_name}")
+            
+            # Prüfe Benutzerberechtigung für diese Anwendung
+            applications = self.user_daten.get("Anwendungen", {}).get("Application", {})
+            
+            if application_name not in applications:
+                logger.warning(f"❌ Anwendung '{application_name}' nicht in Benutzerdaten gefunden")
+                self.show_text(f"❌ Anwendung '{application_name}' nicht vorhanden")
+                return
+            
+            app_config = applications[application_name]
+            menu_guid = app_config.get("Menu")
+            
+            if not menu_guid:
+                logger.warning(f"❌ Keine Menü-GUID für Anwendung '{application_name}' gefunden")
+                self.show_text(f"❌ Anwendung '{application_name}' nicht verfügbar\n(Keine Menü-Berechtigung)")
+                return
+            
+            # Menü-Status für vorheriges Menü speichern
+            self._save_menu_visibility_status()
+            
+            # Neues Anwendungsmenü laden
+            self.menu_handler = PdvmMenuHandler(
+                root=self,
+                menu_widget=self.menu_frame,
+                menu_id=menu_guid,
+                command_handler=self.command_handler
+            )
+            
+            try:
+                self.menu_handler.create_menus()
+                self.setWindowTitle(f"PDVM {application_name} - {self.user_name}")
+                self.show_text(f"🔹 Willkommen in {application_name}!")
+                
+                # Menü-Status für neues Menü wiederherstellen
+                self._restore_menu_visibility_status(menu_guid)
+                
+                logger.info(f"✅ Anwendung '{application_name}' erfolgreich geladen mit Menü-GUID: {menu_guid}")
+                
+            except Exception as menu_error:
+                logger.error(f"❌ Fehler beim Laden des Menüs für '{application_name}': {menu_error}")
+                self.show_text(f"❌ Fehler beim Laden der Anwendung '{application_name}'\n{str(menu_error)}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Starten der Anwendung '{application_name}': {e}")
+            self.show_text(f"❌ Fehler beim Starten der Anwendung '{application_name}'\n{str(e)}")
 
     def pdvm_search(self, view_guid, frame_guid, mode):
         """
@@ -221,80 +288,602 @@ class MainApp(QMainWindow):
         search_widget = PdvmSearchListWidget(self.view_manager, table_name=table_name)
         self.content_layout.addWidget(search_widget)
 
-    def pdvm_test(self):
-        # Beispielhafte Call-Daten
+    def pdvm_enhanced_test(self):
+        """Test für das Enhanced Multi-Tab-Widget mit Frame-basierter Konfiguration"""
+        # Erstelle zunächst die moderne framedaten-Struktur
+        try:
+            from create_modern_framedaten_structure import create_modern_framedaten_database
+            logger.info("🔧 Erstelle moderne framedaten-Struktur für Enhanced Testing...")
+            create_modern_framedaten_database()
+        except Exception as e:
+            logger.warning(f"⚠️ Moderne Struktur-Skript konnte nicht ausgeführt werden: {e}")
+        
+        # Call-Daten für das Enhanced UnifiedPdvmDialogWidget
         call_daten = {
-            "user_guid":  "4886ad26-061b-4662-a762-c8c83f36692d",
+            "app": self,  # Wichtig: Referenz zur Hauptanwendung
+            "user_guid":  self.user_guid,
             "frame_guid": "4078079f-4028-45ed-879c-3c779ecf3d0d",
-            "mode":        0,
+            "language": "de",
+            "stichtag": "2025185"
         }
 
-        # Vorherigen Inhalt im Arbeitsbereich (content_layout) löschen
-        for i in reversed(range(self.content_layout.count())):
-            w = self.content_layout.itemAt(i).widget()
-            if w:
-                w.setParent(None)
+        # Vorherigen Inhalt im Arbeitsbereich (content_layout) KOMPLETT löschen
+        self.clear_content_layout()
 
-        # Widget erzeugen und anzeigen
-        widget = PdvmDialogWidget(call_daten, parent=self.content_frame)
-        self.content_layout.addWidget(widget)
+        # Enhanced UnifiedPdvmDialogWidget erzeugen und anzeigen
+        try:
+            from pdvm_enhanced_multi_tab_widget import EnhancedUnifiedPdvmDialogWidget
+            
+            # Widget erstellen
+            self.enhanced_widget = EnhancedUnifiedPdvmDialogWidget(call_daten)
+            
+            # Widget in den Arbeitsbereich einbetten (mit stretch=1 für volle Raumnutzung)
+            self.content_layout.addWidget(self.enhanced_widget, 1)
+            
+            # Force-Update der Layout-Größen
+            self.content_frame.updateGeometry()
+            self.enhanced_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # WICHTIG: Dialog-Widget persistent halten für Menü-Integration
+            self.current_dialog_widget = self.enhanced_widget
+            
+            logger.info("🎨 Enhanced UnifiedPdvmDialogWidget - Erweiterte Multi-Tab-Funktionalität geladen!")
+            logger.info("✅ Frame-basierte Konfiguration und Benutzer-Einstellungen verfügbar")
+            logger.info("📱 F4: Multi-Tab | ⚙️ F5: Konfiguration | 🔍 F1/F2: Lupe | 🔄 F3: Reset")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Enhanced Dialog-Widgets: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden: {str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def pdvm_enhanced_frame(self, frame_guid=None):
+        """
+        SOFORTIGE Enhanced Multi-Tab-Aktivierung für jedes Frame
+        """
+        if not frame_guid:
+            frame_guid = "4078079f-4028-45ed-879c-3c779ecf3d0d"  # Default Test-Frame
+        
+        # Call-Daten für das Enhanced UnifiedPdvmDialogWidget
+        call_daten = {
+            "app": self,
+            "user_guid": self.user_guid,
+            "frame_guid": frame_guid,
+            "language": "de",
+            "stichtag": "2025185"
+        }
+
+        # Inhalt löschen
+        self.clear_content_layout()
+
+        # Enhanced Widget DIREKT laden (ignoriert framedaten-Status)
+        try:
+            from pdvm_enhanced_multi_tab_widget import EnhancedUnifiedPdvmDialogWidget
+            
+            # Widget erstellen
+            self.enhanced_widget = EnhancedUnifiedPdvmDialogWidget(call_daten)
+            
+            # Widget einbetten
+            self.content_layout.addWidget(self.enhanced_widget, 1)
+            
+            # Layout-Updates
+            self.content_frame.updateGeometry()
+            self.enhanced_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.enhanced_widget
+            
+            logger.info(f"🎨 Enhanced Multi-Tab Widget SOFORT geladen für Frame: {frame_guid}")
+            logger.info("📱 F4: Multi-Tab | ⚙️ F5: Konfiguration | 🔍 F1/F2: Lupe")
+            logger.info("🎯 LIVE-SYSTEM: Enhanced Multi-Tab jetzt aktiv!")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim SOFORT-Laden des Enhanced Widgets: {e}")
+            # Fallback auf Standard
+            self.pdvm_dialog(frame_guid, 0)
+
+    def pdvm_modern_view_test(self, view_guid=None, version=2):
+        """Test für das neue moderne View-Widget mit Version-Auswahl"""
+        if not view_guid:
+            view_guid = "0d10a0d0-b1a5-4544-b284-e8a09ca979b5"  # Test-View für persondaten
+        
+        # Inhalt löschen
+        self.clear_content_layout()
+
+        try:
+            if version == 2:
+                # NEUE V2 Architektur mit separatem Filter-Manager
+                from pdvm_modern_view_widget_v2 import PdvmModernViewWidgetV2
+                
+                self.modern_view_widget = PdvmModernViewWidgetV2(
+                    view_guid=view_guid,
+                    user_guid=self.user_guid,
+                    parent=self
+                )
+                
+                logger.info(f"📊 Modernes View-Widget V2 geladen für View: {view_guid}")
+                logger.info("✅ V2 Funktionen: Separater Filter-Manager, Original+Gefilterte Daten")
+                logger.info("🔍 Dropdown-Filter: Eigener Dialog, Alle/Ohne Buttons")
+                logger.info("🔄 Aktualisieren: Behält alle Filter bei")
+                
+            else:
+                # Original V1 für Vergleich
+                from pdvm_modern_view_widget import PdvmModernViewWidget
+                
+                self.modern_view_widget = PdvmModernViewWidget(
+                    view_guid=view_guid,
+                    user_guid=self.user_guid,
+                    parent=self
+                )
+                
+                logger.info(f"📊 Modernes View-Widget V1 geladen für View: {view_guid}")
+                logger.info("✅ V1 Funktionen: Search, Sort, Filter, Export")
+            
+            # Signal-Verbindungen
+            self.modern_view_widget.rowSelected.connect(self._on_view_row_selected)
+            
+            # Widget einbetten
+            self.content_layout.addWidget(self.modern_view_widget, 1)
+            
+            # Layout-Updates für korrekte Größenberechnung
+            self.content_frame.updateGeometry()
+            self.modern_view_widget.updateGeometry()
+            
+            # Force Layout-Update
+            QApplication.processEvents()
+            
+            # Zusätzlicher Timer für UI-Finalisierung (nur V1)
+            if version == 1:
+                QTimer.singleShot(200, self._finalize_modern_view_setup)
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.modern_view_widget
+            
+            logger.info(" Spalten-Header klicken für Sortierung, Search-Felder für Filterung")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Modern View-Widgets V{version}: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden der modernen View V{version}:\n{str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def pdvm_modern_view_test_v2(self, view_guid=None):
+        """Direkte V2 Test-Funktion"""
+        self.pdvm_modern_view_test(view_guid, version=2)
+
+    def pdvm_modern_view(self, frame_guid=None, version=2):
+        """
+        Moderne View-Widget mit frame_guid - lädt view_guid aus framedaten
+        Version 2: Neue Architektur mit separatem Filter-Manager
+        Diese Methode sollten Sie im Menü verwenden!
+        """
+        if not frame_guid:
+            frame_guid = "4078079f-4028-45ed-879c-3c779ecf3d0d"  # Default Test-Frame
+        
+        # Inhalt löschen
+        self.clear_content_layout()
+
+        try:
+            # 1. view_guid aus framedaten laden
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            framedaten_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="framedaten",
+                guid=frame_guid
+            )
+            
+            frame_data = framedaten_db.lesen()
+            if not frame_data or not isinstance(frame_data, dict):
+                raise ValueError(f"Keine framedaten gefunden für GUID: {frame_guid}")
+            
+            # AKTUELLE STRUKTUR: view_guid und root_table sind im ROOT-Bereich
+            root_config = frame_data.get("ROOT", {})
+            if not root_config:
+                raise ValueError(f"Keine ROOT-Konfiguration in framedaten gefunden für Frame: {frame_guid}")
+            
+            view_guid = root_config.get("view_guid")
+            root_table = root_config.get("root_table")
+            
+            if not view_guid:
+                raise ValueError(f"Keine view_guid in ROOT gefunden für Frame: {frame_guid}")
+            
+            if not root_table:
+                raise ValueError(f"Keine root_table in ROOT gefunden für Frame: {frame_guid}")
+            
+            logger.info(f"🔗 Frame {frame_guid} → View {view_guid}")
+            logger.info(f"📊 Frame: {root_config.get('frame_name', 'Unbekannt')}")
+            logger.info(f"🗃️ Root-Tabelle: {root_table}")
+            logger.info(f"🏗️ Widget-Typ: {root_config.get('widget_type', 'Standard')}")
+            
+            # 2. Moderne View-Widget erstellen (Version wählbar)
+            if version == 2:
+                from pdvm_modern_view_widget_v2 import PdvmModernViewWidgetV2
+                
+                self.modern_view_widget = PdvmModernViewWidgetV2(
+                    view_guid=view_guid,
+                    user_guid=self.user_guid,
+                    parent=self
+                )
+                
+                logger.info(f"📊 Modernes View-Widget V2 geladen für Frame: {frame_guid}")
+                logger.info("✅ V2 Features: Separater Filter-Manager, Original+Gefilterte Daten")
+                logger.info("🔄 Aktualisieren behält alle Filter bei")
+                
+            else:
+                # Fallback V1
+                from pdvm_modern_view_widget import PdvmModernViewWidget
+                
+                self.modern_view_widget = PdvmModernViewWidget(
+                    view_guid=view_guid,
+                    user_guid=self.user_guid,
+                    parent=self
+                )
+                
+                logger.info(f"📊 Modernes View-Widget V1 geladen für Frame: {frame_guid}")
+            
+            # 3. Signal-Verbindungen
+            self.modern_view_widget.rowSelected.connect(self._on_view_row_selected)
+            
+            # 4. Widget einbetten
+            self.content_layout.addWidget(self.modern_view_widget, 1)
+            
+            # 5. Layout-Updates
+            self.content_frame.updateGeometry()
+            self.modern_view_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # 6. UI-Finalisierung (nur V1)
+            if version == 1:
+                QTimer.singleShot(200, self._finalize_modern_view_setup)
+            
+            # 7. Widget persistent halten
+            self.current_dialog_widget = self.modern_view_widget
+            
+            logger.info(f"🔗 Verwendete View-GUID: {view_guid}")
+            logger.info("✅ Funktionen: Search, Sort, Filter, Export")
+            logger.info("🔍 Menü-Integration: frame_guid → view_guid automatisch aufgelöst")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Modern View-Widgets: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden der modernen View V{version}:\n{str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def pdvm_modern_view_v2(self, frame_guid=None):
+        """Direkte V2-Funktion für Menü-Integration"""
+        self.pdvm_modern_view(frame_guid, version=2)
+
+    def _on_view_row_selected(self, record):
+        """Callback wenn eine Zeile in der View ausgewählt wird"""
+        logger.info(f"🔘 Datensatz ausgewählt: {record.get('_guid', 'Unbekannt')}")
+        # TODO: Hier könnte man zu einem Detail-Dialog wechseln
+        
+        # Debug-Info
+        if 'FAMILIENNAME' in record and 'VORNAME' in record:
+            name = f"{record['FAMILIENNAME']}, {record['VORNAME']}"
+            logger.info(f"   Person: {name}")
+            self.show_text(f"📋 Ausgewählt: {name}\nGUID: {record.get('_guid', 'Unbekannt')}")
+
+    def _finalize_modern_view_setup(self):
+        """Finalisiert das Setup des modernen View-Widgets"""
+        try:
+            if hasattr(self, 'modern_view_widget') and self.modern_view_widget:
+                # Force refresh für korrekte Darstellung
+                self.modern_view_widget.refresh()
+                logger.info("🔄 Modern View Widget finalisiert - Daten und Layout aktualisiert")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Finalisieren des Setups: {e}")
+            # Trotzdem weiter machen - Widget ist bereits geladen
+
+    def pdvm_setup_demo_view(self):
+        """Erstellt Demo-Daten und testet das moderne View-Widget"""
+        try:
+            # Demo-Umgebung erstellen
+            from create_demo_view_data import setup_demo_environment
+            logger.info("🔧 Erstelle Demo-Umgebung...")
+            setup_demo_environment()
+            
+            # Moderne View laden
+            self.pdvm_modern_view_test()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Setup der Demo-View: {e}")
+            self.show_text(f"❌ Demo-Setup fehlgeschlagen:\n{str(e)}")
+
+    def pdvm_dialog_with_view(self, frame_guid=None):
+        """
+        Dialog mit integriertem modernen View-Widget
+        Lädt automatisch die view_guid aus den framedaten
+        """
+        if not frame_guid:
+            frame_guid = "4078079f-4028-45ed-879c-3c779ecf3d0d"  # Default Test-Frame
+        
+        # Inhalt löschen
+        self.clear_content_layout()
+
+        try:
+            from pdvm_dialog_view_integration import PdvmDialogViewWidget
+            
+            # Dialog-View-Widget erstellen
+            self.dialog_view_widget = PdvmDialogViewWidget(
+                frame_guid=frame_guid,
+                user_guid=self.user_guid,
+                parent=self
+            )
+            
+            # Signal-Verbindungen
+            self.dialog_view_widget.rowSelected.connect(self._on_dialog_view_row_selected)
+            self.dialog_view_widget.editRequested.connect(self._on_dialog_view_edit_requested)
+            self.dialog_view_widget.newRequested.connect(self._on_dialog_view_new_requested)
+            
+            # Widget einbetten
+            self.content_layout.addWidget(self.dialog_view_widget, 1)
+            
+            # Layout-Updates
+            self.content_frame.updateGeometry()
+            self.dialog_view_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.dialog_view_widget
+            
+            logger.info(f"🔗 Dialog mit integriertem View-Widget geladen für Frame: {frame_guid}")
+            logger.info("✅ Funktionen: View + Dialog-Integration mit Neu/Bearbeiten")
+            logger.info("🎯 View-GUID wird automatisch aus framedaten geladen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Dialog-View-Widgets: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden der Dialog-View:\n{str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def _on_dialog_view_row_selected(self, record):
+        """Callback wenn eine Zeile in der Dialog-View ausgewählt wird"""
+        logger.info(f"🔘 Datensatz in Dialog-View ausgewählt: {record.get('_guid', 'Unbekannt')}")
+        
+        # Debug-Info in Status-Bereich anzeigen (wenn gewünscht)
+        if 'FAMILIENNAME' in record and 'VORNAME' in record:
+            name = f"{record['FAMILIENNAME']}, {record['VORNAME']}"
+            logger.info(f"   Person: {name}")
+
+    def _on_dialog_view_edit_requested(self, record):
+        """Callback wenn Bearbeitung eines Datensatzes angefordert wird"""
+        logger.info(f"✏️ Bearbeitung angefordert für: {record.get('_guid', 'Unbekannt')}")
+        
+        # TODO: Hier würde der Input-Dialog geöffnet werden
+        # Für jetzt nur eine Meldung
+        if 'FAMILIENNAME' in record and 'VORNAME' in record:
+            name = f"{record['FAMILIENNAME']}, {record['VORNAME']}"
+            self.show_text(f"✏️ Bearbeitung angefordert für:\n{name}\nGUID: {record.get('_guid', 'Unbekannt')}\n\n(Input-Dialog würde hier öffnen)")
+
+    def _on_dialog_view_new_requested(self):
+        """Callback wenn ein neuer Datensatz erstellt werden soll"""
+        logger.info("➕ Neuer Datensatz angefordert")
+        
+        # TODO: Hier würde der Input-Dialog für neuen Datensatz geöffnet werden
+        self.show_text("➕ Neuer Datensatz angefordert\n\n(Input-Dialog würde hier öffnen)")
+
+    def pdvm_test(self):
+        # Erstelle zunächst die moderne framedaten-Struktur
+        try:
+            from create_modern_framedaten_structure import create_modern_framedaten_database
+            logger.info("🔧 Erstelle moderne framedaten-Struktur für Testing...")
+            create_modern_framedaten_database()
+        except Exception as e:
+            logger.warning(f"⚠️ Moderne Struktur-Skript konnte nicht ausgeführt werden: {e}")
+        
+        # Call-Daten für das UnifiedPdvmDialogWidget V3
+        call_daten = {
+            "app": self,  # Wichtig: Referenz zur Hauptanwendung
+            "user_guid":  self.user_guid,
+            "frame_guid": "4078079f-4028-45ed-879c-3c779ecf3d0d",
+            "language": "de",
+            "stichtag": "2025185"
+        }
+
+        # Vorherigen Inhalt im Arbeitsbereich (content_layout) KOMPLETT löschen
+        self.clear_content_layout()
+
+        # UnifiedPdvmDialogWidget V3 erzeugen und anzeigen
+        try:
+            from pdvm_unified_dialog_widget_v3 import UnifiedPdvmDialogWidget
+            from pdvm_modern_dialog_loader import enhance_unified_widget
+            
+            # Widget erstellen
+            self.unified_widget = UnifiedPdvmDialogWidget(call_daten)
+            
+            # Moderne Datenstruktur laden und anwenden
+            logger.info("🔧 Lade moderne framedaten-Struktur...")
+            enhance_unified_widget(self.unified_widget)
+            
+            # Widget in den Arbeitsbereich einbetten (mit stretch=1 für volle Raumnutzung)
+            self.content_layout.addWidget(self.unified_widget, 1)
+            
+            # Force-Update der Layout-Größen
+            self.content_frame.updateGeometry()
+            self.unified_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # WICHTIG: Dialog-Widget persistent halten für Menü-Integration
+            self.current_dialog_widget = self.unified_widget
+            
+            logger.info("🎨 UnifiedPdvmDialogWidget V3 - Moderne Tab-basierte Struktur geladen!")
+            logger.info("✅ Echte Persondaten und InputControls verfügbar")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des modernen Dialog-Widgets: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden: {str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
 
     def pdvm_dialog(self, frame_guid, mode):
         """
-        Lädt das UnifiedPdvmDialogWidget V3 mit den übergebenen Parametern.
+        Lädt das Dialog-Widget - automatisch Enhanced Multi-Tab wenn in framedaten aktiviert.
         frame_guid: GUID aus framedaten-Tabelle
-        mode: Modus für zukünftige Verwendung
+        mode: Modus für zukünftige Verwendung (wird in moderne Struktur integriert)
         """
         call_daten = {
             "app": self,  # Wichtig: Referenz zur Hauptanwendung
             "user_guid": self.user_guid,
             "frame_guid": frame_guid,
             "language": "de",
-            "stichtag": "2025185",
-            "mode": mode  # Für zukünftige Verwendung
+            "stichtag": "2025185"
         }
 
         # Vorherigen Inhalt im Arbeitsbereich (content_layout) KOMPLETT löschen
         self.clear_content_layout()
 
-        # DEBUG: Layout-Status
-        logger.info(f"🔧 DEBUG pdvm_dialog aufgerufen - frame_guid: {frame_guid}, mode: {mode}")
-        logger.info(f"🔧 DEBUG Layout-Elemente nach clear_content_layout(): {self.content_layout.count()}")
+        logger.info(f"🔧 pdvm_dialog aufgerufen - frame_guid: {frame_guid}, mode: {mode}")
 
-        # UnifiedPdvmDialogWidget erstellen und in content_layout einbetten
+        # Prüfe Frame-Konfiguration für Multi-Tab-Support
+        multi_tab_enabled = self._check_multi_tab_enabled(frame_guid)
+        
+        if multi_tab_enabled:
+            logger.info("� Multi-Tab in framedaten aktiviert - lade Enhanced Widget...")
+            self._load_enhanced_dialog_widget(call_daten)
+        else:
+            logger.info("📄 Standard-Dialog - lade UnifiedPdvmDialogWidget V3...")
+            self._load_standard_dialog_widget(call_daten)
+
+    def _check_multi_tab_enabled(self, frame_guid):
+        """Prüft ob Multi-Tab in den framedaten aktiviert ist"""
         try:
-            from pdvm_unified_dialog_widget_v3 import UnifiedPdvmDialogWidget
+            from pdvm_central_datenbank import PdvmCentralDatenbank
             
-            # Widget erstellen
-            self.unified_widget = UnifiedPdvmDialogWidget(call_daten)
+            # Framedaten laden
+            db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="framedaten",
+                guid=frame_guid
+            )
             
-            # DEBUG: Content-Layout Info vor Widget-Einbettung
-            logger.info(f"🔧 DEBUG Content-Frame Größe: {self.content_frame.size().width()}x{self.content_frame.size().height()}")
+            frame_data = db.lesen()
+            if frame_data and isinstance(frame_data, dict):
+                multi_tab_config = frame_data.get("multi_tab_config", {})
+                enabled = multi_tab_config.get("multi_tab_enabled", False)
+                logger.info(f"📊 Frame {frame_guid}: Multi-Tab {'aktiviert' if enabled else 'deaktiviert'}")
+                
+                # ZUSÄTZLICH: Prüfe aktuellen Status auch nach Aktivierung
+                if enabled:
+                    logger.info("🎯 ENHANCED MULTI-TAB WIRD GELADEN!")
+                
+                return enabled
             
-            # Widget in den Arbeitsbereich einbetten (nicht als separates Fenster!)
-            # KRITISCH: Widget mit stretch=1 für volle Raumnutzung einbetten
-            self.content_layout.addWidget(self.unified_widget, 1)
-            
-            # KRITISCH: Force-Update der Layout-Größen
-            self.content_frame.updateGeometry()
-            self.unified_widget.updateGeometry()
-            QApplication.processEvents()
-            
-            # DEBUG: Final Widget-Größe
-            logger.info(f"🔧 DEBUG Widget finale Größe: {self.unified_widget.size().width()}x{self.unified_widget.size().height()}")
-            
-            # WICHTIG: Dialog-Widget persistent halten für Menü-Integration
-            self.current_dialog_widget = self.unified_widget
-            
-            # Status-Update
-            logger.info(f"🎨 UnifiedPdvmDialogWidget V3 geladen - Frame: {frame_guid}, Mode: {mode}")
-            logger.info("✅ UnifiedPdvmDialogWidget V3 erfolgreich in Arbeitsbereich integriert")
+            logger.info("📄 Keine framedaten gefunden - Standard-Dialog")
+            return False
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Laden des UnifiedPdvmDialogWidget: {e}")
+            logger.warning(f"⚠️ Fehler beim Prüfen der Multi-Tab-Konfiguration: {e}")
+            return False
+
+    def reload_current_frame_enhanced(self):
+        """
+        Lädt das aktuell aktive Frame mit Enhanced Multi-Tab neu
+        """
+        if hasattr(self, 'current_dialog_widget') and self.current_dialog_widget:
+            # Frame-GUID vom aktuellen Widget holen
+            frame_guid = getattr(self.current_dialog_widget, 'frame_guid', "4078079f-4028-45ed-879c-3c779ecf3d0d")
+            logger.info(f"🔄 Lade Frame {frame_guid} mit Enhanced Multi-Tab neu...")
+            
+            # Enhanced Widget laden
+            self.pdvm_enhanced_frame(frame_guid)
+        else:
+            logger.info("🔄 Lade Standard-Frame mit Enhanced Multi-Tab...")
+            self.pdvm_enhanced_frame()
+
+    def _load_enhanced_dialog_widget(self, call_daten):
+        """Lädt das Enhanced Multi-Tab Dialog-Widget"""
+        try:
+            # Setup für moderne framedaten-Struktur
+            try:
+                from create_modern_framedaten_structure import create_modern_framedaten_database
+                logger.info("🔧 Erstelle moderne framedaten-Struktur für Enhanced Dialog...")
+                create_modern_framedaten_database()
+            except Exception as e:
+                logger.warning(f"⚠️ Moderne Struktur-Skript: {e}")
+            
+            # Enhanced Multi-Tab Widget laden
+            from pdvm_enhanced_multi_tab_widget import EnhancedUnifiedPdvmDialogWidget
+            
+            # Widget erstellen
+            self.dialog_widget = EnhancedUnifiedPdvmDialogWidget(call_daten)
+            
+            # Widget in den Arbeitsbereich einbetten
+            self.content_layout.addWidget(self.dialog_widget, 1)
+            
+            # Layout-Updates
+            self.content_frame.updateGeometry()
+            self.dialog_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.dialog_widget
+            
+            logger.info("🎨 Enhanced Multi-Tab Dialog erfolgreich geladen!")
+            logger.info("📱 F4: Multi-Tab | ⚙️ F5: Konfiguration | 🔍 F1/F2: Lupe | 🔄 F3: Reset")
+            logger.info("🔄 Tab-Navigation: Ctrl+←/→ oder Alt+1-9 für direkten Tab-Zugriff")
+            logger.info("💡 ANLEITUNG: F4 drücken → Navigation-Leiste erscheint → Tab-Wechsel ohne Modus-Verlassen!")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Enhanced Dialog-Widgets: {e}")
+            # Fallback auf Standard-Widget
+            logger.info("🔄 Fallback auf Standard-Dialog...")
+            self._load_standard_dialog_widget(call_daten)
+
+    def _load_standard_dialog_widget(self, call_daten):
+        """Lädt das Standard UnifiedPdvmDialogWidget V3"""
+        try:
+            # Setup für moderne framedaten-Struktur
+            try:
+                from create_modern_framedaten_structure import create_modern_framedaten_database
+                logger.info("🔧 Erstelle moderne framedaten-Struktur für Standard-Dialog...")
+                create_modern_framedaten_database()
+            except Exception as e:
+                logger.warning(f"⚠️ Moderne Struktur-Skript: {e}")
+
+            # Standard UnifiedPdvmDialogWidget V3 laden
+            from pdvm_unified_dialog_widget_v3 import UnifiedPdvmDialogWidget
+            from pdvm_modern_dialog_loader import enhance_unified_widget
+            
+            # Widget erstellen
+            self.dialog_widget = UnifiedPdvmDialogWidget(call_daten)
+            
+            # Moderne Datenstruktur laden und anwenden
+            logger.info("🔧 Lade moderne framedaten-Struktur...")
+            enhance_unified_widget(self.dialog_widget)
+            
+            # Widget in den Arbeitsbereich einbetten
+            self.content_layout.addWidget(self.dialog_widget, 1)
+            
+            # Layout-Updates
+            self.content_frame.updateGeometry()
+            self.dialog_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.dialog_widget
+            
+            logger.info("🎨 Standard UnifiedPdvmDialogWidget V3 erfolgreich geladen!")
+            logger.info("✅ Moderne Tab-basierte Dialog-Architektur mit echten Daten verfügbar")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Standard Dialog-Widgets: {e}")
             # Fehler-Widget anzeigen
             from PyQt5.QtWidgets import QLabel
-            error_label = QLabel(f"❌ Fehler beim Laden: {str(e)}")
+            error_label = QLabel(f"❌ Fehler beim Laden des Dialog-Widgets: {str(e)}")
             error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
             self.content_layout.addWidget(error_label)
 
@@ -422,6 +1011,139 @@ class MainApp(QMainWindow):
         else:
             logger.warning("⚠️ Kein Unified Dialog Widget aktiv")
             return None
+
+    def toggle_menu_visibility(self):
+        """
+        Schaltet die Sichtbarkeit des vertikalen Menüs um.
+        
+        Entfernt oder fügt das vertikale Menü (menu_frame) zum Layout hinzu
+        und gibt dem Content-Bereich den gesamten verfügbaren Platz.
+        """
+        try:
+            # Status-Variable für Menü-Sichtbarkeit initialisieren falls nicht vorhanden
+            if not hasattr(self, '_menu_visible'):
+                self._menu_visible = True
+            
+            if self._menu_visible:
+                # Menü aus Layout entfernen
+                self.main_layout.removeWidget(self.menu_frame)
+                self.menu_frame.hide()
+                logger.info("🎛️ Vertikales Menü ausgeblendet - Content-Bereich vergrößert")
+                self._menu_visible = False
+            else:
+                # Menü wieder zum Layout hinzufügen
+                self.main_layout.insertWidget(0, self.menu_frame, 1)  # Position 0 = links
+                self.menu_frame.show()
+                logger.info("🎛️ Vertikales Menü eingeblendet - Layout wiederhergestellt")
+                self._menu_visible = True
+            
+            # Layout-Update erzwingen
+            self.main_layout.update()
+            QApplication.processEvents()
+            
+            # Aktuellen Status speichern
+            self._save_menu_visibility_status()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Umschalten der Menü-Sichtbarkeit: {e}")
+
+    def _ensure_menu_visible(self):
+        """Stellt sicher, dass das Menü sichtbar ist."""
+        if not hasattr(self, '_menu_visible'):
+            self._menu_visible = True
+            
+        if not self._menu_visible:
+            self.main_layout.insertWidget(0, self.menu_frame, 1)
+            self.menu_frame.show()
+            self._menu_visible = True
+            self.main_layout.update()
+            QApplication.processEvents()
+
+    def _get_current_menu_id(self):
+        """Holt die aktuelle Menü-ID."""
+        if hasattr(self, 'menu_handler') and self.menu_handler:
+            return self.menu_handler.menu_id
+        return self.startmenu_id
+
+    def _save_menu_visibility_status(self):
+        """Speichert den Menü-Sichtbarkeits-Status für das aktuelle Menü in der systemsteuerung-Tabelle."""
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            current_menu_id = self._get_current_menu_id()
+            menu_visible = getattr(self, '_menu_visible', True)
+            
+            # Systemsteuerung-Datenbank für Benutzer öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Aktuelle Daten laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(self.user_guid, {})
+            
+            # MenuStatus-Struktur initialisieren falls nicht vorhanden
+            if "MenuStatus" not in user_data:
+                user_data["MenuStatus"] = {}
+            
+            # Aktuellen Menüstatus speichern (unter Menü-UID)
+            user_data["MenuStatus"][current_menu_id] = menu_visible
+            
+            # Zurück in Datenbank speichern
+            raw_data[self.user_guid] = user_data
+            sys_db.speichern(self.user_guid, raw_data)
+            
+            logger.debug(f"💾 Menü-Status in systemsteuerung gespeichert für Menü {current_menu_id}: {menu_visible}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern des Menü-Status: {e}")
+
+    def _restore_menu_visibility_status(self, menu_id):
+        """Stellt den gespeicherten Menü-Sichtbarkeits-Status aus der systemsteuerung-Tabelle wieder her."""
+        try:
+            # Startmenü: Immer sichtbar
+            if menu_id == self.startmenu_id:
+                self._ensure_menu_visible()
+                return
+            
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            # Systemsteuerung-Datenbank für Benutzer öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Gespeicherten Status laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(self.user_guid, {})
+            menu_status = user_data.get("MenuStatus", {})
+            saved_visibility = menu_status.get(menu_id, True)  # Default: sichtbar
+            
+            # Status anwenden
+            if saved_visibility and not getattr(self, '_menu_visible', True):
+                # Menü einblenden
+                self.main_layout.insertWidget(0, self.menu_frame, 1)
+                self.menu_frame.show()
+                self._menu_visible = True
+                logger.info(f"🔄 Menü für {menu_id} wiederhergestellt: eingeblendet")
+            elif not saved_visibility and getattr(self, '_menu_visible', True):
+                # Menü ausblenden
+                self.main_layout.removeWidget(self.menu_frame)
+                self.menu_frame.hide()
+                self._menu_visible = False
+                logger.info(f"🔄 Menü für {menu_id} wiederhergestellt: ausgeblendet")
+            
+            self.main_layout.update()
+            QApplication.processEvents()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Wiederherstellen des Menü-Status: {e}")
+            # Fallback: Menü anzeigen
+            self._ensure_menu_visible()
 
     def logout(self):
         """Logout: schließt App und zeigt Login erneut."""

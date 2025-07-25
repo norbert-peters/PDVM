@@ -307,63 +307,77 @@ class PdvmCentralDatenbank:
     def lesen_alle(self) -> Optional[list]:
         """
         Liest **alle** Zeilen (alle GUIDs) aus der Tabelle self.table_name.
+        Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
         Gibt eine Liste von Diktaten zurück: jeweils
           {"uid": <guid>, "<GRUPPE1>": <Daten-Dict oder JSON-String>, ...}
         """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {self.table_name}")
-        rows = cursor.fetchall()
-        cols = [col[0] for col in cursor.description]
-        conn.close()
+        try:
+            # Über PdvmDatenbank alle Datensätze laden (statt direkter SQL-Zugriffe)
+            from pdvm_datenbank import PdvmDatenbank
+            
+            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+            rows = data_db.lesen_alle()
+            
+            if not rows:
+                logger.warning(f"⚠️ Keine Datensätze in Tabelle {self.table_name} gefunden")
+                return []
 
-        result = []
-        for row in rows:
-            entry = {cols[i]: row[i] for i in range(len(cols))}
-            # Spalte "daten" liegt in entry["daten"] als JSON-String oder dict
-            raw = entry.get("daten", {})
-            if isinstance(raw, str):
-                try:
-                    data_dict = json.loads(raw)
-                except:
-                    data_dict = {}
-            else:
-                data_dict = raw
-            # Wir ersetzen entry["daten"] durch den gepackten Dict-Inhalt:
-            entry = {"uid": entry["uid"], **data_dict}
-            result.append(entry)
-        return result
+            result = []
+            for row in rows:
+                # Spalte "daten" liegt in row["daten"] als JSON-String oder dict
+                raw = row.get("daten", {})
+                if isinstance(raw, str):
+                    try:
+                        data_dict = json.loads(raw)
+                    except:
+                        data_dict = {}
+                else:
+                    data_dict = raw
+                # Wir ersetzen row["daten"] durch den gepackten Dict-Inhalt:
+                entry = {"uid": row["uid"], **data_dict}
+                result.append(entry)
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Lesen aller Datensätze aus {self.table_name}: {e}")
+            return []
 
     def speichern(self, guid: str, daten: Dict[str, Any]):
         """
         Speichert oder aktualisiert den Eintrag (guid, daten).
+        Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
         'daten' ist ein Python-Dict, das wir in JSON umwandeln und in Tabelle schreiben.
         """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-
-        json_str = json.dumps(daten)
-        # Prüfen, ob schon existiert
-        cursor.execute(f"SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?", (guid,))
-        exists = cursor.fetchone()[0] > 0
-
-        if exists:
-            cursor.execute(f"UPDATE {self.table_name} SET daten = ? WHERE uid = ?", (json_str, guid))
-        else:
-            cursor.execute(f"INSERT INTO {self.table_name} (uid, daten) VALUES (?, ?)", (guid, json_str))
-
-        conn.commit()
-        conn.close()
+        try:
+            # Über PdvmDatenbank speichern (statt direkter SQL-Zugriffe)
+            from pdvm_datenbank import PdvmDatenbank
+            
+            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+            data_db.speichern(guid, daten)
+            
+            logger.debug(f"✅ Datensatz {guid} erfolgreich in {self.table_name} gespeichert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern von Datensatz {guid}: {e}")
+            raise
 
     def loeschen(self, guid: str):
         """
         Löscht einen Datensatz anhand der GUID.
+        Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
         """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        cursor.execute(f"DELETE FROM {self.table_name} WHERE uid = ?", (guid,))
-        conn.commit()
-        conn.close()
+        try:
+            # Über PdvmDatenbank löschen (statt direkter SQL-Zugriffe)
+            from pdvm_datenbank import PdvmDatenbank
+            
+            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+            data_db.loeschen(guid)
+            
+            logger.debug(f"✅ Datensatz {guid} erfolgreich aus {self.table_name} gelöscht")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen von Datensatz {guid}: {e}")
+            raise
 
     def save_values(self):
         """
@@ -619,3 +633,294 @@ class PdvmCentralDatenbank:
                 self.data = raw
                 self.guid = guid
                 self._dirty = False
+
+    def get_value_view(self, view_config: dict, stichtag: Optional[float] = None) -> list:
+        """
+        Effiziente View-Methode: Liest alle Datensätze der Tabelle und löst sie 
+        basierend auf view_config in eine flache Struktur auf.
+        
+        Args:
+            view_config: View-Konfiguration mit metadata und Feldliste
+            stichtag: Optionaler Stichtag für historische Daten
+            
+        Returns:
+            Liste von Dicts mit aufgelösten Feldwerten: [{'_guid': '...', 'FELD1': 'Wert', ...}, ...]
+        """
+        try:
+            if stichtag is None:
+                from pd_datetime import Pdvm_DateTime
+                dt_inst = Pdvm_DateTime("DEU")
+                stichtag = dt_inst.PdvmDateTimeNow()
+            
+            # 1. Alle Datensätze der Tabelle laden (EINMAL!)
+            alle_datensaetze = self.lesen_alle()
+            if not alle_datensaetze:
+                logger.warning(f"📊 Keine Datensätze in Tabelle {self.table_name} gefunden")
+                return []
+            
+            # 2. View-Konfiguration extrahieren
+            if not view_config or "metadata" not in view_config:
+                logger.error("❌ Ungültige view_config - metadata fehlt")
+                return []
+            
+            table_name = view_config["ROOT"]["view_table"]
+            felder = view_config["metadata"][table_name]["felder"]
+            
+            logger.info(f"📊 get_value_view: Verarbeite {len(alle_datensaetze)} Datensätze für {len(felder)} Felder")
+            
+            # 3. Für jeden Datensatz alle gewünschten Felder auflösen
+            result = []
+            for row_data in alle_datensaetze:
+                guid = row_data.get("uid")
+                if not guid:
+                    continue
+                
+                # Temporäre Instanz für diesen Datensatz erstellen
+                temp_instance = PdvmCentralDatenbank(
+                    db_name=self.db_name,
+                    table_name=self.table_name,
+                    guid=guid
+                )
+                
+                # Feldwerte für diesen Datensatz sammeln
+                record = {"uid": guid, "_guid": guid}
+                for feld_config in felder:
+                    feld_name = feld_config["feld"]
+                    
+                    # Flexibel alle möglichen Gruppen durchsuchen
+                    wert = self._find_field_in_any_group(temp_instance, feld_name, stichtag)
+                    record[feld_name] = wert
+                
+                result.append(record)
+            
+            logger.info(f"✅ {len(result)} Datensätze für View verarbeitet (Stichtag: {stichtag})")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler in get_value_view: {e}")
+            return []
+    
+    def _find_field_in_any_group(self, instance: 'PdvmCentralDatenbank', feld_name: str, stichtag: float) -> Any:
+        """
+        Sucht ein Feld in allen verfügbaren Gruppen der Instanz.
+        
+        Args:
+            instance: PdvmCentralDatenbank-Instanz 
+            feld_name: Name des gesuchten Feldes
+            stichtag: Stichtag für historische Abfrage
+            
+        Returns:
+            Gefundener Wert oder None
+        """
+        if not instance.data:
+            return None
+        
+        # Alle Gruppen in der Instanz durchsuchen
+        for gruppe in instance.data.keys():
+            if isinstance(instance.data[gruppe], dict):
+                if feld_name in instance.data[gruppe]:
+                    # Feld gefunden - Wert mit get_value holen
+                    result = instance.get_value(gruppe, feld_name, stichtag)
+                    if result:
+                        wert = result.get("wert")
+                        logger.debug(f"      ✅ Gefunden in {gruppe}: {feld_name} = {wert}")
+                        logger.debug(f"   📚 Historisch: {feld_name} = {wert}")
+                        return wert
+        
+        # Feld nicht gefunden
+        logger.debug(f"      🚫 Nicht gefunden: {feld_name}")
+        logger.debug(f"   📚 Historisch: {feld_name} = None")
+        return None
+
+    # ====== ZENTRALE DROPDOWN-FUNKTIONALITÄT ======
+    
+    def get_dropdown_options_from_data(self, table_name: str, field_name: str, dropdown_config: dict) -> Dict[str, str]:
+        """
+        Zentrale Methode: Erzeugt Dropdown-Optionen basierend auf tatsächlich in der Tabelle vorhandenen Werten.
+        
+        Args:
+            table_name: Name der Tabelle (z.B. "persondaten")
+            field_name: Name des Feldes (z.B. "ANREDE") 
+            dropdown_config: Konfiguration mit "table", "key", "value" für Übersetzungen
+            
+        Returns:
+            Dict[str, str]: {key: display_text} Mapping aller in den Daten vorkommenden Werte
+        """
+        options = {}
+        
+        try:
+            # 1. Alle tatsächlich vorhandenen Werte aus der Tabelle sammeln
+            unique_values = self._collect_unique_values_from_table(table_name, field_name)
+            logger.info(f"🔍 Gefundene eindeutige Werte in {table_name}.{field_name}: {unique_values}")
+            
+            if not unique_values:
+                logger.warning(f"⚠️ Keine Werte für {field_name} in {table_name} gefunden")
+                return options
+            
+            # 2. Übersetzungen für diese Werte laden
+            dropdown_table = dropdown_config.get("table", "dropdowndaten")
+            dropdown_key = dropdown_config.get("key")
+            dropdown_group = dropdown_config.get("value", "ANREDE")
+            
+            if not dropdown_key:
+                logger.warning(f"⚠️ Kein dropdown_key konfiguriert für {field_name}")
+                # Fallback: Werte ohne Übersetzung verwenden
+                for value in unique_values:
+                    if value is not None:
+                        options[str(value)] = str(value)
+                return options
+            
+            # 3. Dropdown-Daten laden
+            dropdown_db = PdvmCentralDatenbank(
+                db_name=self.db_name,
+                table_name=dropdown_table,
+                guid=dropdown_key
+            )
+            
+            dropdown_data = dropdown_db.lesen()
+            translations = {}
+            
+            if dropdown_data and "ROOT" in dropdown_data:
+                group_data = dropdown_data["ROOT"].get(dropdown_group, {})
+                values = group_data.get("werte", [])
+                
+                # Übersetzungs-Mapping erstellen
+                for entry in values:
+                    key = entry.get("key", "")
+                    display = entry.get("de", entry.get("en", key))
+                    if key:
+                        translations[key] = display
+                
+                logger.info(f"🔍 Übersetzungen geladen für {dropdown_group}: {len(translations)} Einträge")
+            
+            # 4. Nur die tatsächlich vorhandenen Werte mit Übersetzungen zurückgeben
+            for value in unique_values:
+                if value is not None:
+                    str_value = str(value)
+                    display_value = translations.get(str_value, str_value)
+                    options[str_value] = display_value
+                    logger.debug(f"🔍 Dropdown-Option: '{str_value}' → '{display_value}'")
+            
+            logger.info(f"✅ Dropdown-Optionen für {field_name} erstellt: {len(options)} Optionen basierend auf echten Daten")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen der Dropdown-Optionen für {field_name}: {e}")
+            # Fallback: Leeres Dict
+            
+        return options
+
+    def _collect_unique_values_from_table(self, table_name: str, field_name: str) -> set:
+        """
+        Sammelt alle eindeutigen Werte für ein Feld aus einer Tabelle.
+        Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
+        
+        Args:
+            table_name: Name der Tabelle
+            field_name: Name des Feldes
+            
+        Returns:
+            set: Alle eindeutigen Werte (ohne None/leere Strings)
+        """
+        unique_values = set()
+        
+        try:
+            # Über PdvmDatenbank alle Datensätze laden (statt direkter SQL-Zugriffe)
+            from pdvm_datenbank import PdvmDatenbank
+            
+            data_db = PdvmDatenbank(db_name=self.db_name, table_name=table_name)
+            rows = data_db.lesen_alle()
+            
+            if not rows:
+                logger.warning(f"⚠️ Keine Datensätze in Tabelle {table_name} gefunden")
+                return unique_values
+            
+            logger.debug(f"🔍 Analysiere {len(rows)} Datensätze aus {table_name}")
+            
+            for row in rows:
+                try:
+                    # 'daten' Spalte extrahieren und JSON parsen
+                    json_data = row.get('daten', '')
+                    if isinstance(json_data, str):
+                        data = json.loads(json_data)
+                    else:
+                        data = json_data
+                    
+                    # Durch alle Gruppen suchen
+                    for group_name, group_data in data.items():
+                        if isinstance(group_data, dict) and field_name in group_data:
+                            field_data = group_data[field_name]
+                            
+                            if isinstance(field_data, dict):
+                                # Historische Daten: Alle Werte aus dem Dict extrahieren
+                                for timestamp, value in field_data.items():
+                                    if value is not None and value != "":
+                                        unique_values.add(value)
+                            else:
+                                # Direkter Wert
+                                if field_data is not None and field_data != "":
+                                    unique_values.add(field_data)
+                    
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"🔍 Überspringe ungültigen Datensatz: {e}")
+                    continue
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Sammeln der Werte aus {table_name}: {e}")
+        
+        # None-Werte entfernen
+        unique_values.discard(None)
+        unique_values.discard("")
+        
+        logger.debug(f"🔍 Eindeutige Werte gefunden: {unique_values}")
+        return unique_values
+
+    def get_dropdown_display_value(self, raw_value: str, field_name: str, dropdown_config: dict) -> str:
+        """
+        Übersetzt einen Raw-Wert zu seinem Display-Text für Dropdown-Felder.
+        
+        Args:
+            raw_value: Der rohe Wert aus der Datenbank
+            field_name: Name des Feldes
+            dropdown_config: Dropdown-Konfiguration
+            
+        Returns:
+            str: Übersetzter Display-Text oder Raw-Wert als Fallback
+        """
+        if not raw_value:
+            return ""
+        
+        try:
+            dropdown_table = dropdown_config.get("table", "dropdowndaten")
+            dropdown_key = dropdown_config.get("key")
+            dropdown_group = dropdown_config.get("value", "ANREDE")
+            
+            if not dropdown_key:
+                return str(raw_value)
+            
+            # Dropdown-Daten laden
+            dropdown_db = PdvmCentralDatenbank(
+                db_name=self.db_name,
+                table_name=dropdown_table,
+                guid=dropdown_key
+            )
+            
+            dropdown_data = dropdown_db.lesen()
+            
+            if dropdown_data and "ROOT" in dropdown_data:
+                group_data = dropdown_data["ROOT"].get(dropdown_group, {})
+                values = group_data.get("werte", [])
+                
+                for entry in values:
+                    key = entry.get("key", "")
+                    display = entry.get("de", entry.get("en", key))
+                    if key == str(raw_value):
+                        logger.debug(f"🔍 Dropdown übersetzt: '{raw_value}' → '{display}'")
+                        return display
+            
+            # Fallback: Raw-Wert zurückgeben
+            logger.debug(f"🔍 Keine Übersetzung gefunden für '{raw_value}', verwende Raw-Wert")
+            return str(raw_value)
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Dropdown-Übersetzung für {raw_value}: {e}")
+            return str(raw_value)

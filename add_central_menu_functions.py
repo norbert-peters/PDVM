@@ -48,6 +48,17 @@ def add_central_functions_menu():
         "Dialog_Daten-Export": "widget = self.get_current_unified_widget(); widget and widget.execute_central_function('export_data')",
         "Dialog_Menu-Toggle": "widget = self.get_current_unified_widget(); widget and widget.execute_central_function('toggle_menu')",
         
+        # === BESTEHENDE MENÜ-EINTRÄGE (aus dem Log erkannt) ===
+        "Testbereich_Dialog Inputframe_🔍 Lupe Modi_Lupe Übersicht": "self.dialog_zusatz('View-Lupe')",
+        "Testbereich_Dialog Inputframe_🔍 Lupe Modi_Lupe Eingaben": "self.dialog_zusatz('Input-Lupe')",
+        "Testbereich_Dialog Inputframe_🔍 Lupe Modi_Lupen aus": "self.dialog_zusatz('Position-Normal')",
+        
+        # === DIALOG ZUSATZ VARIANTEN ===
+        "Dialog_Lupe-View": "self.dialog_zusatz('View-Lupe')",
+        "Dialog_Lupe-Input": "self.dialog_zusatz('Input-Lupe')",
+        "Dialog_Lupe-Aus": "self.dialog_zusatz('Position-Normal')",
+        "Dialog_Lupe-Normal": "self.dialog_zusatz('Position-Normal')",
+        
         # === ZENTRALE FUNKTIONEN (alte Variante) ===
         "Dialog_🗓️ Stichtag wechseln": "widget = self.get_current_unified_widget(); widget and widget.execute_central_function('stichtag_wechsel')",
         "Dialog_🔄 View refreshen": "widget = self.get_current_unified_widget(); widget and widget.execute_central_function('refresh_view')",

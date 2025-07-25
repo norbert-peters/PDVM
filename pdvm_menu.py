@@ -12,7 +12,33 @@ class PdvmMenu:
         self.db = PdvmDatenbank(db_name, "menudaten", historisch=False)
         daten = self.db.lesen(menu_id)
         self.__pd_structure = self.normalize_menu_structure(daten)
+        
+        # Template-Verarbeitung BEVOR Validierung
+        self._process_templates()
+        
         self.validate_and_normalize_structure()
+        
+    def _process_templates(self):
+        """
+        Verarbeitet Template-Referenzen in der Menüstruktur
+        WICHTIG: Wird vor validate_and_normalize_structure() ausgeführt
+        """
+        try:
+            from pdvm_menu_template_handler import PdvmMenuTemplateHandler
+            
+            template_handler = PdvmMenuTemplateHandler()
+            
+            # Template-Verarbeitung auf die Rohstruktur anwenden
+            processed_structure = template_handler.process_menu_templates(self.__pd_structure)
+            
+            # Verarbeitete Struktur übernehmen
+            self.__pd_structure = processed_structure
+            
+            logger.info(f"✅ Templates in Menü {self.menu_id} verarbeitet")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Template-Verarbeitung für Menü {self.menu_id} fehlgeschlagen: {e}")
+            # Bei Fehlern mit Original-Struktur weiterarbeiten
 
     def save_to_db(self):
         self.db.speichern(self.menu_id, self.__pd_structure)

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-UnifiedPdvmDialogWidget V3 - Saubere Lupe-Implementierung
-=======================================================
+UnifiedPdvmDialogWidget V3 - Saubere Lupe-Implementierung mit Multi-Tab-Support
+==============================================================================
 
 Erweiterte Dialog-Architektur mit:
 - Schaltbare View (außerhalb der Tabs)  
 - Input-Controls in Tabs organisiert
 - Einfache Lupe-Funktionalität (komplettes Ein-/Ausblenden)
+- Multi-Tab-Layout (2-3 Tabs parallel anzeigen)
 - Zentrale Funktionen für Menü-Integration
 - Persistente UI-Einstellungen per Frame-GUID
 - Vollständige PyQt5-Integration mit Scrollbars
@@ -26,10 +27,22 @@ import json
 
 # Import PDVM modules
 try:
-    from pd_datetime import Pdvm_DateTime, PdvmDateTimeNow
+    from pd_datetime import Pdvm_DateTime
     from pdvm_central_datenbank import PdvmCentralDatenbank
 except ImportError as e:
-    logging.warning(f"PDVM Module nicht verfügbar: {e}")
+    logging.warning(f"PDVM Basis-Module nicht verfügbar: {e}")
+    
+# Multi-Tab-Support Import (optional)
+try:
+    from pdvm_multi_tab_layout import add_multi_tab_support
+    MULTI_TAB_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Multi-Tab-Modul nicht verfügbar: {e}")
+    MULTI_TAB_AVAILABLE = False
+    # Fallback-Funktion
+    def add_multi_tab_support(container, tab_widget):
+        logging.warning("Multi-Tab-Support nicht verfügbar - Fallback verwendet")
+        return None
 
 # Logger konfigurieren
 logging.basicConfig(level=logging.INFO)
@@ -44,9 +57,10 @@ class UnifiedPdvmDialogWidget(QWidget):
     - View-Bereich mit kompletter Ein-/Ausblendung
     - Input-Controls in Tabs mit Scrollbars
     - Lupe-Funktionalität (View-Lupe/Input-Lupe)
+    - Multi-Tab-Layout (2-3 Tabs parallel)
     - Zentrale Funktionen für Menü-Integration
     - Persistente UI-Einstellungen
-    - Keyboard-Shortcuts (F1, F2, F3)
+    - Keyboard-Shortcuts (F1, F2, F3, F4)
     """
     
     # Signale für Kommunikation mit Hauptanwendung
@@ -68,6 +82,9 @@ class UnifiedPdvmDialogWidget(QWidget):
         self.input_lupe_active = False
         self.saved_splitter_sizes = [300, 300]  # Standard 50/50
         
+        # Multi-Tab-Manager (wird später initialisiert)
+        self.multi_tab_manager = None
+        
         # Widget initialisieren
         self.init_ui()
         self.setup_keyboard_shortcuts()
@@ -82,8 +99,8 @@ class UnifiedPdvmDialogWidget(QWidget):
         # KRITISCH: Widget soll volle verfügbare Größe nutzen
         self.resize(800, 600)  # Fallback falls Parent-Size nicht verfügbar
         
-        logger.info("⌨️ Keyboard-Shortcuts aktiviert: F1=View-Lupe, F2=Input-Lupe, F3=Position wiederherstellen")
-        logger.info("🎨 UnifiedPdvmDialogWidget V3 erfolgreich initialisiert")
+        logger.info("⌨️ Keyboard-Shortcuts aktiviert: F1=View-Lupe, F2=Input-Lupe, F3=Position wiederherstellen, F4=Multi-Tab")
+        logger.info("🎨 UnifiedPdvmDialogWidget V3 mit Multi-Tab-Support erfolgreich initialisiert")
     
     def init_ui(self):
         """Initialisiert die gesamte Benutzeroberfläche"""
@@ -239,6 +256,21 @@ class UnifiedPdvmDialogWidget(QWidget):
         self.create_stammdaten_tab()
         self.create_details_tab()
         self.create_zusatz_tab()
+        
+        # Multi-Tab-Unterstützung hinzufügen
+        try:
+            if MULTI_TAB_AVAILABLE:
+                self.multi_tab_manager = add_multi_tab_support(container, self.input_tabs)
+                if self.multi_tab_manager:
+                    logger.info("🎨 Multi-Tab-Unterstützung erfolgreich hinzugefügt")
+                else:
+                    logger.warning("⚠️ Multi-Tab-Manager konnte nicht erstellt werden")
+            else:
+                logger.info("ℹ️ Multi-Tab-Support nicht verfügbar - läuft ohne Multi-Tab-Features")
+                self.multi_tab_manager = None
+        except Exception as e:
+            logger.warning(f"⚠️ Multi-Tab-Unterstützung konnte nicht hinzugefügt werden: {e}")
+            self.multi_tab_manager = None
         
         layout.addWidget(self.input_tabs)
         
@@ -416,6 +448,10 @@ class UnifiedPdvmDialogWidget(QWidget):
         # F3: Position wiederherstellen
         self.shortcut_f3 = QShortcut(QKeySequence(Qt.Key_F3), self)
         self.shortcut_f3.activated.connect(self.restore_user_position)
+        
+        # F4: Multi-Tab-Modus umschalten
+        self.shortcut_f4 = QShortcut(QKeySequence(Qt.Key_F4), self)
+        self.shortcut_f4.activated.connect(self.toggle_multi_tab_mode)
     
     def toggle_view_lupe(self):
         """Toggle View-Lupe - blendet Input komplett aus oder wieder ein"""
@@ -732,6 +768,38 @@ class UnifiedPdvmDialogWidget(QWidget):
         self.description_field.clear()
         self.show_status_message("🔄 Stammdaten zurückgesetzt")
         logger.info("🔄 Stammdaten zurückgesetzt")
+    
+    def toggle_multi_tab_mode(self):
+        """Schaltet den Multi-Tab-Modus um (F4)"""
+        
+        if self.multi_tab_manager:
+            try:
+                self.multi_tab_manager.toggle_multi_tab_mode()
+                
+                if self.multi_tab_manager.multi_tab_active:
+                    self.show_status_message("📱 Multi-Tab-Modus aktiviert - Parallele Tab-Anzeige")
+                    logger.info("📱 Multi-Tab-Modus über F4 aktiviert")
+                else:
+                    self.show_status_message("📱 Multi-Tab-Modus deaktiviert - Standard-Tab-Anzeige")
+                    logger.info("📱 Multi-Tab-Modus über F4 deaktiviert")
+                    
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Umschalten des Multi-Tab-Modus: {e}")
+                self.show_status_message(f"❌ Multi-Tab-Fehler: {str(e)}")
+        else:
+            logger.warning("⚠️ Multi-Tab-Manager nicht verfügbar")
+            self.show_status_message("⚠️ Multi-Tab-Modus nicht verfügbar")
+    
+    def get_multi_tab_status(self):
+        """Gibt den aktuellen Status des Multi-Tab-Modus zurück"""
+        
+        if self.multi_tab_manager:
+            return {
+                'active': self.multi_tab_manager.multi_tab_active,
+                'layout_type': self.multi_tab_manager.layout_combo.currentText() if hasattr(self.multi_tab_manager, 'layout_combo') else None,
+                'available_tabs': len(self.multi_tab_manager.available_tabs) if hasattr(self.multi_tab_manager, 'available_tabs') else 0
+            }
+        return {'active': False, 'layout_type': None, 'available_tabs': 0}
 
 # ========================================
 # DEMO/TEST BEREICH
