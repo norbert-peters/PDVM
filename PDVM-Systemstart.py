@@ -457,10 +457,78 @@ class MainApp(QMainWindow):
         """Direkte V2 Test-Funktion"""
         self.pdvm_modern_view_test(view_guid, version=2)
 
-    def pdvm_modern_view(self, frame_guid=None, version=2):
+    def pdvm_modern_view_test_v3(self, view_guid=None):
+        """Test für das neue moderne View-Widget V3 mit Original/Show-Spalten-Architektur"""
+        if not view_guid:
+            view_guid = "test-view-v3-architektur-2025"  # Default V3-Test-View
+        
+        # Inhalt löschen
+        self.clear_content_layout()
+
+        try:
+            # V3 Architektur mit Original/Show-Spalten
+            from pdvm_modern_view_widget_v3 import PdvmModernViewWidgetV3
+            
+            self.modern_view_widget = PdvmModernViewWidgetV3(
+                view_guid=view_guid,
+                user_guid=self.user_guid,
+                parent=self
+            )
+            
+            logger.info(f"📊 Modernes View-Widget V3 geladen für View: {view_guid}")
+            logger.info("✅ V3 Features: Original/Show-Spalten-Architektur")
+            logger.info("🔧 Zentrale Datenaufbereitung in PdvmCentralDatenbank")
+            logger.info("🎛️ Filter: Text auf Show-Spalten, Datum mit Zeitraum-Modus")
+            logger.info("📊 Sortierung: Original oder Show basierend auf sortByOriginal")
+            logger.info("💾 Benutzer-Einstellungen in systemsteuerung gespeichert")
+            
+            # Signal-Verbindungen
+            self.modern_view_widget.rowSelected.connect(self._on_view_row_selected)
+            
+            # Widget einbetten
+            self.content_layout.addWidget(self.modern_view_widget, 1)
+            
+            # Layout-Updates
+            self.content_frame.updateGeometry()
+            self.modern_view_widget.updateGeometry()
+            QApplication.processEvents()
+            
+            # Widget persistent halten
+            self.current_dialog_widget = self.modern_view_widget
+            
+            logger.info("✅ V3-System: Original/Show-Spalten, YMD/Alter, zentrale Filter")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Modern View-Widgets V3: {e}")
+            # Fehler-Widget anzeigen
+            from PyQt5.QtWidgets import QLabel
+            error_label = QLabel(f"❌ Fehler beim Laden der modernen View V3:\n{str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            self.content_layout.addWidget(error_label)
+
+    def pdvm_setup_v3_test_environment(self):
+        """Erstellt die V3-Test-Umgebung"""
+        try:
+            from test_view_system_v3 import test_v3_system
+            
+            logger.info("🔧 Erstelle V3-Test-Umgebung...")
+            success = test_v3_system()
+            
+            if success:
+                logger.info("✅ V3-Test-Umgebung erfolgreich erstellt")
+                self.show_text("✅ V3-Test-Umgebung erstellt!\n\nJetzt verfügbar:\n• app.pdvm_modern_view_test_v3()")
+            else:
+                logger.error("❌ V3-Test-Umgebung konnte nicht erstellt werden")
+                self.show_text("❌ Fehler beim Erstellen der V3-Test-Umgebung")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Setup der V3-Test-Umgebung: {e}")
+            self.show_text(f"❌ Setup-Fehler:\n{str(e)}")
+
+    def pdvm_modern_view(self, frame_guid=None):
         """
         Moderne View-Widget mit frame_guid - lädt view_guid aus framedaten
-        Version 2: Neue Architektur mit separatem Filter-Manager
+        Verwendet die konsolidierte Architektur mit zentraler get_value_view() Methode
         Diese Methode sollten Sie im Menü verwenden!
         """
         if not frame_guid:
@@ -502,31 +570,21 @@ class MainApp(QMainWindow):
             logger.info(f"🗃️ Root-Tabelle: {root_table}")
             logger.info(f"🏗️ Widget-Typ: {root_config.get('widget_type', 'Standard')}")
             
-            # 2. Moderne View-Widget erstellen (Version wählbar)
-            if version == 2:
-                from pdvm_modern_view_widget_v2 import PdvmModernViewWidgetV2
-                
-                self.modern_view_widget = PdvmModernViewWidgetV2(
-                    view_guid=view_guid,
-                    user_guid=self.user_guid,
-                    parent=self
-                )
-                
-                logger.info(f"📊 Modernes View-Widget V2 geladen für Frame: {frame_guid}")
-                logger.info("✅ V2 Features: Separater Filter-Manager, Original+Gefilterte Daten")
-                logger.info("🔄 Aktualisieren behält alle Filter bei")
-                
-            else:
-                # Fallback V1
-                from pdvm_modern_view_widget import PdvmModernViewWidget
-                
-                self.modern_view_widget = PdvmModernViewWidget(
-                    view_guid=view_guid,
-                    user_guid=self.user_guid,
-                    parent=self
-                )
-                
-                logger.info(f"📊 Modernes View-Widget V1 geladen für Frame: {frame_guid}")
+            # 2. Moderne View-Widget erstellen mit konsolidierter Architektur
+            from pdvm_modern_view_widget_v3 import PdvmModernViewWidgetV3
+            
+            self.modern_view_widget = PdvmModernViewWidgetV3(
+                view_guid=view_guid,
+                user_guid=self.user_guid,
+                parent=self
+            )
+            
+            logger.info(f"📊 Modernes View-Widget geladen für Frame: {frame_guid}")
+            logger.info("✅ Features: Original/Show-Spalten-Architektur")
+            logger.info("🔧 Zentrale Datenaufbereitung mit get_value_view()")
+            logger.info("🎛️ Filter: Text auf Show-Spalten, Datum mit Zeitraum-Modus")
+            logger.info("📊 Sortierung: Original oder Show basierend auf Benutzer-Einstellungen")
+            logger.info("� Benutzer-Einstellungen in systemsteuerung gespeichert")
             
             # 3. Signal-Verbindungen
             self.modern_view_widget.rowSelected.connect(self._on_view_row_selected)
@@ -539,11 +597,7 @@ class MainApp(QMainWindow):
             self.modern_view_widget.updateGeometry()
             QApplication.processEvents()
             
-            # 6. UI-Finalisierung (nur V1)
-            if version == 1:
-                QTimer.singleShot(200, self._finalize_modern_view_setup)
-            
-            # 7. Widget persistent halten
+            # 6. Widget persistent halten
             self.current_dialog_widget = self.modern_view_widget
             
             logger.info(f"🔗 Verwendete View-GUID: {view_guid}")
@@ -554,13 +608,9 @@ class MainApp(QMainWindow):
             logger.error(f"❌ Fehler beim Laden des Modern View-Widgets: {e}")
             # Fehler-Widget anzeigen
             from PyQt5.QtWidgets import QLabel
-            error_label = QLabel(f"❌ Fehler beim Laden der modernen View V{version}:\n{str(e)}")
+            error_label = QLabel(f"❌ Fehler beim Laden der modernen View:\n{str(e)}")
             error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
             self.content_layout.addWidget(error_label)
-
-    def pdvm_modern_view_v2(self, frame_guid=None):
-        """Direkte V2-Funktion für Menü-Integration"""
-        self.pdvm_modern_view(frame_guid, version=2)
 
     def _on_view_row_selected(self, record):
         """Callback wenn eine Zeile in der View ausgewählt wird"""

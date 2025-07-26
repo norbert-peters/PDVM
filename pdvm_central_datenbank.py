@@ -49,6 +49,24 @@ class PdvmCentralDatenbank:
         # Wenn eine GUID übergeben wurde, lade das JSON‐Diktat in self.data;
         # sonst setze self.data auf {} (für get_value_all o.ä.).
         self.data: Dict[str, Any] = {}
+        
+        # Historisch-Merkmal aus SYSTEM_USER_ID-Datensatz laden (falls keine GUID gesetzt)
+        if not self.guid:
+            logger.info(f"🔹 Keine GUID gesetzt - lade historisch-Merkmal aus SYSTEM_USER_ID {self.SYSTEM_USER_ID}")
+            # Temporäre Verbindung nur für historisch-Merkmal
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT historisch FROM {self.table_name} WHERE uid = ?", (self.SYSTEM_USER_ID,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                self.historisch = bool(row[0])
+                logger.info(f"🔹 Historisch-Merkmal aus System-Datensatz: {self.historisch}")
+            else:
+                self.historisch = False  # Fallback
+                logger.info(f"🔹 Kein System-Datensatz gefunden - historisch=False (Fallback)")
+        
         if self.guid:
             logger.info(f"🔹 Lade Daten für GUID {self.guid} aus Tabelle {self.table_name}.")
             raw = self._lesen_rogue(self.guid)  # "roh" aus DB als JSON-String bzw. dict
@@ -636,8 +654,13 @@ class PdvmCentralDatenbank:
 
     def get_value_view(self, view_config: dict, stichtag: Optional[float] = None) -> list:
         """
-        Effiziente View-Methode: Liest alle Datensätze der Tabelle und löst sie 
+        Zentrale View-Methode: Liest alle Datensätze der Tabelle und löst sie 
         basierend auf view_config in eine flache Struktur auf.
+        
+        Erstellt IMMER eine vollständige Basis mit:
+        - Original-Spalten für alle Felder (FELD_original)
+        - Show-Spalten für alle Felder (FELD_show) 
+        - YMD/Alter-Spalten für alle Datumsfelder (automatisch bei type:date)
         
         Args:
             view_config: View-Konfiguration mit metadata und Feldliste
@@ -652,19 +675,35 @@ class PdvmCentralDatenbank:
                 dt_inst = Pdvm_DateTime("DEU")
                 stichtag = dt_inst.PdvmDateTimeNow()
             
-            # 1. Alle Datensätze der Tabelle laden (EINMAL!)
-            alle_datensaetze = self.lesen_alle()
-            if not alle_datensaetze:
-                logger.warning(f"📊 Keine Datensätze in Tabelle {self.table_name} gefunden")
-                return []
-            
-            # 2. View-Konfiguration extrahieren
+            # 1. View-Konfiguration extrahieren
             if not view_config or "metadata" not in view_config:
                 logger.error("❌ Ungültige view_config - metadata fehlt")
                 return []
             
             table_name = view_config["ROOT"]["view_table"]
             felder = view_config["metadata"][table_name]["felder"]
+            
+            # 2. Alle Datensätze der VIEW-TABELLE laden (EINMAL!)
+            from pdvm_datenbank import PdvmDatenbank
+            data_db = PdvmDatenbank(db_name=self.db_name, table_name=table_name)
+            alle_datensaetze = data_db.lesen_alle()
+            
+            if not alle_datensaetze:
+                logger.warning(f"📊 Keine Datensätze in Tabelle {table_name} gefunden")
+                return []
+            
+            # WICHTIG: historisch-Flag für View-Tabelle ermitteln (aus erstem Datensatz)
+            if alle_datensaetze and len(alle_datensaetze) > 0:
+                first_row = alle_datensaetze[0]
+                # historisch ist normalerweise in row["historisch"] gespeichert, falls PdvmDatenbank es liefert
+                self.historisch = bool(first_row.get("historisch", False))
+            else:
+                self.historisch = False  # Fallback
+            
+            # Spalten-Sichtbarkeit vorbereiten (falls nicht vorhanden, Standard verwenden)
+            if "column_visibility" not in view_config:
+                view_config["column_visibility"] = self.get_default_column_visibility(view_config)
+                logger.info("📊 Standard-Spalten-Sichtbarkeit angewendet")
             
             logger.info(f"📊 get_value_view: Verarbeite {len(alle_datensaetze)} Datensätze für {len(felder)} Felder")
             
@@ -675,62 +714,58 @@ class PdvmCentralDatenbank:
                 if not guid:
                     continue
                 
-                # Temporäre Instanz für diesen Datensatz erstellen
-                temp_instance = PdvmCentralDatenbank(
-                    db_name=self.db_name,
-                    table_name=self.table_name,
-                    guid=guid
-                )
+                # JSON-Daten aus der bereits geladenen Zeile direkt in self.data setzen (SUPER-OPTIMIERUNG!)
+                raw_data = row_data.get("daten", {})
+                if isinstance(raw_data, str):
+                    try:
+                        self.data = json.loads(raw_data)
+                    except:
+                        self.data = {}
+                else:
+                    self.data = raw_data
                 
-                # Feldwerte für diesen Datensatz sammeln
+                # Feldwerte für diesen Datensatz sammeln - VOLLSTÄNDIGE BASIS erstellen
                 record = {"uid": guid, "_guid": guid}
+                
+                # IMMER alle Felder mit vollständiger Basis verarbeiten
                 for feld_config in felder:
                     feld_name = feld_config["feld"]
+                    feld_gruppe = feld_config.get("gruppe", "ROOT")  # Gruppe aus view_config verwenden
                     
-                    # Flexibel alle möglichen Gruppen durchsuchen
-                    wert = self._find_field_in_any_group(temp_instance, feld_name, stichtag)
-                    record[feld_name] = wert
+                    # WICHTIG: Gruppen und Felder sind in der DB immer in GROSSBUCHSTABEN!
+                    feld_gruppe_upper = feld_gruppe.upper()
+                    feld_name_upper = feld_name.upper()
+                    
+                    # Direkter Zugriff über self.get_value mit bekannter Gruppe (SUPER-OPTIMIERT!)
+                    result_dict = self.get_value(feld_gruppe_upper, feld_name_upper, stichtag)
+                    wert = result_dict.get("wert") if result_dict else None
+                    
+                    # IMMER Original/Show-Spalten erstellen (vollständige Basis)
+                    record[f"{feld_name}_original"] = wert
+                    show_value = self._prepare_show_value_v3(wert, feld_config, stichtag)
+                    record[f"{feld_name}_show"] = show_value
+                    
+                    # Standard-Feld erhält Show-Wert (für Kompatibilität)
+                    record[feld_name] = show_value
+                
+                # IMMER YMD/Alter-Spalten für alle Datumsfelder erstellen
+                self._add_date_columns_v3(record, felder, stichtag)
+                
+                # Spalten-Sichtbarkeit basierend auf view_config anwenden
+                record = self._apply_column_visibility(record, view_config)
                 
                 result.append(record)
             
             logger.info(f"✅ {len(result)} Datensätze für View verarbeitet (Stichtag: {stichtag})")
+            logger.info("� OPTIMIERT: Nur 1x Datenbank-Zugriff für alle Datensätze")
+            logger.info("�🔧 Vollständige Basis: Original/Show-Spalten für alle Felder")
+            logger.info("📅 Vollständige Basis: YMD/Alter-Spalten für alle Datumsfelder")
+            logger.info("⚡ Kein doppeltes Lesen: JSON-Daten direkt aus geladenen Zeilen verwendet")
             return result
             
         except Exception as e:
             logger.error(f"❌ Fehler in get_value_view: {e}")
             return []
-    
-    def _find_field_in_any_group(self, instance: 'PdvmCentralDatenbank', feld_name: str, stichtag: float) -> Any:
-        """
-        Sucht ein Feld in allen verfügbaren Gruppen der Instanz.
-        
-        Args:
-            instance: PdvmCentralDatenbank-Instanz 
-            feld_name: Name des gesuchten Feldes
-            stichtag: Stichtag für historische Abfrage
-            
-        Returns:
-            Gefundener Wert oder None
-        """
-        if not instance.data:
-            return None
-        
-        # Alle Gruppen in der Instanz durchsuchen
-        for gruppe in instance.data.keys():
-            if isinstance(instance.data[gruppe], dict):
-                if feld_name in instance.data[gruppe]:
-                    # Feld gefunden - Wert mit get_value holen
-                    result = instance.get_value(gruppe, feld_name, stichtag)
-                    if result:
-                        wert = result.get("wert")
-                        logger.debug(f"      ✅ Gefunden in {gruppe}: {feld_name} = {wert}")
-                        logger.debug(f"   📚 Historisch: {feld_name} = {wert}")
-                        return wert
-        
-        # Feld nicht gefunden
-        logger.debug(f"      🚫 Nicht gefunden: {feld_name}")
-        logger.debug(f"   📚 Historisch: {feld_name} = None")
-        return None
 
     # ====== ZENTRALE DROPDOWN-FUNKTIONALITÄT ======
     
@@ -924,3 +959,205 @@ class PdvmCentralDatenbank:
         except Exception as e:
             logger.error(f"❌ Fehler bei Dropdown-Übersetzung für {raw_value}: {e}")
             return str(raw_value)
+
+    def _prepare_show_value_v3(self, original_value: Any, field_config: dict, stichtag: float) -> str:
+        """
+        V3-Feature: Bereitet Show-Werte auf (z.B. Dropdown-Texte, Formatierungen)
+        """
+        try:
+            # Dropdown-Feld?
+            if field_config.get("type") == "dropdown" and field_config.get("dropdown_config"):
+                dropdown_config = field_config["dropdown_config"]
+                show_value = self.get_dropdown_display_value(
+                    raw_value=str(original_value),
+                    field_name=field_config["feld"],
+                    dropdown_config=dropdown_config
+                )
+                return show_value
+            
+            # Datum-Feld?
+            elif field_config.get("type") == "date" and original_value:
+                try:
+                    # Datum formatieren
+                    from pd_datetime import Pdvm_DateTime
+                    dt_inst = Pdvm_DateTime("DEU")
+                    if isinstance(original_value, (int, float)) and original_value > 0:
+                        return dt_inst.format_date(original_value)
+                except:
+                    pass
+            
+            # Standard: Original-Wert als String
+            return str(original_value) if original_value is not None else ""
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler bei Show-Value für {field_config.get('feld', 'unknown')}: {e}")
+            return str(original_value) if original_value is not None else ""
+
+    def _add_date_columns_v3(self, record: dict, felder: list, stichtag: float):
+        """
+        V3-Feature: Fügt IMMER YMD/Alter-Spalten für alle Datumsfelder hinzu
+        (vollständige Basis - ViewManager entscheidet später was angezeigt wird)
+        """
+        try:
+            from pd_datetime import Pdvm_DateTime
+            dt_inst = Pdvm_DateTime("DEU")
+            
+            for field_config in felder:
+                if field_config.get("type") == "date":
+                    field_name = field_config.get("feld")
+                    if not field_name:
+                        continue
+                    
+                    # Original-Wert für Berechnung verwenden
+                    if f"{field_name}_original" in record:
+                        date_value = record[f"{field_name}_original"]
+                    else:
+                        date_value = record.get(field_name)
+                    
+                    if date_value and isinstance(date_value, (int, float)) and date_value > 0:
+                        # IMMER YMD-Spalten hinzufügen (vollständige Basis)
+                        try:
+                            year, month, day = dt_inst.extract_ymd(date_value)
+                            record[f"{field_name}_jahr"] = year
+                            record[f"{field_name}_monat"] = month
+                            record[f"{field_name}_tag"] = day
+                        except Exception as e:
+                            logger.debug(f"YMD-Extraktion fehlgeschlagen für {field_name}: {e}")
+                        
+                        # IMMER Alter-Spalte hinzufügen (vollständige Basis)
+                        try:
+                            alter = dt_inst.calculate_age(date_value, stichtag)
+                            record[f"{field_name}_alter"] = alter
+                        except Exception as e:
+                            logger.debug(f"Alter-Berechnung fehlgeschlagen für {field_name}: {e}")
+                                
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Hinzufügen der Datums-Spalten: {e}")
+
+    def _apply_column_visibility(self, record: dict, view_config: dict) -> dict:
+        """
+        Wendet Spalten-Sichtbarkeit basierend auf view_config an.
+        Nur Spalten mit show=true werden im finalen Record behalten.
+        
+        Args:
+            record: Vollständiger Datensatz mit allen Spalten
+            view_config: View-Konfiguration mit Spalten-Definitionen
+            
+        Returns:
+            dict: Gefilterter Datensatz nur mit sichtbaren Spalten
+        """
+        try:
+            filtered_record = {}
+            
+            # IMMER: System-Spalten behalten
+            filtered_record["uid"] = record.get("uid")
+            filtered_record["_guid"] = record.get("_guid")
+            
+            # View-Konfiguration auslesen
+            table_name = view_config["ROOT"]["view_table"]
+            felder = view_config["metadata"][table_name]["felder"]
+            
+            # Spalten-Visibility-Konfiguration (falls vorhanden)
+            column_config = view_config.get("column_visibility", {})
+            
+            logger.debug(f"🔍 Spalten-Filter anwenden: {len(record)} → {len(filtered_record)} Spalten")
+            
+            for feld_config in felder:
+                feld_name = feld_config["feld"]
+                
+                # Standard: Feld selbst anzeigen (falls nicht anders konfiguriert)
+                show_main = column_config.get(feld_name, True)
+                if show_main:
+                    filtered_record[feld_name] = record.get(feld_name)
+                
+                # Original-Spalte anzeigen?
+                show_original = column_config.get(f"{feld_name}_original", False)
+                if show_original:
+                    filtered_record[f"{feld_name}_original"] = record.get(f"{feld_name}_original")
+                
+                # Show-Spalte anzeigen?
+                show_show = column_config.get(f"{feld_name}_show", False)
+                if show_show:
+                    filtered_record[f"{feld_name}_show"] = record.get(f"{feld_name}_show")
+                
+                # Datums-Spalten (YMD/Alter) anzeigen?
+                if feld_config.get("type") == "date":
+                    # Jahr/Monat/Tag
+                    if column_config.get(f"{feld_name}_jahr", False):
+                        filtered_record[f"{feld_name}_jahr"] = record.get(f"{feld_name}_jahr")
+                    if column_config.get(f"{feld_name}_monat", False):
+                        filtered_record[f"{feld_name}_monat"] = record.get(f"{feld_name}_monat")
+                    if column_config.get(f"{feld_name}_tag", False):
+                        filtered_record[f"{feld_name}_tag"] = record.get(f"{feld_name}_tag")
+                    
+                    # Alter
+                    if column_config.get(f"{feld_name}_alter", False):
+                        filtered_record[f"{feld_name}_alter"] = record.get(f"{feld_name}_alter")
+            
+            logger.debug(f"✅ Spalten-Filter: {len(filtered_record)} sichtbare Spalten")
+            return filtered_record
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden der Spalten-Sichtbarkeit: {e}")
+            # Fallback: Vollständiger Record
+            return record
+
+    def get_default_column_visibility(self, view_config: dict) -> dict:
+        """
+        Erstellt eine Standard-Spalten-Sichtbarkeits-Konfiguration.
+        
+        Standard-Verhalten:
+        - Haupt-Felder: sichtbar (show=true)
+        - Original-Spalten: unsichtbar (show=false)  
+        - Show-Spalten: unsichtbar (show=false)
+        - YMD/Alter-Spalten: unsichtbar (show=false)
+        
+        Args:
+            view_config: View-Konfiguration
+            
+        Returns:
+            dict: Standard-Spalten-Sichtbarkeits-Konfiguration
+        """
+        try:
+            column_visibility = {}
+            
+            # Flexible Behandlung verschiedener view_config Strukturen
+            if "ROOT" in view_config and "metadata" in view_config:
+                # Vollständige view_config Struktur
+                table_name = view_config["ROOT"]["view_table"]
+                felder = view_config["metadata"][table_name]["felder"]
+            elif "fields" in view_config:
+                # Einfache fields-basierte Struktur
+                felder = [{"feld": field, "type": "string"} for field in view_config["fields"]]
+            else:
+                print("❌ Fehler beim Erstellen der Standard-Spalten-Sichtbarkeit: Unbekannte view_config Struktur")
+                return {}
+            
+            for feld_config in felder:
+                if isinstance(feld_config, str):
+                    feld_name = feld_config
+                    feld_type = "string"
+                else:
+                    feld_name = feld_config["feld"]
+                    feld_type = feld_config.get("type", "string")
+                
+                # Standard: Haupt-Feld sichtbar
+                column_visibility[feld_name] = True
+                
+                # Original/Show-Spalten: Standard unsichtbar (für Debugging/Entwicklung verfügbar)
+                column_visibility[f"{feld_name}_original"] = False
+                column_visibility[f"{feld_name}_show"] = False
+                
+                # Datums-Spalten: Standard unsichtbar
+                if feld_type == "date":
+                    column_visibility[f"{feld_name}_jahr"] = False
+                    column_visibility[f"{feld_name}_monat"] = False
+                    column_visibility[f"{feld_name}_tag"] = False
+                    column_visibility[f"{feld_name}_alter"] = False
+            
+            logger.info(f"📊 Standard-Spalten-Sichtbarkeit erstellt: {len(column_visibility)} Spalten-Regeln")
+            return column_visibility
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen der Standard-Spalten-Sichtbarkeit: {e}")
+            return {}
