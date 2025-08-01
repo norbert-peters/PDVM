@@ -9,16 +9,112 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
     QLineEdit, QComboBox, QHeaderView, QPushButton, QLabel, QDateEdit,
     QFrame, QSplitter, QScrollArea, QMessageBox, QCheckBox, QSpinBox,
-    QMenu, QAction, QWidgetAction
+    QMenu, QAction, QWidgetAction, QListWidget, QListWidgetItem, QDialog
 )
+
 from PyQt5.QtCore import Qt, QDate, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPalette
 import json
 from datetime import datetime, date
 
 from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_view_data_manager import PdvmViewDataManager
+
 
 logger = logging.getLogger(__name__)
+
+class ColumnSelectionDialog(QDialog):
+    """
+    Dialog für die Spaltenauswahl mit Checkboxen
+    """
+    
+    def __init__(self, available_columns, selected_columns, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Spaltenauswahl")
+        self.setModal(True)
+        self.resize(400, 300)
+        
+        self.available_columns = available_columns  # Liste von {"name": str, "label": str}
+        self.selected_columns = selected_columns.copy()  # Liste der ausgewählten Namen
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Überschrift
+        title_label = QLabel("Wählen Sie die anzuzeigenden Spalten:")
+        title_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(title_label)
+        
+        # Scroll-Bereich für Checkboxen
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        self.checkboxes = {}
+        
+        # Alle verfügbaren Spalten als Checkboxen
+        for col_data in self.available_columns:
+            name = col_data["name"]
+            label = col_data["label"]
+            
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(name in self.selected_columns)
+            checkbox.stateChanged.connect(self._on_checkbox_changed)
+            
+            self.checkboxes[name] = checkbox
+            scroll_layout.addWidget(checkbox)
+        
+        scroll_area.setWidget(scroll_widget)
+        layout.addWidget(scroll_area)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        # Alle auswählen / Alle abwählen
+        select_all_btn = QPushButton("Alle auswählen")
+        select_all_btn.clicked.connect(self._select_all)
+        button_layout.addWidget(select_all_btn)
+        
+        deselect_all_btn = QPushButton("Alle abwählen") 
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        button_layout.addWidget(deselect_all_btn)
+        
+        button_layout.addStretch()
+        
+        # OK / Abbrechen
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True)
+        button_layout.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("Abbrechen")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _on_checkbox_changed(self):
+        """Aktualisiert die Liste der ausgewählten Spalten"""
+        self.selected_columns = []
+        for name, checkbox in self.checkboxes.items():
+            if checkbox.isChecked():
+                self.selected_columns.append(name)
+    
+    def _select_all(self):
+        """Wählt alle Spalten aus"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(True)
+    
+    def _deselect_all(self):
+        """Wählt alle Spalten ab"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(False)
+    
+    def get_selected_columns(self):
+        """Gibt die Liste der ausgewählten Spaltennamen zurück"""
+        return self.selected_columns
 
 class PdvmModernViewWidget(QWidget):
     """
@@ -32,49 +128,50 @@ class PdvmModernViewWidget(QWidget):
     
     def __init__(self, view_guid, user_guid=None, parent=None):
         super().__init__(parent)
-        
         self.view_guid = view_guid
         self.user_guid = user_guid
-        
+        self.stichtag = None  # Wird beim Laden gesetzt
         # WICHTIG: Manager-Pattern - UI verwendet nur den Data-Manager
         self.data_manager = None
+        self.table_data = []  # Initialisiere table_data, um Attributfehler zu vermeiden
         self.filtered_data = []
         self.current_sort_column = None
         self.current_sort_order = Qt.AscendingOrder
-        
+        self.expert_mode = False
+        self.visible_column_names = []
+        self._custom_column_selection = None  # Für benutzerdefinierte Spaltenauswahl
         # Search delay timer
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._apply_filters)
-        
         # UI Setup Timer (für korrekte Spaltenbreiten)
         self.setup_timer = QTimer()
         self.setup_timer.setSingleShot(True)
         self.setup_timer.timeout.connect(self._finalize_setup)
-        
+        self.dummy_mode = False  # Flag: Dummy-Modus (keine echten Spalten)
+        logger.debug(f"[ModernViewWidget] __init__ called: view_guid={view_guid}, user_guid={user_guid}")
         # Initialisierung mit Manager-Pattern
         self._initialize_data_manager()
+        logger.debug("[ModernViewWidget] Data-Manager initialisiert")
+        # Gespeicherte Einstellungen laden BEVOR UI aufgebaut wird
+        self._load_view_settings() 
         self._setup_ui()
-        self._load_data_from_manager()
-        
-        # UI-Finalisierung nach kurzer Verzögerung
-        self.setup_timer.start(100)
+        logger.debug("[ModernViewWidget] UI setup abgeschlossen")
+        # Keine weiteren Methodenaufrufe, nur Minimal-Tabelle
     
     def _initialize_data_manager(self):
         """Initialisiert den Data-Manager für saubere Trennung von UI und Datenlogik."""
         try:
-            from pdvm_view_data_manager import PdvmViewDataManager
-            
             self.data_manager = PdvmViewDataManager(
                 view_guid=self.view_guid,
                 user_guid=self.user_guid
             )
-            
             # view_fields aus Manager extrahieren
             self.view_fields = self.data_manager.fields_config
-            
+            # Stichtag aus Manager übernehmen, falls vorhanden
+            if hasattr(self.data_manager, 'stichtag'):
+                self.stichtag = self.data_manager.stichtag
             logger.info(f"✅ Data-Manager initialisiert: {self.data_manager.get_table_info()}")
-            
         except Exception as e:
             logger.error(f"❌ Fehler beim Initialisieren des Data-Managers: {e}")
             raise
@@ -105,91 +202,623 @@ class PdvmModernViewWidget(QWidget):
         return self.data_manager.get_dropdown_options(field_name)
     
     def _setup_ui(self):
-        """Erstellt die Benutzeroberfläche"""
+        from PyQt5.QtWidgets import QLabel, QTableWidget, QTableWidgetItem
+        logger.debug("[ModernViewWidget] _setup_ui aufgerufen")
+        """Erstellt die UI mit Expert-Mode-Button, Spaltenauswahl und Tabelle."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
+        # Überschrift und Stichtag-Bereich
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        # Überschrift
+        title_label = QLabel("Datenansicht (Modernes View-Widget)")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 2px;")
+        header_layout.addWidget(title_label)
+        # Stichtag anzeigen (immer im PdvmFormat, wie in get_value verwendet)
+        stichtag_label = QLabel(f"Stichtag (PdvmFormat): {self.stichtag if self.stichtag is not None else '-'}")
+        stichtag_label.setStyleSheet("font-size: 14px; color: #555; margin-bottom: 8px;")
+        header_layout.addWidget(stichtag_label)
+        # Expert-Mode Button und Spaltenauswahl
+        controls_row = QHBoxLayout()
         
-        # Header mit Titel und Aktionen
-        self._create_header(layout)
+        # Expert-Mode Button mit verbessertem Styling
+        self.expert_button = QPushButton("🔬 Expert-Mode: AUS")
+        self.expert_button.setCheckable(True)
+        self.expert_button.setChecked(False)
+        self.expert_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #333;
+                border: 2px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 150px;
+            }
+            QPushButton:checked {
+                background-color: #007bff;
+                color: white;
+                border-color: #0056b3;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+            }
+            QPushButton:checked:hover {
+                background-color: #0056b3;
+                border-color: #004085;
+            }
+        """)
+        self.expert_button.clicked.connect(self._toggle_expert_mode)
+        controls_row.addWidget(self.expert_button)
         
-        # Search/Filter-Bereich
-        self._create_search_area(layout)
+        # Reset Einstellungen Button mit verbessertem Styling
+        self.reset_button = QPushButton("🔄 Reset Einstellungen")
+        self.reset_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #6c757d;
+                border: 2px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: normal;
+                min-width: 140px;
+            }
+            QPushButton:hover {
+                background-color: #dc3545;
+                color: white;
+                border-color: #c82333;
+            }
+            QPushButton:pressed {
+                background-color: #c82333;
+                border-color: #bd2130;
+            }
+        """)
+        self.reset_button.clicked.connect(self._reset_view_settings)
+        controls_row.addWidget(self.reset_button)
         
-        # Haupttabelle
-        self._create_table(layout)
+        # Button für Spaltenauswahl mit Dialog
+        self.column_selection_button = QPushButton("Spalten auswählen...")
+        self.column_selection_button.setMinimumWidth(200)
+        self.column_selection_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: #333;
+                border: 2px solid #dee2e6;
+                border-radius: 6px;
+                padding: 8px 16px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+            }
+        """)
+        self.column_selection_button.clicked.connect(self._open_column_selection_dialog)
+        controls_row.addWidget(QLabel("Spalten anzeigen:"))
+        controls_row.addWidget(self.column_selection_button)
+        controls_row.addStretch(1)
+        header_layout.addLayout(controls_row)
+        layout.addWidget(header_widget)
+        # Tabelle
+        try:
+            self._update_visible_columns()
+            self._create_table_with_visible_columns(layout)
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aufbau der UI in _setup_ui: {e}")
+            error_label = QLabel(f"❌ Fehler beim Aufbau der Tabelle:\n{str(e)}")
+            error_label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            layout.addWidget(error_label)
+
+    def _toggle_expert_mode(self):
+        self.expert_mode = not self.expert_mode
+        self.expert_button.setText("🔬 Expert-Mode: AN" if self.expert_mode else "🔬 Expert-Mode: AUS")
+        self.expert_button.setChecked(self.expert_mode)  # Button-Status aktualisieren
+        self._update_visible_columns()
+        self._rebuild_table()
+        # Einstellungen speichern
+        self._save_view_settings()
+
+    def _load_view_settings(self):
+        """Lädt die gespeicherten View-Einstellungen aus der systemsteuerung-Tabelle."""
+        if not self.user_guid or not self.view_guid:
+            logger.debug("🔧 Keine user_guid oder view_guid - verwende Standard-Einstellungen")
+            return
         
-        # Status-Leiste
-        self._create_status_bar(layout)
-        
-    def _create_header(self, layout):
-        """Erstellt den Header-Bereich"""
-        header_frame = QFrame()
-        header_frame.setStyleSheet("QFrame { background-color: #f0f0f0; border: 1px solid #ccc; }")
-        header_layout = QHBoxLayout(header_frame)
-        
-        # Titel
-        title = QLabel(f"📊 {self._get_table_display_name()}")
-        title.setFont(QFont("Arial", 12, QFont.Bold))
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        # Aktions-Buttons
-        refresh_btn = QPushButton("🔄 Aktualisieren")
-        refresh_btn.clicked.connect(self._refresh_data)
-        header_layout.addWidget(refresh_btn)
-        
-        export_btn = QPushButton("📤 Exportieren")
-        export_btn.clicked.connect(self._export_data)
-        header_layout.addWidget(export_btn)
-        
-        layout.addWidget(header_frame)
-    
-    def _create_search_area(self, layout):
-        """Erstellt den Search/Filter-Bereich"""
-        search_frame = QFrame()
-        search_frame.setStyleSheet("QFrame { background-color: #fafafa; border: 1px solid #ddd; }")
-        search_layout = QVBoxLayout(search_frame)
-        
-        # Search-Felder für jede Spalte
-        search_row_layout = QHBoxLayout()
-        self.search_widgets = {}
-        
-        if self.data_manager:
-            field_names = self.data_manager.get_field_names()
+        try:
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
             
-            for field_name in field_names:
-                field_config = self.data_manager.get_field_config(field_name)
-                if not field_config:
-                    continue
-                    
-                field_display = field_config["name"]
-                ui_config = field_config.get("ui", {})
+            # Benutzerdaten laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(self.user_guid, {})
+            
+            # ViewSettings-Struktur
+            view_settings = user_data.get("ViewSettings", {})
+            current_view_settings = view_settings.get(self.view_guid, {})
+            
+            # Expert-Mode laden
+            saved_expert_mode = current_view_settings.get("expert_mode", False)
+            if saved_expert_mode != self.expert_mode:
+                self.expert_mode = saved_expert_mode
+                self.expert_button.setChecked(saved_expert_mode)
+                self.expert_button.setText("🔬 Expert-Mode: AN" if saved_expert_mode else "🔬 Expert-Mode: AUS")
+                logger.info(f"📋 Expert-Mode aus Einstellungen geladen: {saved_expert_mode}")
+            
+            # Spaltenauswahl laden
+            saved_column_selection = current_view_settings.get("custom_columns", None)
+            if saved_column_selection:
+                self._custom_column_selection = saved_column_selection
+                logger.info(f"📋 Spaltenauswahl aus Einstellungen geladen: {len(saved_column_selection)} Spalten")
+            
+            # Weitere Einstellungen können hier geladen werden:
+            # - column_widths = current_view_settings.get("column_widths", {})
+            
+            logger.info(f"✅ View-Einstellungen für {self.view_guid} geladen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der View-Einstellungen: {e}")
+
+    def _save_view_settings(self):
+        """Speichert die aktuellen View-Einstellungen in der systemsteuerung-Tabelle."""
+        if not self.user_guid or not self.view_guid:
+            logger.debug("🔧 Keine user_guid oder view_guid - Speichern übersprungen")
+            return
+        
+        try:
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Aktuelle Benutzerdaten laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(self.user_guid, {})
+            
+            # ViewSettings-Struktur initialisieren falls nicht vorhanden
+            if "ViewSettings" not in user_data:
+                user_data["ViewSettings"] = {}
+            
+            # Aktuelle View-Einstellungen zusammenstellen
+            current_settings = {
+                "expert_mode": self.expert_mode,
+                "custom_columns": getattr(self, '_custom_column_selection', []),
+                "last_updated": datetime.now().isoformat(),
+                # Platz für zukünftige Erweiterungen:
+                # "column_widths": self.get_column_widths(),
+                # "sort_column": self.current_sort_column,
+                # "sort_order": self.current_sort_order
+            }
+            
+            # Einstellungen für diese View speichern
+            user_data["ViewSettings"][self.view_guid] = current_settings
+            
+            # Zurück in Datenbank speichern
+            raw_data[self.user_guid] = user_data
+            sys_db.speichern(self.user_guid, raw_data)
+            
+            logger.debug(f"💾 View-Einstellungen für {self.view_guid} gespeichert: expert_mode={self.expert_mode}, custom_columns={len(getattr(self, '_custom_column_selection', []))}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern der View-Einstellungen: {e}")
+
+    def _reset_view_settings(self):
+        """Setzt alle View-Einstellungen auf Standard zurück und löscht gespeicherte Werte."""
+        try:
+            # Standard-Werte setzen
+            self.expert_mode = False
+            self.expert_button.setChecked(False)
+            self.expert_button.setText("🔬 Expert-Mode: AUS")
+            
+            # Spaltenauswahl zurücksetzen
+            self._custom_column_selection = None
+            
+            # Gespeicherte Einstellungen löschen
+            if self.user_guid and self.view_guid:
+                sys_db = PdvmCentralDatenbank(
+                    db_name="PdvmManager.db",
+                    table_name="systemsteuerung",
+                    guid=self.user_guid
+                )
                 
-                # Nur suchbare Felder bekommen Search-Widgets
-                if ui_config.get("searchable", True):
-                    search_widget = self._create_search_widget(field_config)
-                    if search_widget:
-                        self.search_widgets[field_name] = search_widget
-                        
-                        # Label und Widget in vertikalem Layout
-                        field_layout = QVBoxLayout()
-                        field_label = QLabel(field_display)
-                        field_label.setFont(QFont("Arial", 8))
-                        field_layout.addWidget(field_label)
-                        field_layout.addWidget(search_widget)
-                        
-                        search_row_layout.addLayout(field_layout)
+                raw_data = sys_db.lesen() or {}
+                user_data = raw_data.get(self.user_guid, {})
+                
+                # ViewSettings für diese View löschen
+                if "ViewSettings" in user_data and self.view_guid in user_data["ViewSettings"]:
+                    del user_data["ViewSettings"][self.view_guid]
+                    raw_data[self.user_guid] = user_data
+                    sys_db.speichern(self.user_guid, raw_data)
+                    logger.info(f"🗑️ Gespeicherte Einstellungen für View {self.view_guid} gelöscht")
+            
+            # UI aktualisieren
+            self._update_visible_columns()
+            self._rebuild_table()
+            
+            logger.info("🔄 View-Einstellungen auf Standard zurückgesetzt")
+            
+            # Erfolgs-Meldung anzeigen
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, 
+                "Einstellungen zurückgesetzt", 
+                f"Die View-Einstellungen wurden auf Standard zurückgesetzt.\n\n• Expert-Mode: AUS\n• Spaltenauswahl: Standard\n\nZukünftige Erweiterungen:\n• Spaltenbreiten: Standard\n• Sortierung: Standard"
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Zurücksetzen der View-Einstellungen: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Zurücksetzen:\n{str(e)}")
+
+    def _update_visible_columns(self):
+        """Setzt self.visible_column_names und aktualisiert das Dropdown."""
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            self.visible_column_names = []
+            self.column_dropdown.clear()
+            logger.debug("[ModernViewWidget] Keine Controlstruktur oder keine columns vorhanden!")
+            return
+        columns = control.columns
+        logger.debug(f"[ModernViewWidget] Alle Spalten (columns): {columns}")
         
-        search_row_layout.addStretch()
+        # Filter nach show/expert - KORRIGIERTE LOGIK FÜR EXPERT-SPALTEN
+        filtered = []
+        for col in columns:
+            # Robust: show/expert direkt als Key, mit Fallback
+            show_val = col['show'] if 'show' in col else False
+            expert_val = col['expert'] if 'expert' in col else False
+            
+            if not ('show' in col and 'expert' in col):
+                logger.error(f"[ModernViewWidget] Spalte '{col}': show/expert fehlt! Typ: {type(col)} Inhalt: {col}")
+                
+            logger.debug(f"[ModernViewWidget] Spalte '{col.get('name', str(col))}', show={show_val}, expert={expert_val}")
+            
+            # KORRIGIERTE FILTER-LOGIK FÜR EXPERT-SPALTEN:
+            if self.expert_mode:
+                # Expert-Mode: Zeige show=True Spalten UND expert=True Spalten
+                # Expert-Spalten werden temporär als "show" behandelt
+                if show_val or expert_val:
+                    filtered.append(col)
+                    if expert_val and not show_val:
+                        logger.debug(f"[ModernViewWidget] Expert-Spalte '{col.get('name')}' wird im Expert-Mode angezeigt (show=False aber expert=True)")
+            else:
+                # Normal-Mode: Zeige nur Spalten mit show=True UND expert=False
+                if show_val and not expert_val:
+                    filtered.append(col)
         
-        # Clear-Button
-        clear_btn = QPushButton("🗑️ Filter löschen")
-        clear_btn.clicked.connect(self._clear_filters)
-        search_row_layout.addWidget(clear_btn)
+        if self.expert_mode:
+            logger.debug(f"[ModernViewWidget] Expert-Mode aktiv: Zeige alle show=True Spalten")
+        else:
+            logger.debug(f"[ModernViewWidget] Normal-Mode: Zeige nur show=True AND expert=False Spalten")
+            
+        logger.debug(f"[ModernViewWidget] Nach Filter: {[col.get('name', str(col)) for col in filtered]}")
         
-        search_layout.addLayout(search_row_layout)
-        layout.addWidget(search_frame)
+        self.visible_column_names = [col['name'] for col in filtered]
+        logger.debug(f"[ModernViewWidget] Sichtbare Spaltennamen: {self.visible_column_names}")
+        
+        # Button-Text für Spaltenauswahl aktualisieren
+        self._update_column_selection_button(filtered)
+
+    def _update_column_selection_button(self, available_columns):
+        """Aktualisiert den Button-Text für die Spaltenauswahl"""
+        current_selection = getattr(self, '_custom_column_selection', None)
+        if current_selection is None:
+            # Standard: Alle verfügbaren Spalten auswählen
+            current_selection = [col['name'] for col in available_columns]
+            self._custom_column_selection = current_selection
+        
+        # Button-Text aktualisieren - KORRIGIERT: Verwende 'label' statt 'anzeige'
+        if not current_selection:
+            button_text = "Keine Spalten ausgewählt"
+        elif len(current_selection) == len(available_columns):
+            button_text = "Alle Spalten ausgewählt"
+        elif len(current_selection) == 1:
+            # Eine Spalte: Zeige Label (korrigiert)
+            for col in available_columns:
+                if col['name'] == current_selection[0]:
+                    # Verwende 'label' statt 'anzeige' und fallback zu 'name'
+                    button_text = col.get('label', col.get('anzeige', col['name']))
+                    break
+            else:
+                button_text = current_selection[0]
+        else:
+            button_text = f"{len(current_selection)} von {len(available_columns)} Spalten"
+        
+        self.column_selection_button.setText(button_text)
+        
+        # Sichtbare Spalten basierend auf aktueller Auswahl aktualisieren
+        self.visible_column_names = [name for name in current_selection if name in [col['name'] for col in available_columns]]
+
+    def _open_column_selection_dialog(self):
+        """Öffnet den Dialog zur Spaltenauswahl"""
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            QMessageBox.warning(self, "Fehler", "Keine Spalten verfügbar")
+            return
+        
+        columns = control.columns
+        
+        # Verfügbare Spalten für Dialog sammeln - KORRIGIERTE LOGIK FÜR EXPERT-SPALTEN
+        available_columns = []
+        for col in columns:
+            show_val = col.get('show', False)
+            expert_val = col.get('expert', False)
+            
+            # KORRIGIERTE FILTER-LOGIK FÜR EXPERT-SPALTEN:
+            if self.expert_mode:
+                # Expert-Mode: Zeige show=True Spalten UND expert=True Spalten
+                # Expert-Spalten werden temporär als verfügbar behandelt
+                if show_val or expert_val:
+                    available_columns.append(col)
+            else:
+                # Normal-Mode: Zeige nur Spalten mit show=True UND expert=False
+                if show_val and not expert_val:
+                    available_columns.append(col)
+        
+        # Dialog-Format erstellen - KORRIGIERT: Verwende 'label' statt 'anzeige'
+        dialog_columns = []
+        for col in available_columns:
+            dialog_columns.append({
+                "name": col['name'],
+                "label": col.get('label', col.get('anzeige', col['name']))
+            })
+        
+        # Aktuelle Auswahl
+        current_selection = getattr(self, '_custom_column_selection', [col['name'] for col in available_columns])
+        
+        # Dialog öffnen
+        dialog = ColumnSelectionDialog(dialog_columns, current_selection, self)
+        if dialog.exec_() == QDialog.Accepted:
+            # Neue Auswahl übernehmen
+            new_selection = dialog.get_selected_columns()
+            self._custom_column_selection = new_selection
+            self.visible_column_names = new_selection
+            
+            # Button-Text und Tabelle aktualisieren
+            self._update_column_selection_button(available_columns)
+            self._rebuild_table()
+            
+            # Einstellungen speichern
+            self._save_view_settings()
+            
+            logger.info(f"📋 Spaltenauswahl geändert: {len(new_selection)} Spalten ausgewählt")
+
+    def _on_column_selection_changed(self, selected_names):
+        """Callback wenn sich die Spaltenauswahl ändert - Kompatibilität"""
+        logger.debug(f"[ModernViewWidget] Spaltenauswahl geändert: {selected_names}")
+        
+        # Auswahl speichern
+        self._custom_column_selection = selected_names
+        
+        # Sichtbare Spalten aktualisieren
+        self.visible_column_names = selected_names
+        
+        # Tabelle neu aufbauen
+        self._rebuild_table()
+        
+        # Einstellungen speichern
+        self._save_view_settings()
+
+    def _on_column_dropdown_changed(self, idx):
+        # Veraltet - nicht mehr verwendet
+        pass
+
+    def _rebuild_table(self):
+        # Tabelle neu aufbauen mit aktuellen sichtbaren Spalten
+        layout = self.layout()
+        if hasattr(self, 'table') and self.table:
+            layout.removeWidget(self.table)
+            self.table.deleteLater()
+            self.table = None
+        self._create_table_with_visible_columns(layout)
+
+    def _create_table_with_visible_columns(self, layout):
+        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QLabel
+        from PyQt5.QtWidgets import QAbstractItemView
+        from PyQt5.QtCore import Qt
+        logger.debug(f"[ModernViewWidget] _create_table_with_visible_columns: visible_column_names={self.visible_column_names}")
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
+            control_columns = []
+        else:
+            control_columns = [col for col in control.columns if col['name'] in self.visible_column_names]
+
+        data = self.data_manager.get_data() if self.data_manager else []
+        # Dummy-Spalte erzeugen, wenn keine echten Spalten sichtbar sind
+        if len(control_columns) == 0:
+            self.dummy_mode = True
+            logger.info("[ModernViewWidget] Keine sichtbaren Spalten. Zeige Dummy-Spalte 'keine Spalte'.")
+            self.table = QTableWidget()
+            self.table.setColumnCount(1)
+            self.table.setRowCount(len(data) if data else 1)
+            self.table.setHorizontalHeaderLabels(["keine Spalte"])
+            # Dummy-Zeile füllen
+            self.table.setItem(0, 0, QTableWidgetItem("Keine Daten"))
+            layout.addWidget(self.table)
+            return
+        else:
+            self.dummy_mode = False
+
+        # Normale Tabelle mit echten Spalten und zweizeiliger Überschrift
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(control_columns))
+        self.table.setRowCount(len(data))
+
+
+        # Setze Headerlabels je nach Expert-Mode
+        if getattr(self, 'expert_mode', False):
+            header_labels = [
+                f"{str(col.get('anzeige', col.get('name', '')))}\n{str(col.get('name', ''))}"
+                for col in control_columns
+            ]
+        else:
+            header_labels = [str(col.get('anzeige', col.get('name', ''))) for col in control_columns]
+        self.table.setHorizontalHeaderLabels(header_labels)
+        # Header-Design: fett, 1 Punkt größer, linksbündig
+        header = self.table.horizontalHeader()
+        font = header.font()
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 1)
+        header.setFont(font)
+        # Alle Header explizit linksbündig ausrichten
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        for i in range(self.table.columnCount()):
+            header.setSectionResizeMode(i, header.Interactive)
+            self.table.model().setHeaderData(i, Qt.Horizontal, Qt.AlignLeft | Qt.AlignVCenter, Qt.TextAlignmentRole)
+        # Wordwrap für Header aktivieren
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
+        self.table.horizontalHeader().setSectionsClickable(True)
+        self.table.horizontalHeader().setSectionsMovable(True)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setMinimumSectionSize(40)
+        self.table.horizontalHeader().setHighlightSections(False)
+        # setWordWrap gibt es in PyQt5 nicht, Zeilenumbruch funktioniert trotzdem mit \n
+
+        # Daten stumpf eintragen
+        for row_idx, record in enumerate(data):
+            if not isinstance(record, dict):
+                continue
+            for col_idx, col in enumerate(control_columns):
+                key = col.get('name')
+                value = record.get(key, "")
+                self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
+        logger.debug(f"[ModernViewWidget] Tabelle erstellt: rows={len(data)}, cols={len(control_columns)}")
+        layout.addWidget(self.table)
+
+    def _toggle_expert_mode(self):
+        self.expert_mode = not self.expert_mode
+        self.expert_button.setText("🔬 Expert-Mode: AN" if self.expert_mode else "🔬 Expert-Mode: AUS")
+        self._update_visible_columns()
+        self._rebuild_table()
+        # Zeige oder verstecke die zweite Kopfzeile
+        if hasattr(self, 'header_label_row'):
+            self.header_label_row.setVisible(self.expert_mode)
+
+    def create_simple_table(self, layout):
+        """Minimalistische Tabelle: Zeigt alle Spalten aus der Controlstruktur, stumpf, ohne Filter, ohne Mapping."""
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
+            control_columns = []
+        else:
+            control_columns = control.columns
+
+        data = self.data_manager.get_data() if self.data_manager else []
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(control_columns))
+        self.table.setRowCount(len(data))
+
+        # Spaltennamen (interner Name)
+        header_labels = []
+        for col in control_columns:
+            if isinstance(col, dict):
+                header_labels.append(str(col.get('name', '')))
+            else:
+                header_labels.append(str(col))
+        self.table.setHorizontalHeaderLabels(header_labels)
+
+        # Daten stumpf eintragen
+        for row_idx, record in enumerate(data):
+            if not isinstance(record, dict):
+                continue
+            for col_idx, col in enumerate(control_columns):
+                key = col.get('name') if isinstance(col, dict) else str(col)
+                value = record.get(key, "")
+                self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
+
+        layout.addWidget(self.table)
+    def _create_table_minimal(self, layout):
+        """Erstellt die Haupttabelle exakt nach Controlstruktur, zeigt IMMER alle Spalten aus der Controlstruktur, unabhängig von Daten."""
+        self.table = QTableWidget()
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(False)
+
+        # Controlstruktur holen (Pflicht!)
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
+            control_columns = []
+        else:
+            control_columns = control.columns
+
+        # Daten holen (kann leer sein)
+        data = self.data_manager.get_data()
+
+        self.table.setColumnCount(len(control_columns))
+        self.table.setRowCount(len(data) if data else 0)
+
+        # Zweizeilige Überschrift: 1. Zeile interner Name, 2. Zeile Anzeigename (aus Controlstruktur)
+        column_labels = self.data_manager.get_column_labels() if hasattr(self.data_manager, 'get_column_labels') else {}
+        header_labels = []
+        for idx, col in enumerate(control_columns):
+            if not isinstance(col, dict):
+                logger.warning(f"⚠️ Spalten-Definition an Position {idx} ist kein dict: {col}")
+                internal = str(col)
+                display = str(col)
+            else:
+                internal = col.get('name')
+                display = column_labels.get(internal, internal)
+            header_labels.append(f"{internal}\n{display}")
+        self.table.setHorizontalHeaderLabels(header_labels)
+
+        # Daten einfügen (immer alle Spalten, auch wenn leer)
+        for row_idx, record in enumerate(data):
+            if not isinstance(record, dict):
+                logger.error(f"❌ Ungültiger Datensatz (kein dict) in Zeile {row_idx}: {record}")
+                continue
+            for col_idx, col in enumerate(control_columns):
+                if not isinstance(col, dict):
+                    logger.warning(f"⚠️ Spalten-Definition an Position {col_idx} ist kein dict: {col}")
+                    key = str(col)
+                else:
+                    key = col.get('name')
+                value = record.get(key, "")
+                item = QTableWidgetItem(str(value))
+                self.table.setItem(row_idx, col_idx, item)
+
+        layout.addWidget(self.table)
+        
+    def create_simple_table(self, layout):
+        """Minimalistische Tabelle: Zeigt alle Spalten aus der Controlstruktur, stumpf, ohne Filter, ohne Mapping."""
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
+            control_columns = []
+        else:
+            control_columns = control.columns
+
+        data = self.data_manager.get_data() if self.data_manager else []
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(control_columns))
+        self.table.setRowCount(len(data))
+
+        # Spaltennamen (interner Name)
+        header_labels = []
+        for col in control_columns:
+            if isinstance(col, dict):
+                header_labels.append(str(col.get('name', '')))
+            else:
+                header_labels.append(str(col))
+        self.table.setHorizontalHeaderLabels(header_labels)
+
+        # Daten stumpf eintragen
+        for row_idx, record in enumerate(data):
+            if not isinstance(record, dict):
+                continue
+            for col_idx, col in enumerate(control_columns):
+                key = col.get('name') if isinstance(col, dict) else str(col)
+                value = record.get(key, "")
+                self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
+
+            layout.addWidget(self.table)
     
     def _create_search_widget(self, field_config):
         """Erstellt das passende Search-Widget für einen Feld-Typ"""
@@ -270,7 +899,6 @@ class PdvmModernViewWidget(QWidget):
             dropdown_group = dropdown_config["value"]
             
             # Dropdown-Daten laden
-            from pdvm_central_datenbank import PdvmCentralDatenbank
             
             dropdown_db = PdvmCentralDatenbank(
                 db_name="PdvmManager.db",
@@ -800,6 +1428,9 @@ class PdvmModernViewWidget(QWidget):
     
     def _setup_table_columns(self):
         """Konfiguriert die Tabellenspalten über den Data-Manager."""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Spalten-Setup wird ignoriert.")
+            return
         if not self.data_manager:
             return
         
@@ -873,6 +1504,9 @@ class PdvmModernViewWidget(QWidget):
     
     def _apply_filters(self):
         """Wendet alle Filter über den Data-Manager an"""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Filterung wird ignoriert.")
+            return
         if not self.data_manager:
             logger.debug("❌ Kein Data-Manager verfügbar für Filterung")
             return
@@ -981,7 +1615,6 @@ class PdvmModernViewWidget(QWidget):
             if isinstance(record_value, str) and record_value:
                 try:
                     # Versuche verschiedene Datumsformate
-                    from datetime import datetime
                     date_obj = datetime.strptime(record_value, "%Y-%m-%d")
                     formatted_dates = [
                         date_obj.strftime("%d.%m.%Y"),
@@ -1066,6 +1699,9 @@ class PdvmModernViewWidget(QWidget):
     
     def _sort_data(self):
         """Sortiert die gefilterten Daten nach der aktuellen Spalte."""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Sortierung wird ignoriert.")
+            return
         if not self.filtered_data or self.current_sort_column is None:
             return
         
@@ -1097,6 +1733,9 @@ class PdvmModernViewWidget(QWidget):
     
     def _populate_table(self):
         """Füllt die Tabelle mit den gefilterten/sortierten Daten über den Data-Manager."""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Tabellen-Population wird ignoriert.")
+            return
         if not self.data_manager or not self.filtered_data:
             logger.debug(f"❌ Tabellen-Population Check: data_manager={bool(self.data_manager)}, filtered_data={len(self.filtered_data) if self.filtered_data else 0}")
             self.table.setRowCount(0)
@@ -1159,11 +1798,17 @@ class PdvmModernViewWidget(QWidget):
     # Event Handlers
     def _on_search_changed(self):
         """Wird aufgerufen wenn sich ein Suchfilter ändert"""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Suche wird ignoriert.")
+            return
         self.search_timer.stop()
         self.search_timer.start(300)  # 300ms Verzögerung
     
     def _on_header_clicked(self, logical_index):
         """Wird aufgerufen wenn ein Spalten-Header geklickt wird"""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Header-Klick wird ignoriert.")
+            return
         if self.current_sort_column == logical_index:
             # Umschalten zwischen Auf-/Absteigend
             self.current_sort_order = Qt.DescendingOrder if self.current_sort_order == Qt.AscendingOrder else Qt.AscendingOrder
@@ -1172,9 +1817,12 @@ class PdvmModernViewWidget(QWidget):
             self.current_sort_order = Qt.AscendingOrder
         
         self._apply_filters()
-    
+
     def _on_row_selected(self):
         """Wird aufgerufen wenn eine Zeile ausgewählt wird"""
+        if self.dummy_mode:
+            logger.info("[ModernViewWidget] Dummy-Modus: Zeilenauswahl wird ignoriert.")
+            return
         current_row = self.table.currentRow()
         if current_row >= 0:
             item = self.table.item(current_row, 0)

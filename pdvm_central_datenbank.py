@@ -8,7 +8,50 @@ from typing import Any, Dict, Optional
 
 from pd_datetime import Pdvm_DateTime
 
+from pd_datetime import Pdvm_DateTime
+
 logger = logging.getLogger(__name__)
+
+
+class ColumnControl:
+    """
+    Control-Struktur für Spalten-Management.
+    Verwaltet Reihenfolge, Eigenschaften und Verarbeitung aller Spalten.
+    """
+    def __init__(self):
+        self.columns = []  # Liste von ColumnInfo-Objekten in der korrekten Reihenfolge
+        self.column_map = {}  # Schneller Zugriff nach Name
+    
+    def add_column(self, name: str, column_type: str, order: int, **kwargs):
+        """Fügt eine Spalte zur Control hinzu"""
+        column_info = {
+            'name': name,  # Spaltenname, z.B. 'vorname_original'
+            'type': column_type,
+            'order': order,
+            'original_field': kwargs.get('original_field'),
+            'field_config': kwargs.get('field_config'),
+            'is_auto_generated': kwargs.get('is_auto_generated', False),
+            'gruppe': kwargs.get('gruppe'),
+            'feld': kwargs.get('feld'),
+            'anzeige': kwargs.get('anzeige'),
+            'show': kwargs.get('show', False),
+            'expert': kwargs.get('expert', False),
+            'header_name': name,  # explizit für Header-Zeile 2 im Expert-Mode
+        }
+        self.columns.append(column_info)
+        self.column_map[name] = column_info
+        
+    def sort_columns(self):
+        """Sortiert die Spalten nach der Order"""
+        self.columns.sort(key=lambda x: x['order'])
+        
+    def get_ordered_column_names(self):
+        """Gibt die Spaltennamen in der korrekten Reihenfolge zurück"""
+        return [col['name'] for col in self.columns]
+        
+    def get_column_info(self, name: str):
+        """Gibt die Informationen einer Spalte zurück"""
+        return self.column_map.get(name)
 
 
 class PdvmCentralDatenbank:
@@ -329,36 +372,29 @@ class PdvmCentralDatenbank:
         Gibt eine Liste von Diktaten zurück: jeweils
           {"uid": <guid>, "<GRUPPE1>": <Daten-Dict oder JSON-String>, ...}
         """
-        try:
-            # Über PdvmDatenbank alle Datensätze laden (statt direkter SQL-Zugriffe)
-            from pdvm_datenbank import PdvmDatenbank
-            
-            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
-            rows = data_db.lesen_alle()
-            
-            if not rows:
-                logger.warning(f"⚠️ Keine Datensätze in Tabelle {self.table_name} gefunden")
-                return []
-
-            result = []
-            for row in rows:
-                # Spalte "daten" liegt in row["daten"] als JSON-String oder dict
-                raw = row.get("daten", {})
-                if isinstance(raw, str):
-                    try:
-                        data_dict = json.loads(raw)
-                    except:
-                        data_dict = {}
-                else:
-                    data_dict = raw
-                # Wir ersetzen row["daten"] durch den gepackten Dict-Inhalt:
-                entry = {"uid": row["uid"], **data_dict}
-                result.append(entry)
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Lesen aller Datensätze aus {self.table_name}: {e}")
+        # Über PdvmDatenbank alle Datensätze laden (statt direkter SQL-Zugriffe)
+        from pdvm_datenbank import PdvmDatenbank
+        data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+        rows = data_db.lesen_alle()
+        if not rows:
+            logger.warning(f"⚠️ Keine Datensätze in Tabelle {self.table_name} gefunden")
             return []
+
+        result = []
+        for row in rows:
+            # Spalte "daten" liegt in row["daten"] als JSON-String oder dict
+            raw = row.get("daten", {})
+            if isinstance(raw, str):
+                try:
+                    data_dict = json.loads(raw)
+                except:
+                    data_dict = {}
+            else:
+                data_dict = raw
+            # Wir ersetzen row["daten"] durch den gepackten Dict-Inhalt:
+            entry = {"uid": row["uid"], **data_dict}
+            result.append(entry)
+        return result
 
     def speichern(self, guid: str, daten: Dict[str, Any]):
         """
@@ -366,36 +402,22 @@ class PdvmCentralDatenbank:
         Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
         'daten' ist ein Python-Dict, das wir in JSON umwandeln und in Tabelle schreiben.
         """
-        try:
-            # Über PdvmDatenbank speichern (statt direkter SQL-Zugriffe)
-            from pdvm_datenbank import PdvmDatenbank
-            
-            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
-            data_db.speichern(guid, daten)
-            
-            logger.debug(f"✅ Datensatz {guid} erfolgreich in {self.table_name} gespeichert")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern von Datensatz {guid}: {e}")
-            raise
+        # Über PdvmDatenbank speichern (statt direkter SQL-Zugriffe)
+        from pdvm_datenbank import PdvmDatenbank
+        data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+        data_db.speichern(guid, daten)
+        logger.debug(f"✅ Datensatz {guid} erfolgreich in {self.table_name} gespeichert")
 
     def loeschen(self, guid: str):
         """
         Löscht einen Datensatz anhand der GUID.
         Verwendet PdvmDatenbank für den Datenzugriff (statt direkter SQL-Abfragen).
         """
-        try:
-            # Über PdvmDatenbank löschen (statt direkter SQL-Zugriffe)
-            from pdvm_datenbank import PdvmDatenbank
-            
-            data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
-            data_db.loeschen(guid)
-            
-            logger.debug(f"✅ Datensatz {guid} erfolgreich aus {self.table_name} gelöscht")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Löschen von Datensatz {guid}: {e}")
-            raise
+        # Über PdvmDatenbank löschen (statt direkter SQL-Zugriffe)
+        from pdvm_datenbank import PdvmDatenbank
+        data_db = PdvmDatenbank(db_name=self.db_name, table_name=self.table_name)
+        data_db.loeschen(guid)
+        logger.debug(f"✅ Datensatz {guid} erfolgreich aus {self.table_name} gelöscht")
 
     def save_values(self):
         """
@@ -652,120 +674,889 @@ class PdvmCentralDatenbank:
                 self.guid = guid
                 self._dirty = False
 
+
+
     def get_value_view(self, view_config: dict, stichtag: Optional[float] = None) -> list:
         """
-        Zentrale View-Methode: Liest alle Datensätze der Tabelle und löst sie 
-        basierend auf view_config in eine flache Struktur auf.
+        Zentrale View-Methode: Gibt (controls, daten)-Tuple zurück.
+        controls: ColumnControl-Objekt mit Spaltenstruktur
+        daten: Liste von Dicts mit optimaler Spaltenstruktur
+        """
+        # try entfernt: kein except/finally vorhanden
+        from pd_datetime import Pdvm_DateTime
+        if stichtag is None:
+            dt_inst = Pdvm_DateTime("DEU")
+            stichtag = dt_inst.PdvmDateTimeNow()
         
-        Erstellt IMMER eine vollständige Basis mit:
-        - Original-Spalten für alle Felder (FELD_original)
-        - Show-Spalten für alle Felder (FELD_show) 
-        - YMD/Alter-Spalten für alle Datumsfelder (automatisch bei type:date)
+        # DateTime-Instanz für Datumsübersetzungen
+        dt_formatter = Pdvm_DateTime("DEU")
         
-        Args:
-            view_config: View-Konfiguration mit metadata und Feldliste
-            stichtag: Optionaler Stichtag für historische Daten
+        # 1. View-Konfiguration extrahieren
+        if not view_config or "metadata" not in view_config:
+            logger.error("❌ Ungültige view_config - metadata fehlt")
+            return []
+        
+        table_name = view_config["ROOT"]["view_table"]
+        felder = view_config["metadata"][table_name]["felder"]
+        
+        # 2. Alle Datensätze der VIEW-TABELLE laden (EINMAL!)
+        from pdvm_datenbank import PdvmDatenbank
+        data_db = PdvmDatenbank(db_name=self.db_name, table_name=table_name)
+        alle_datensaetze = data_db.lesen_alle()
+        
+        if not alle_datensaetze:
+            logger.warning(f"📊 Keine Datensätze in Tabelle {table_name} gefunden")
+            return []
+        
+        # WICHTIG: historisch-Flag für View-Tabelle ermitteln (aus erstem Datensatz)
+        # Mit Initialisierung der Klasse wird die historisch-Logik gesetzt.
+        # Wir nehmen an, dass alle Datensätze in der View-Tabelle das gleiche historisch-Flag haben.
+#        if alle_datensaetze and len(alle_datensaetze) > 0:
+#            first_row = alle_datensaetze[0]
+#            # historisch ist normalerweise in row["historisch"] gespeichert, falls PdvmDatenbank es liefert
+#            self.historisch = bool(first_row.get("historisch", False))
+#        else:
+#            self.historisch = False  # Fallback
+        
+        logger.info(f"📊 get_value_view: Verarbeite {len(alle_datensaetze)} Datensätze für {len(felder)} Felder")
+        logger.info("🔧 KLARE 4-SCHRITT ARCHITEKTUR: 1.Controls 2.Original-Daten 3.Show-Daten 4.Rückgabe")
+        
+        # SCHRITT 1: SPALTEN-STRUKTUR erstellen (alle _original, dann alle _show, dann dummy)
+        column_structure = self._create_column_control(felder)
+        logger.info(f"🏗️ Control-Struktur erstellt: {len(column_structure.columns)} Spalten (inkl. Dummy)")
+        logger.info(f"📋 Reihenfolge: System → Original → Auto-Original → Show → Auto-Show → Dummy")
+        
+        all_column_names = [col['name'] for col in column_structure.columns]
+        logger.info(f"📋 Spaltennamen: {all_column_names}")
+
+        # SCHRITT 2: Alle Datensätze verarbeiten - nur _original Spalten befüllen
+        result = []
+        for row_data in alle_datensaetze:
+            guid = row_data.get("uid")
+            if not guid:
+                continue
+
+            # JSON-Daten aus der bereits geladenen Zeile direkt in self.data setzen
+            raw_data = row_data.get("daten", {})
+            if isinstance(raw_data, str):
+                try:
+                    self.data = json.loads(raw_data)
+                except Exception as e:
+                    logger.error(f"❌ Fehler beim Parsen von JSON für GUID {guid}: {e}. Überspringe diesen Datensatz.")
+                    continue
+            else:
+                self.data = raw_data
+
+            # Record mit allen Spalten initialisieren
+            record = {col_name: "" for col_name in all_column_names}
             
-        Returns:
-            Liste von Dicts mit aufgelösten Feldwerten: [{'_guid': '...', 'FELD1': 'Wert', ...}, ...]
+            # SCHRITT 2A: System-Original-Spalten befüllen
+            record["uid_original"] = guid
+            
+            # SCHRITT 2B: Feld-Original-Spalten befüllen (inkl. Zusatzspalten)
+            self._fill_all_original_columns(record, column_structure, dt_formatter, stichtag)
+            
+            result.append(record)
+        
+        # SCHRITT 3: Alle _show Spalten befüllen (basierend auf _original Werten)
+        for record in result:
+            self._fill_all_show_columns(record, column_structure, dt_formatter, stichtag)
+        
+        # SCHRITT 4: Dummy-Spalte und finale Rückgabe
+        for record in result:
+            record["dummy"] = "keine Daten"
+
+        all_column_names = [col['name'] for col in column_structure.columns]
+        if not result:
+            logger.warning("⚠️ Keine gültigen Datensätze nach JSON-Parsing, gebe leere Zeile mit allen Spalten zurück.")
+            empty = {col: "" for col in all_column_names}
+            logger.info(f"🔎 get_value_view Rückgabe (nur Spalten): {list(empty.keys())}")
+            return [empty]
+
+        logger.info(f"🔎 get_value_view Rückgabe: Spalten={all_column_names}")
+        if result:
+            logger.info(f"🔎 get_value_view Beispiel-Datensatz: {result[0]}")
+        return (column_structure, result)
+
+    def _fill_all_original_columns(self, record: dict, column_structure, dt_formatter, stichtag: float):
+        """
+        SCHRITT 2: Alle _original Spalten befüllen (Haupt- und Zusatzspalten)
+        """
+        for col in column_structure.columns:
+            col_name = col['name']
+            
+            # Nur _original Spalten verarbeiten (außer uid_original, das ist schon gesetzt)
+            if not col_name.endswith("_original") or col_name == "uid_original":
+                continue
+                
+            col_type = col.get('type', '')
+            
+            if col_type == "original":
+                # Haupt-Original-Spalte (z.B. geburtsdatum_original)
+                feld = col.get('feld') or col.get('original_field')
+                gruppe = col.get('gruppe', 'DATEN')
+                if feld:
+                    wert_dict = self.get_value(gruppe, str(feld).upper(), stichtag)
+                    val = wert_dict.get("wert")
+                    record[col_name] = val
+                    
+                    # Falls Datumsfeld: Zusatzspalten direkt befüllen
+                    field_config = col.get('field_config', {})
+                    if field_config.get('type') == 'date' and isinstance(val, (int, float)) and val > 0:
+                        self._fill_date_additional_original_columns(record, feld, val, dt_formatter, stichtag)
+                else:
+                    record[col_name] = None
+                    
+            elif col_type == "date_plus":
+                # Zusatzspalten für Datum werden von _fill_date_additional_original_columns befüllt
+                # Falls nicht befüllt, leer lassen
+                if col_name not in record or record[col_name] == "":
+                    record[col_name] = ""
+
+    def _fill_date_additional_original_columns(self, record: dict, feld_name: str, original_wert: Any, dt_formatter, stichtag: float):
+        """
+        Befüllt alle Zusatzspalten für ein Datumsfeld (_alter_original, _jahr_original, etc.)
         """
         try:
-            if stichtag is None:
-                from pd_datetime import Pdvm_DateTime
-                dt_inst = Pdvm_DateTime("DEU")
-                stichtag = dt_inst.PdvmDateTimeNow()
+            if not isinstance(original_wert, (int, float)) or original_wert <= 0:
+                # Leere Werte für alle Zusatzspalten
+                for zusatz in ["alter", "jahr", "monat", "tag"]:
+                    record[f"{feld_name.lower()}_{zusatz}_original"] = ""
+                return
             
-            # 1. View-Konfiguration extrahieren
-            if not view_config or "metadata" not in view_config:
-                logger.error("❌ Ungültige view_config - metadata fehlt")
-                return []
+            # Datum setzen
+            dt_formatter.PdvmDateTime = original_wert
+            dt_stichtag = Pdvm_DateTime("DEU")
+            dt_stichtag.PdvmDateTime = stichtag
             
-            table_name = view_config["ROOT"]["view_table"]
-            felder = view_config["metadata"][table_name]["felder"]
+            # Werte berechnen
+            alter = dt_stichtag.Year - dt_formatter.Year
+            jahr = dt_formatter.Year
+            monat = dt_formatter.Month
+            tag = dt_formatter.Day
             
-            # 2. Alle Datensätze der VIEW-TABELLE laden (EINMAL!)
-            from pdvm_datenbank import PdvmDatenbank
-            data_db = PdvmDatenbank(db_name=self.db_name, table_name=table_name)
-            alle_datensaetze = data_db.lesen_alle()
-            
-            if not alle_datensaetze:
-                logger.warning(f"📊 Keine Datensätze in Tabelle {table_name} gefunden")
-                return []
-            
-            # WICHTIG: historisch-Flag für View-Tabelle ermitteln (aus erstem Datensatz)
-            if alle_datensaetze and len(alle_datensaetze) > 0:
-                first_row = alle_datensaetze[0]
-                # historisch ist normalerweise in row["historisch"] gespeichert, falls PdvmDatenbank es liefert
-                self.historisch = bool(first_row.get("historisch", False))
-            else:
-                self.historisch = False  # Fallback
-            
-            # Spalten-Sichtbarkeit vorbereiten (falls nicht vorhanden, Standard verwenden)
-            if "column_visibility" not in view_config:
-                view_config["column_visibility"] = self.get_default_column_visibility(view_config)
-                logger.info("📊 Standard-Spalten-Sichtbarkeit angewendet")
-            
-            logger.info(f"📊 get_value_view: Verarbeite {len(alle_datensaetze)} Datensätze für {len(felder)} Felder")
-            
-            # 3. Für jeden Datensatz alle gewünschten Felder auflösen
-            result = []
-            for row_data in alle_datensaetze:
-                guid = row_data.get("uid")
-                if not guid:
-                    continue
-                
-                # JSON-Daten aus der bereits geladenen Zeile direkt in self.data setzen (SUPER-OPTIMIERUNG!)
-                raw_data = row_data.get("daten", {})
-                if isinstance(raw_data, str):
-                    try:
-                        self.data = json.loads(raw_data)
-                    except:
-                        self.data = {}
-                else:
-                    self.data = raw_data
-                
-                # Feldwerte für diesen Datensatz sammeln - VOLLSTÄNDIGE BASIS erstellen
-                record = {"uid": guid, "_guid": guid}
-                
-                # IMMER alle Felder mit vollständiger Basis verarbeiten
-                for feld_config in felder:
-                    feld_name = feld_config["feld"]
-                    feld_gruppe = feld_config.get("gruppe", "ROOT")  # Gruppe aus view_config verwenden
-                    
-                    # WICHTIG: Gruppen und Felder sind in der DB immer in GROSSBUCHSTABEN!
-                    feld_gruppe_upper = feld_gruppe.upper()
-                    feld_name_upper = feld_name.upper()
-                    
-                    # Direkter Zugriff über self.get_value mit bekannter Gruppe (SUPER-OPTIMIERT!)
-                    result_dict = self.get_value(feld_gruppe_upper, feld_name_upper, stichtag)
-                    wert = result_dict.get("wert") if result_dict else None
-                    
-                    # IMMER Original/Show-Spalten erstellen (vollständige Basis)
-                    record[f"{feld_name}_original"] = wert
-                    show_value = self._prepare_show_value_v3(wert, feld_config, stichtag)
-                    record[f"{feld_name}_show"] = show_value
-                    
-                    # Standard-Feld erhält Show-Wert (für Kompatibilität)
-                    record[feld_name] = show_value
-                
-                # IMMER YMD/Alter-Spalten für alle Datumsfelder erstellen
-                self._add_date_columns_v3(record, felder, stichtag)
-                
-                # Spalten-Sichtbarkeit basierend auf view_config anwenden
-                record = self._apply_column_visibility(record, view_config)
-                
-                result.append(record)
-            
-            logger.info(f"✅ {len(result)} Datensätze für View verarbeitet (Stichtag: {stichtag})")
-            logger.info("� OPTIMIERT: Nur 1x Datenbank-Zugriff für alle Datensätze")
-            logger.info("�🔧 Vollständige Basis: Original/Show-Spalten für alle Felder")
-            logger.info("📅 Vollständige Basis: YMD/Alter-Spalten für alle Datumsfelder")
-            logger.info("⚡ Kein doppeltes Lesen: JSON-Daten direkt aus geladenen Zeilen verwendet")
-            return result
+            # Original-Zusatzspalten befüllen
+            record[f"{feld_name.lower()}_alter_original"] = alter
+            record[f"{feld_name.lower()}_jahr_original"] = jahr
+            record[f"{feld_name.lower()}_monat_original"] = monat
+            record[f"{feld_name.lower()}_tag_original"] = tag
             
         except Exception as e:
-            logger.error(f"❌ Fehler in get_value_view: {e}")
-            return []
+            logger.error(f"❌ Fehler beim Befüllen der Original-Zusatzspalten für {feld_name}: {e}")
+            # Fallback: Leere Werte
+            for zusatz in ["alter", "jahr", "monat", "tag"]:
+                record[f"{feld_name.lower()}_{zusatz}_original"] = ""
+
+    def _fill_all_show_columns(self, record: dict, column_structure, dt_formatter, stichtag: float):
+        """
+        SCHRITT 3: Alle _show Spalten befüllen (basierend auf _original Werten)
+        """
+        # System-Show-Spalte
+        record["uid_show"] = record["uid_original"][:8] + "..." if record["uid_original"] else ""
+        
+        for col in column_structure.columns:
+            col_name = col['name']
+            
+            # Nur _show Spalten verarbeiten (außer uid_show, das ist schon gesetzt)
+            if not col_name.endswith("_show") or col_name == "uid_show":
+                continue
+                
+            col_type = col.get('type', '')
+            original_col_name = col_name.replace("_show", "_original")
+            original_wert = record.get(original_col_name)
+            
+            if col_type == "show":
+                # Haupt-Show-Spalte
+                field_config = col.get('field_config', {})
+                self._fill_single_show_column(record, col_name, original_wert, field_config, dt_formatter)
+                
+            elif col_type == "date_plus":
+                # Zusatz-Show-Spalten für Datum
+                self._fill_date_additional_show_column(record, col_name, original_wert, dt_formatter)
+
+    def _fill_single_show_column(self, record: dict, col_name: str, original_wert: Any, field_config: dict, dt_formatter):
+        """
+        Befüllt eine einzelne _show Spalte basierend auf dem Original-Wert
+        """
+        try:
+            field_type = field_config.get("type", "string")
+            
+            if field_type == "dropdown":
+                # Dropdown-Übersetzung
+                record[col_name] = self._translate_dropdown_value(original_wert, field_config.get("dropdown", {}))
+                
+            elif field_type == "date":
+                # Datum formatieren
+                if isinstance(original_wert, (int, float)) and original_wert > 0:
+                    dt_formatter.PdvmDateTime = original_wert
+                    record[col_name] = dt_formatter.Date
+                else:
+                    record[col_name] = ""
+                    
+            else:
+                # String oder andere Typen
+                record[col_name] = str(original_wert) if original_wert is not None else ""
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Befüllen der Show-Spalte {col_name}: {e}")
+            record[col_name] = ""
+
+    def _fill_date_additional_show_column(self, record: dict, col_name: str, original_wert: Any, dt_formatter):
+        """
+        Befüllt eine Zusatz-Show-Spalte für Datum (formatiert für Anzeige)
+        """
+        try:
+            if col_name.endswith("_alter_show"):
+                record[col_name] = str(original_wert) if original_wert not in ("", None) else ""
+                
+            elif col_name.endswith("_jahr_show"):
+                record[col_name] = str(original_wert) if original_wert not in ("", None) else ""
+                
+            elif col_name.endswith("_monat_show"):
+                # Monatsname (deutscher Text)
+                if isinstance(original_wert, int) and 1 <= original_wert <= 12:
+                    monat_namen = ["", "Januar", "Februar", "März", "April", "Mai", "Juni", 
+                                  "Juli", "August", "September", "Oktober", "November", "Dezember"]
+                    record[col_name] = monat_namen[original_wert]
+                else:
+                    record[col_name] = str(original_wert) if original_wert not in ("", None) else ""
+                    
+            elif col_name.endswith("_tag_show"):
+                record[col_name] = str(original_wert) if original_wert not in ("", None) else ""
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Befüllen der Zusatz-Show-Spalte {col_name}: {e}")
+            record[col_name] = ""
+
+    def _create_column_control(self, felder: list) -> ColumnControl:
+        """
+        Erstellt die Control-Struktur mit einheitlicher Namensgebung und Kopfzeilen-Logik.
+        - Feldname (klein) für _original/_show
+        - 'name' als Anzeigeüberschrift (show), bei original: '(Original)' anhängen
+        - Zusatzfelder: 'Alter', 'Jahr', 'Monat', 'Tag'
+        - Im Expert-Mode: 2 Kopfzeilen (Zeile 1: name, Zeile 2: feldname)
+        """
+        control = ColumnControl()
+        order = 0
+
+        # System-Spalten zuerst
+        control.add_column(
+            "uid_original", "system", order,
+            field_config={"anzeige": "ID (Original)", "label": "uid_original"},
+            gruppe=None, feld=None, anzeige="ID (Original)",
+            show=False, expert=True
+        )
+        order += 1
+        control.add_column(
+            "uid_show", "system", order,
+            field_config={"anzeige": "ID", "label": "uid_show"},
+            gruppe=None, feld=None, anzeige="ID",
+            show=True, expert=False
+        )
+        order += 1
+
+
+        for feld_config in felder:
+            feldname_gross = feld_config["feld"]
+            feld_name = feldname_gross.lower()
+            feld_type = feld_config.get("type", "string")
+            gruppe = feld_config.get("gruppe", "DATEN")
+            anzeige = feld_config.get("name") or feld_name.capitalize()
+
+            # Original-Spalte (Expert-Mode: label = feld_name (klein))
+            orig_label = feld_name  # <--- Feldname klein für die zweite Zeile im Header
+            orig_anzeige = f"{anzeige} (Original)"
+            orig_field_config = dict(feld_config)
+            orig_field_config["anzeige"] = orig_anzeige
+            orig_field_config["label"] = orig_label
+            control.add_column(
+                f"{feld_name}_original",
+                "original",
+                order,
+                original_field=feld_name,
+                field_config=orig_field_config,
+                gruppe=gruppe,
+                feld=feld_name,
+                anzeige=orig_anzeige,
+                show=False,
+                expert=True
+            )
+            order += 1
+
+            # Zusatzfelder für Datum
+            if feld_type == "date":
+                for zusatz, zusatz_label in zip(
+                    ["alter", "jahr", "monat", "tag"],
+                    ["Alter", "Jahr", "Monat", "Tag"]):
+                    col_name = f"{feld_name}_{zusatz}_original"
+                    auto_field_config = dict(feld_config)
+                    auto_field_config["anzeige"] = f"{anzeige} {zusatz_label} (Original)"
+                    auto_field_config["label"] = f"{feldname_gross}_{zusatz}"
+                    control.add_column(
+                        col_name,
+                        "date_plus",
+                        order,
+                        original_field=feld_name,
+                        field_config=auto_field_config,
+                        is_auto_generated=True,
+                        gruppe=gruppe,
+                        feld=feld_name,
+                        anzeige=auto_field_config["anzeige"],
+                        show=False,
+                        expert=True
+                    )
+                    order += 1
+
+            # Show-Spalte (label = feldname_gross)
+            show_field_config = dict(feld_config)
+            show_field_config["anzeige"] = anzeige
+            show_field_config["label"] = feldname_gross
+            control.add_column(
+                f"{feld_name}_show",
+                "show",
+                order,
+                original_field=feld_name,
+                field_config=show_field_config,
+                gruppe=gruppe,
+                feld=feld_name,
+                anzeige=anzeige,
+                show=True,
+                expert=False
+            )
+            order += 1
+
+            # Zusatzfelder für Datum (show)
+            if feld_type == "date":
+                for zusatz, zusatz_label in zip(
+                    ["alter", "jahr", "monat", "tag"],
+                    ["Alter", "Jahr", "Monat", "Tag"]):
+                    col_name = f"{feld_name}_{zusatz}_show"
+                    auto_field_config = dict(feld_config)
+                    auto_field_config["anzeige"] = f"{anzeige} {zusatz_label}"
+                    auto_field_config["label"] = f"{feldname_gross}_{zusatz}"
+                    control.add_column(
+                        col_name,
+                        "date_plus",
+                        order,
+                        original_field=feld_name,
+                        field_config=auto_field_config,
+                        is_auto_generated=True,
+                        gruppe=gruppe,
+                        feld=feld_name,
+                        anzeige=auto_field_config["anzeige"],
+                        show=True,
+                        expert=False
+                    )
+                    order += 1
+
+        # Dummy-Spalte immer am Ende hinzufügen
+        control.add_column(
+            "dummy", "dummy", order,
+            field_config={"anzeige": "Keine Daten", "label": "dummy"},
+            gruppe=None, feld=None, anzeige="Keine Daten",
+            show=False, expert=False
+        )
+        order += 1
+
+        # Control sortieren
+        control.sort_columns()
+
+        logger.info(f"🏗️ Control-Struktur erstellt: {len(control.columns)} Spalten (inkl. Dummy)")
+        logger.info("📋 Reihenfolge: System → Original → Auto-Original → Show → Auto-Show → Dummy")
+        logger.info(f"📋 Spaltennamen: {[col['name'] for col in control.columns]}")
+        return control
+
+    def _translate_dropdown_cached(self, wert: Any, field_config: dict, 
+                                 dropdown_cache: dict, guid: str) -> str:
+        """
+        Übersetzt Dropdown-Werte mit Cache (nur einmal pro GUID laden).
+        """
+        if not wert:
+            return ""
+
+        dropdown_config = field_config.get("dropdown_config")
+        if not dropdown_config:
+            dropdown_config = field_config.get("dropdown", {})
+        if not dropdown_config:
+            msg = f"FEHLER: Dropdown-Konfiguration fehlt für Feld {field_config.get('feld', '')}"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        # Cache-Key erstellen
+        cache_key = f"{guid}_{dropdown_config.get('table', '')}_{dropdown_config.get('gruppe', '')}"
+
+        if cache_key not in dropdown_cache:
+            # Dropdown-Daten laden und cachen
+            dropdown_cache[cache_key] = self._load_dropdown_data(dropdown_config, guid)
+
+        dropdown_data = dropdown_cache[cache_key]
+        if not dropdown_data:
+            msg = f"FEHLER: Keine Dropdown-Daten geladen für Feld {field_config.get('feld', '')}"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        return dropdown_data.get(str(wert), f"FEHLER: Kein Mapping für Wert '{wert}'")
+
+    def _load_dropdown_data(self, dropdown_config: dict, guid: str) -> dict:
+        """
+        Lädt Dropdown-Daten für Übersetzungen.
+        """
+        try:
+            table_name = dropdown_config.get("table")
+            guid = dropdown_config.get("key")
+            value_field = dropdown_config.get("value")
+
+            if not (table_name and guid and value_field):
+                raise ValueError(f"Ungültige Dropdown-Konfiguration: {dropdown_config}")
+
+            # Lade den Datensatz mit der GUID aus der Tabelle
+            dropdown_db = PdvmCentralDatenbank(db_name=self.db_name, table_name=table_name, guid=guid)
+            dropdown_data = dropdown_db.lesen()
+            mapping = {}
+            if dropdown_data and "ROOT" in dropdown_data:
+                group_data = dropdown_data["ROOT"].get(value_field, {})
+                werte = group_data.get("werte", [])
+                for eintrag in werte:
+                    key = str(eintrag.get("key"))
+                    display = eintrag.get("de") or eintrag.get("en") or key
+                    if key:
+                        mapping[key] = display
+            if not mapping:
+                logger.warning(f"Keine Dropdown-Mappings gefunden für {table_name}/{guid}/{value_field}")
+            return mapping
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der Dropdown-Daten: {e}")
+            raise
+
+    def _create_show_value(self, original_wert: Any, feld_config: dict, dt_formatter, stichtag: float) -> str:
+        """
+        Erstellt den aufbereiteten Show-Wert basierend auf Feldtyp und Konfiguration.
+        
+        Args:
+            original_wert: Der Original-Rohwert
+            feld_config: Feld-Konfiguration mit type, dropdown_config etc.
+            dt_formatter: PdvmDateTime-Instanz für Datumsformatierung
+            stichtag: Aktueller Stichtag
+            
+        Returns:
+            str: Aufbereiteter Anzeigewert
+        """
+        try:
+            if original_wert is None:
+                return ""
+
+            feld_type = feld_config.get("type", "string")
+
+            if feld_type == "date":
+                # Datum mit PdvmDateTime formatieren
+                if isinstance(original_wert, (int, float)) and original_wert > 0:
+                    dt_formatter.PdvmDateTime = original_wert
+                    return dt_formatter.Date
+                return str(original_wert) if original_wert else ""
+
+            elif feld_type == "dropdown":
+                # Dropdown-Übersetzung
+                dropdown_config = feld_config.get("dropdown_config")
+                if not dropdown_config:
+                    dropdown_config = feld_config.get("dropdown", {})
+                if not dropdown_config:
+                    msg = f"FEHLER: Dropdown-Konfiguration fehlt für Feld {feld_config.get('feld', '')}"
+                    logger.error(msg)
+                    raise ValueError(msg)
+                try:
+                    return self._translate_dropdown_value(original_wert, dropdown_config)
+                except Exception as e:
+                    msg = f"FEHLER: Dropdown-Übersetzung fehlgeschlagen für Feld {feld_config.get('feld', '')}: {e}"
+                    logger.error(msg)
+                    raise
+
+            else:
+                # String oder andere Typen: Als String zurückgeben
+                return str(original_wert) if original_wert else ""
+
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen des Show-Werts: {e}")
+            return f"FEHLER: {e}" if e else str(original_wert) if original_wert else ""
+
+    def _add_complete_date_columns(self, record: dict, feld_name: str, original_wert: Any, 
+                                  dt_formatter, stichtag: float):
+        """
+        Fügt ALLE Datums-Spalten hinzu: Original UND Show-Versionen.
+        Ersetzt _add_date_show_columns mit vollständiger Spalten-Architektur.
+        
+        Args:
+            record: Der Datensatz-Record (wird modifiziert)
+            feld_name: Name des Datums-Feldes (kleinbuchstaben)
+            original_wert: Der Original-Datumswert
+            dt_formatter: PdvmDateTime-Instanz
+            stichtag: Aktueller Stichtag
+        """
+        try:
+            if not isinstance(original_wert, (int, float)) or original_wert <= 0:
+                # ALLE Spalten mit leeren Werten initialisieren
+                date_cols = [
+                    f"{feld_name}_alter_original", f"{feld_name}_alter_show",
+                    f"{feld_name}_jahr_original", f"{feld_name}_jahr_show",
+                    f"{feld_name}_monat_original", f"{feld_name}_monat_show",
+                    f"{feld_name}_tag_original", f"{feld_name}_tag_show"
+                ]
+                for col in date_cols:
+                    record[col] = ""
+                return
+            
+            # Datum setzen
+            dt_formatter.PdvmDateTime = original_wert
+            
+            # Alter berechnen (basierend auf Stichtag)
+            dt_stichtag = Pdvm_DateTime("DEU")
+            dt_stichtag.PdvmDateTime = stichtag
+            alter = dt_stichtag.Year - dt_formatter.Year
+            
+            # Jahr, Monat, Tag extrahieren
+            jahr = dt_formatter.Year
+            monat = dt_formatter.Month
+            tag = dt_formatter.Day
+            # Deutscher Monatsname
+            monat_namen = ["", "Januar", "Februar", "März", "April", "Mai", "Juni", 
+                          "Juli", "August", "September", "Oktober", "November", "Dezember"]
+            monat_name = monat_namen[monat] if 1 <= monat <= 12 else str(monat)
+            
+            # ORIGINAL-Spalten (Zahlen-Werte für Sortierung/Filterung)
+            record[f"{feld_name}_alter_original"] = alter if alter is not None else 0
+            record[f"{feld_name}_jahr_original"] = jahr
+            record[f"{feld_name}_monat_original"] = monat
+            record[f"{feld_name}_tag_original"] = tag
+            
+            # SHOW-Spalten (Formatierte Anzeige für Benutzer)
+            record[f"{feld_name}_alter_show"] = str(alter) if alter is not None else ""
+            record[f"{feld_name}_jahr_show"] = str(jahr)
+            record[f"{feld_name}_monat_show"] = monat_name  # z.B. "Januar"
+            record[f"{feld_name}_tag_show"] = str(tag)
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen der Datums-Spalten für {feld_name}: {e}")
+            # Fallback: Alle Spalten leer
+            date_cols = [
+                f"{feld_name}_alter_original", f"{feld_name}_alter_show",
+                f"{feld_name}_jahr_original", f"{feld_name}_jahr_show",
+                f"{feld_name}_monat_original", f"{feld_name}_monat_show",
+                f"{feld_name}_tag_original", f"{feld_name}_tag_show"
+            ]
+            for col in date_cols:
+                record[col] = ""
+
+    def _create_column_structure(self, felder: list) -> dict:
+        """
+        Erstellt die komplette Spalten-Struktur ohne Doppelungen.
+        OPTIMIERTE REIHENFOLGE: System → Original-Felder → Automatische Original-Spalten → Show-Spalten
+        
+        Args:
+            felder: Liste der Feld-Konfigurationen
+            
+        Returns:
+            dict: Spalten-Struktur mit allen benötigten Spalten in korrekter Reihenfolge
+        """
+        structure = {}
+        
+        # System-Spalten (immer vorhanden)
+        structure["uid_original"] = {"type": "system", "order": 0}
+        structure["uid_show"] = {"type": "system", "order": 1}
+        
+        order_counter = 2
+        
+        # SCHRITT 1: Alle Original-Spalten (inkl. automatische Datum-Spalten)
+        for feld_config in felder:
+            feld_name = feld_config["feld"].lower()
+            feld_type = feld_config.get("type", "string")
+            
+            # Basis Original-Spalte
+            original_col = f"{feld_name}_original"
+            if original_col not in structure:
+                structure[original_col] = {
+                    "type": "original", 
+                    "field_type": feld_type,
+                    "field_config": feld_config,
+                    "order": order_counter
+                }
+                order_counter += 1
+            
+            # Automatische Original-Spalten für Datum-Felder (direkt nach dem Basis-Datum)
+            if feld_type == "date":
+                date_original_cols = [
+                    f"{feld_name}_alter_original",
+                    f"{feld_name}_jahr_original", 
+                    f"{feld_name}_monat_original",
+                    f"{feld_name}_tag_original"
+                ]
+                
+                for col in date_original_cols:
+                    if col not in structure:
+                        structure[col] = {
+                            "type": "date_original",
+                            "field_type": "integer",
+                            "parent_field": feld_name,
+                            "field_config": feld_config,
+                            "order": order_counter
+                        }
+                        order_counter += 1
+        
+        # SCHRITT 2: Alle Show-Spalten (inkl. automatische Datum-Show-Spalten)
+        for feld_config in felder:
+            feld_name = feld_config["feld"].lower()
+            feld_type = feld_config.get("type", "string")
+            
+            # Basis Show-Spalte
+            show_col = f"{feld_name}_show"
+            if show_col not in structure:
+                structure[show_col] = {
+                    "type": "show", 
+                    "field_type": feld_type,
+                    "field_config": feld_config,
+                    "order": order_counter
+                }
+                order_counter += 1
+            
+            # Automatische Show-Spalten für Datum-Felder (direkt nach dem Basis-Show)
+            if feld_type == "date":
+                date_show_cols = [
+                    f"{feld_name}_alter_show",
+                    f"{feld_name}_jahr_show", 
+                    f"{feld_name}_monat_show",
+                    f"{feld_name}_tag_show"
+                ]
+                
+                for col in date_show_cols:
+                    if col not in structure:
+                        structure[col] = {
+                            "type": "date_show",
+                            "field_type": "string",
+                            "parent_field": feld_name,
+                            "field_config": feld_config,
+                            "order": order_counter
+                        }
+                        order_counter += 1
+        
+        logger.info(f"🏗️ Spalten-Struktur erstellt: {len(structure)} Spalten in optimaler Reihenfolge")
+        logger.info("📋 Reihenfolge: System → Original-Felder → Auto-Original → Show-Felder → Auto-Show")
+        return structure
+
+    def _create_record_with_structure(self, guid: str, felder: list, column_structure: dict, 
+                                    dt_formatter, stichtag: float) -> dict:
+        """
+        Erstellt einen Datensatz basierend auf der definierten Spalten-Struktur.
+        OPTIMIERT: Schleifenverarbeitung entsprechend der Spalten-Reihenfolge.
+        
+        Args:
+            guid: GUID des Datensatzes
+            felder: Liste der Feld-Konfigurationen  
+            column_structure: Definierte Spalten-Struktur
+            dt_formatter: PdvmDateTime-Instanz
+            stichtag: Aktueller Stichtag
+            
+        Returns:
+            dict: Vollständig befüllter Datensatz
+        """
+        # Datensatz mit allen Spalten initialisieren
+        record = {}
+        
+        # Alle Spalten in korrekter Reihenfolge initialisieren
+        sorted_columns = sorted(column_structure.items(), key=lambda x: x[1]["order"])
+        for col_name, col_info in sorted_columns:
+            record[col_name] = None  # Initialer Wert
+        
+        # System-Spalten befüllen
+        record["uid_original"] = guid
+        record["uid_show"] = guid[:8] + "..."
+        
+        # Einmaliger DB-Zugriff für alle Felder
+        field_data = {}
+        for feld_config in felder:
+            feld_name = feld_config["feld"].lower()
+            feld_gruppe = feld_config.get("gruppe", "ROOT")
+            feld_type = feld_config.get("type", "string")
+            
+            # DB-Zugriff
+            feld_gruppe_upper = feld_gruppe.upper()
+            feld_name_upper = feld_config["feld"].upper()
+            
+            result_dict = self.get_value(feld_gruppe_upper, feld_name_upper, stichtag)
+            original_wert = result_dict.get("wert") if result_dict else None
+            
+            field_data[feld_name] = {
+                "original": original_wert,
+                "config": feld_config,
+                "type": feld_type
+            }
+        
+        # SPALTEN-REIHENFOLGE VERARBEITUNG: Direkt durch sortierte Spalten-Struktur
+        for col_name, col_info in sorted_columns:
+            col_type = col_info["type"]
+            
+            if col_type == "system":
+                # System-Spalten bereits befüllt
+                continue
+                
+            elif col_type == "original":
+                # Basis Original-Spalte
+                field_name = col_name.replace("_original", "")
+                if field_name in field_data:
+                    record[col_name] = field_data[field_name]["original"]
+                    
+            elif col_type == "date_original":
+                # Automatische Original-Datum-Spalte
+                parent_field = col_info["parent_field"]
+                if parent_field in field_data:
+                    original_wert = field_data[parent_field]["original"]
+                    self._fill_single_date_original_column(
+                        record, col_name, parent_field, original_wert, dt_formatter, stichtag
+                    )
+                    
+            elif col_type == "show":
+                # Basis Show-Spalte
+                field_name = col_name.replace("_show", "")
+                if field_name in field_data:
+                    data = field_data[field_name]
+                    show_wert = self._create_show_value(
+                        data["original"], data["config"], dt_formatter, stichtag
+                    )
+                    record[col_name] = show_wert
+                    
+            elif col_type == "date_show":
+                # Automatische Show-Datum-Spalte
+                parent_field = col_info["parent_field"]
+                if parent_field in field_data:
+                    original_wert = field_data[parent_field]["original"]
+                    self._fill_single_date_show_column(
+                        record, col_name, parent_field, original_wert, dt_formatter, stichtag
+                    )
+        
+        return record
+
+    def _fill_single_date_original_column(self, record: dict, col_name: str, parent_field: str, 
+                                        original_wert: Any, dt_formatter, stichtag: float):
+        """
+        Befüllt eine einzelne automatische Original-Datum-Spalte.
+        
+        Args:
+            record: Der Datensatz-Record (wird modifiziert)
+            col_name: Name der zu befüllenden Spalte (z.B. "geburtsdatum_alter_original")
+            parent_field: Name des Parent-Datums-Feldes (z.B. "geburtsdatum")
+            original_wert: Der Original-Datumswert
+            dt_formatter: PdvmDateTime-Instanz
+            stichtag: Aktueller Stichtag
+        """
+        try:
+            if not isinstance(original_wert, (int, float)) or original_wert <= 0:
+                record[col_name] = 0 if "_alter_" in col_name else ""
+                return
+            
+            # Datum setzen
+            dt_formatter.PdvmDateTime = original_wert
+            
+            # Spezifischen Wert je nach Spalten-Typ
+            if col_name.endswith("_alter_original"):
+                dt_stichtag = Pdvm_DateTime("DEU")
+                dt_stichtag.PdvmDateTime = stichtag
+                alter = dt_stichtag.Year - dt_formatter.Year
+                record[col_name] = alter if alter is not None else 0
+                
+            elif col_name.endswith("_jahr_original"):
+                record[col_name] = dt_formatter.Year
+                
+            elif col_name.endswith("_monat_original"):
+                record[col_name] = dt_formatter.Month
+                
+            elif col_name.endswith("_tag_original"):
+                record[col_name] = dt_formatter.Day
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Befüllen der Original-Datum-Spalte {col_name}: {e}")
+            record[col_name] = 0 if "_alter_" in col_name else ""
+
+    def _fill_single_date_show_column(self, record: dict, col_name: str, parent_field: str, 
+                                    original_wert: Any, dt_formatter, stichtag: float):
+        """
+        Befüllt eine einzelne automatische Show-Datum-Spalte.
+        
+        Args:
+            record: Der Datensatz-Record (wird modifiziert)
+            col_name: Name der zu befüllenden Spalte (z.B. "geburtsdatum_alter_show")
+            parent_field: Name des Parent-Datums-Feldes (z.B. "geburtsdatum")
+            original_wert: Der Original-Datumswert
+            dt_formatter: PdvmDateTime-Instanz
+            stichtag: Aktueller Stichtag
+        """
+        try:
+            if not isinstance(original_wert, (int, float)) or original_wert <= 0:
+                record[col_name] = ""
+                return
+            
+            # Datum setzen
+            dt_formatter.PdvmDateTime = original_wert
+            
+            # Spezifischen Anzeige-Wert je nach Spalten-Typ
+            if col_name.endswith("_alter_show"):
+                dt_stichtag = Pdvm_DateTime("DEU")
+                dt_stichtag.PdvmDateTime = stichtag
+                alter = dt_stichtag.Year - dt_formatter.Year
+                record[col_name] = str(alter) if alter is not None else ""
+                
+            elif col_name.endswith("_jahr_show"):
+                record[col_name] = str(dt_formatter.Year)
+                
+            elif col_name.endswith("_monat_show"):
+                monat_namen = ["", "Januar", "Februar", "März", "April", "Mai", "Juni", 
+                              "Juli", "August", "September", "Oktober", "November", "Dezember"]
+                monat = dt_formatter.Month
+                monat_name = monat_namen[monat] if 1 <= monat <= 12 else str(monat)
+                record[col_name] = monat_name  # Deutscher Monatsname
+                
+            elif col_name.endswith("_tag_show"):
+                record[col_name] = str(dt_formatter.Day)
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Befüllen der Show-Datum-Spalte {col_name}: {e}")
+            record[col_name] = ""
+
+    def _translate_dropdown_value(self, original_wert: Any, dropdown_config: dict) -> str:
+        """
+        Übersetzt einen Dropdown-Wert basierend auf der Konfiguration.
+        
+        Args:
+            original_wert: Der Original-Schlüsselwert
+            dropdown_config: Dropdown-Konfiguration mit table, key, value
+            
+        Returns:
+            str: Übersetzter Anzeigewert oder Original-Wert als Fallback
+        """
+        try:
+            if not original_wert or not dropdown_config:
+                return str(original_wert) if original_wert else ""
+
+            table_name = dropdown_config.get("table")
+            guid = dropdown_config.get("key")
+            value_field = dropdown_config.get("value")
+
+            if table_name and guid and value_field:
+                # Lade den Datensatz mit der GUID aus der Tabelle
+                dropdown_db = PdvmCentralDatenbank(db_name=self.db_name, table_name=table_name, guid=guid)
+                dropdown_data = dropdown_db.lesen()
+                if dropdown_data and "ROOT" in dropdown_data:
+                    group_data = dropdown_data["ROOT"].get(value_field, {})
+                    werte = group_data.get("werte", [])
+                    for eintrag in werte:
+                        if str(eintrag.get("key")) == str(original_wert):
+                            # Bevorzugt Deutsch, sonst Englisch, sonst Key
+                            return eintrag.get("de") or eintrag.get("en") or str(original_wert)
+                # Wenn keine Übersetzung gefunden, gib den Originalwert zurück
+                return str(original_wert)
+
+            # Fallback: Original-Wert zurückgeben
+            return str(original_wert)
+
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Übersetzen des Dropdown-Werts {original_wert}: {e}")
+            return str(original_wert) if original_wert else ""
 
     # ====== ZENTRALE DROPDOWN-FUNKTIONALITÄT ======
     

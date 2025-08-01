@@ -15,13 +15,13 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 
 # Import der neuen V3-Manager
-from pdvm_view_data_manager_v3 import PdvmViewDataManagerV3
+from pdvm_view_data_manager import PdvmViewDataManager
 from pdvm_filter_manager_v3 import PdvmFilterManagerV3
 from pdvm_central_datenbank_extensions import install_extensions
 
 logger = logging.getLogger(__name__)
 
-class PdvmModernViewWidgetV3(QWidget):
+class PdvmModernViewWidget(QWidget):
     """
     Modernes View-Widget V3 mit korrekter Original/Show-Spalten-Architektur
     
@@ -71,7 +71,7 @@ class PdvmModernViewWidgetV3(QWidget):
         """Initialisiert Data- und Filter-Manager V3"""
         try:
             # Data-Manager V3
-            self.data_manager = PdvmViewDataManagerV3(
+            self.data_manager = PdvmViewDataManager(
                 view_guid=self.view_guid,
                 user_guid=self.user_guid
             )
@@ -232,120 +232,67 @@ class PdvmModernViewWidgetV3(QWidget):
         layout.addWidget(self.status_label)
     
     def _initial_load(self):
-        """Lädt Initial-Daten und Setup"""
+        """Lädt Initial-Basisdaten und Setup (keine Filter, alle Spalten)"""
         try:
-            # Original-Daten vom Data-Manager laden
-            self.filter_manager.load_original_data()
-            
-            # Tabellen-Spalten aufbauen
             self._setup_table_columns()
-            
-            # Initial alle Daten anzeigen (keine Filter)
-            self.filter_manager.apply_all_filters()
-            self._update_ui_from_filter_manager()
-            
-            logger.info("✅ Initial-Load V3 abgeschlossen")
-            
+            self._populate_table()
+            logger.info("✅ Initial-Load (Basis) abgeschlossen")
         except Exception as e:
-            logger.error(f"❌ Fehler beim Initial-Load V3: {e}")
+            logger.error(f"❌ Fehler beim Initial-Load (Basis): {e}")
     
     def _setup_table_columns(self):
-        """Richtet die Tabellen-Spalten basierend auf sichtbaren Spalten ein"""
+        """Richtet die Tabellen-Spalten für ALLE Basisspalten ein, Header zweizeilig (Anzeigename, interner Name)"""
         try:
-            # Sichtbare Spalten vom Data-Manager holen
-            visible_columns = self.data_manager.get_visible_columns()
-            
-            # Tabelle konfigurieren
-            self.table.setColumnCount(len(visible_columns))
-            
-            # Header-Labels setzen
+            # Hole alle Spaltennamen direkt aus der Basistabelle (keine Filterung)
+            if hasattr(self.data_manager, 'original_data') and self.data_manager.original_data:
+                all_columns = list(self.data_manager.original_data[0].keys())
+            else:
+                all_columns = []
+
+            self.table.setColumnCount(len(all_columns))
             headers = []
-            for column_name in visible_columns:
-                # Header-Namen aus column_name ableiten
-                if column_name.endswith("_show"):
-                    field_name = column_name[:-5]  # "_show" entfernen
-                    field_config = self.data_manager.get_field_config(field_name)
-                    header = field_config.get("bezeichnung", field_name)
-                elif "_Jahr" in column_name:
-                    header = column_name.replace("_", " ")
-                elif "_Monat" in column_name:
-                    header = column_name.replace("_", " ")
-                elif "_Tag" in column_name:
-                    header = column_name.replace("_", " ")
-                elif "_Alter" in column_name:
-                    header = column_name.replace("_", " ")
+            for col in all_columns:
+                # Anzeigename aus Feldkonfiguration, sonst leer
+                field_config = self.data_manager.get_field_config(col.replace('_show',''))
+                display = field_config.get('bezeichnung', '') if field_config else ''
+                # Zweizeilig: Anzeigename (fett), darunter interner Name
+                if display and display != col:
+                    header = f"{display}\n[{col}]"
                 else:
-                    header = column_name
-                
+                    header = col
                 headers.append(header)
-            
             self.table.setHorizontalHeaderLabels(headers)
-            
-            # Spalten-Zuordnung speichern
-            self.visible_columns = visible_columns
-            
-            # Auto-Resize
+            self.visible_columns = all_columns
             self.table.horizontalHeader().setStretchLastSection(True)
-            
-            logger.info(f"✅ Tabellen-Spalten eingerichtet: {len(visible_columns)} Spalten")
-            
+            logger.info(f"✅ Tabellen-Spalten (Basis) eingerichtet: {len(all_columns)} Spalten")
         except Exception as e:
-            logger.error(f"❌ Fehler beim Einrichten der Tabellen-Spalten: {e}")
+            logger.error(f"❌ Fehler beim Einrichten der Basis-Tabellen-Spalten: {e}")
     
     def _populate_table(self):
-        """Befüllt die Tabelle mit gefilterten Daten"""
+        """Befüllt die Tabelle mit ALLEN Basisdaten (keine Filterung)"""
         try:
-            filtered_data = self.filter_manager.get_filtered_data()
-            
-            # WICHTIG: Sichtbare Spalten immer frisch vom Data-Manager holen
-            visible_columns = self.data_manager.get_visible_columns()
-            self.visible_columns = visible_columns  # Aktualisieren
-            
-            # Tabelle leeren
+            if hasattr(self.data_manager, 'original_data'):
+                all_data = self.data_manager.original_data
+            else:
+                all_data = []
+            visible_columns = self.visible_columns
             self.table.setRowCount(0)
             self.table.setSortingEnabled(False)
-            
-            # Spalten-Setup sicherstellen (für YMD/Alter-Spalten)
             if self.table.columnCount() != len(visible_columns):
                 self._setup_table_columns()
-            
-            # Zeilen hinzufügen
-            for row_idx, record in enumerate(filtered_data):
+            for row_idx, record in enumerate(all_data):
                 self.table.insertRow(row_idx)
-                
                 for col_idx, column_name in enumerate(visible_columns):
                     value = record.get(column_name, "")
-                    
-                    # Formatierung für spezielle Spalten
-                    if "_Alter" in column_name and value is not None:
-                        display_value = f"{value} Jahre"
-                    elif "_Jahr" in column_name and value is not None:
-                        display_value = str(value)
-                    elif "_Monat" in column_name and value is not None:
-                        display_value = str(value)
-                    elif "_Tag" in column_name and value is not None:
-                        display_value = str(value)
-                    elif value is None:
-                        display_value = ""
-                    else:
-                        display_value = str(value)
-                    
-                    # Table Item erstellen
+                    display_value = str(value) if value is not None else ""
                     item = QTableWidgetItem(display_value)
-                    
-                    # GUID als Daten speichern
                     if col_idx == 0:
                         item.setData(Qt.UserRole, record.get("_guid"))
-                    
                     self.table.setItem(row_idx, col_idx, item)
-            
-            # Sortierung wieder aktivieren
             self.table.setSortingEnabled(True)
-            
-            logger.debug(f"✅ Tabelle befüllt: {len(filtered_data)} Zeilen, {len(visible_columns)} Spalten")
-            
+            logger.debug(f"✅ Tabelle (Basis) befüllt: {len(all_data)} Zeilen, {len(visible_columns)} Spalten")
         except Exception as e:
-            logger.error(f"❌ Fehler beim Befüllen der Tabelle: {e}")
+            logger.error(f"❌ Fehler beim Befüllen der Basistabelle: {e}")
     
     def _update_ui_from_filter_manager(self):
         """Aktualisiert komplette UI basierend auf Filter-Manager"""
