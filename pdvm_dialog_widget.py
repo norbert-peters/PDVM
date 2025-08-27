@@ -6,10 +6,10 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from pdvm_input_widget import PdvmInputWidget
-from pdvm_search_list_widget import PdvmSearchListWidget
+# from pdvm_search_list_widget import PdvmSearchListWidget  # ENTFERNT - nicht mehr benötigt
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from pd_datetime import Pdvm_DateTime, PdvmDateTimeUtils
-from pdvm_view_manager import PdvmViewManager
+from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
+# from pdvm_view_manager import PdvmViewManager  # ENTFERNT - nicht mehr benötigt
 import logging
 
 logger = logging.getLogger(__name__)
@@ -175,14 +175,17 @@ class PdvmDialogWidget(QWidget):
         # Entscheide, ob Search oder Input
         lr = frame_data.get('last_root_guid', SYSTEM_USER_ID)
         if lr == SYSTEM_USER_ID:
-            cd = self.manager.get_call()
-            vm = PdvmViewManager(cd)
-            self.view_mgr = vm
-            w = PdvmSearchListWidget(vm, vm.view_table)
-            w.selectionChanged.connect(self._on_search_selected)
-            self.view_frame = w
-            self.layout.addWidget(self.btn_frame)
-            self.layout.addWidget(self.view_frame)
+            # DEAKTIVIERT - ViewManager und SearchListWidget nicht mehr verfügbar
+            logger.warning("Search-Funktionalität temporär deaktiviert - verwende Input-Widget")
+            self._create_input_widget()
+            # cd = self.manager.get_call()
+            # vm = PdvmViewManager(cd)
+            # self.view_mgr = vm
+            # w = PdvmSearchListWidget(vm, vm.view_table)
+            # w.selectionChanged.connect(self._on_search_selected)
+            # self.view_frame = w
+            # self.layout.addWidget(self.btn_frame)
+            # self.layout.addWidget(self.view_frame)
             self.search = w
             self.input_frame = None
         else:

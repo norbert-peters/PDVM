@@ -333,7 +333,7 @@ class PdvmFilterManager:
             
             # Fallback: Wenn interne Spalten nicht existieren, selbst berechnen
             if record_jahr is None or record_monat is None or record_tag is None:
-                from pd_datetime import Pdvm_DateTime
+                from pdvm_datetime import Pdvm_DateTime
                 pdvm_dt = Pdvm_DateTime("DEU")
                 pdvm_dt.PdvmDateTime = float(record_value)
                 record_jahr = pdvm_dt.Year
@@ -419,7 +419,7 @@ class PdvmFilterManager:
     
     def apply_date_range_on_original_column(self, field_name, range_data):
         """Filtert die Originaldaten direkt nach einem PDVM Date-Bereich (Zeitraum-Modus)."""
-        from pd_datetime import Pdvm_DateTime
+        from pdvm_datetime import Pdvm_DateTime
         ab_jahr = range_data.get("ab_jahr")
         ab_monat = range_data.get("ab_monat")
         ab_tag = range_data.get("ab_tag")

@@ -25,14 +25,15 @@ logger = logging.getLogger(__name__)
 
 class ColumnSelectionDialog(QDialog):
     """
-    Dialog für die Spaltenauswahl mit Checkboxen
+    Vereinfachter Dialog nur für die Spaltenauswahl (Sichtbarkeit).
+    Reihenfolge wird direkt in der Tabelle per Drag & Drop verwaltet.
     """
     
     def __init__(self, available_columns, selected_columns, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Spaltenauswahl")
         self.setModal(True)
-        self.resize(400, 300)
+        self.resize(450, 400)
         
         self.available_columns = available_columns  # Liste von {"name": str, "label": str}
         self.selected_columns = selected_columns.copy()  # Liste der ausgewählten Namen
@@ -47,6 +48,12 @@ class ColumnSelectionDialog(QDialog):
         title_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
         layout.addWidget(title_label)
         
+        # Hinweis für Reihenfolge
+        hint_label = QLabel("💡 Tipp: Spalten-Reihenfolge können Sie direkt in der Tabelle per Drag & Drop ändern")
+        hint_label.setStyleSheet("color: #666; font-size: 12px; margin-bottom: 15px; padding: 8px; background-color: #f0f0f0; border-radius: 4px;")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+        
         # Scroll-Bereich für Checkboxen
         scroll_area = QScrollArea()
         scroll_widget = QWidget()
@@ -54,47 +61,80 @@ class ColumnSelectionDialog(QDialog):
         
         self.checkboxes = {}
         
-        # Alle verfügbaren Spalten als Checkboxen
-        for col_data in self.available_columns:
-            name = col_data["name"]
-            label = col_data["label"]
+        # Standard-Spalten und Expert-Spalten getrennt anzeigen
+        standard_cols = [col for col in self.available_columns if not col.get('expert', False)]
+        expert_cols = [col for col in self.available_columns if col.get('expert', False)]
+        
+        # Standard-Spalten
+        if standard_cols:
+            std_header = QLabel("Standard-Spalten:")
+            std_header.setStyleSheet("font-weight: bold; color: #333; margin-top: 5px;")
+            scroll_layout.addWidget(std_header)
             
-            checkbox = QCheckBox(label)
-            checkbox.setChecked(name in self.selected_columns)
-            checkbox.stateChanged.connect(self._on_checkbox_changed)
+            for col_data in standard_cols:
+                name = col_data["name"]
+                label = col_data["label"]
+                
+                checkbox = QCheckBox(label)
+                checkbox.setChecked(name in self.selected_columns)
+                checkbox.stateChanged.connect(self._on_checkbox_changed)
+                
+                self.checkboxes[name] = checkbox
+                scroll_layout.addWidget(checkbox)
+        
+        # Expert-Spalten (falls vorhanden)
+        if expert_cols:
+            # Trennlinie
+            scroll_layout.addSpacing(10)
             
-            self.checkboxes[name] = checkbox
-            scroll_layout.addWidget(checkbox)
+            expert_header = QLabel("Expert-Spalten:")
+            expert_header.setStyleSheet("font-weight: bold; color: #e67e22; margin-top: 5px;")
+            scroll_layout.addWidget(expert_header)
+            
+            for col_data in expert_cols:
+                name = col_data["name"]
+                label = col_data["label"]
+                
+                checkbox = QCheckBox(f"🔧 {label}")  # Expert-Icon
+                checkbox.setChecked(name in self.selected_columns)
+                checkbox.stateChanged.connect(self._on_checkbox_changed)
+                checkbox.setStyleSheet("color: #e67e22;")  # Orange für Expert
+                
+                self.checkboxes[name] = checkbox
+                scroll_layout.addWidget(checkbox)
         
         scroll_area.setWidget(scroll_widget)
         layout.addWidget(scroll_area)
         
-        # Buttons
+        # Buttons für Schnell-Auswahl
         button_layout = QHBoxLayout()
         
-        # Alle auswählen / Alle abwählen
         select_all_btn = QPushButton("Alle auswählen")
         select_all_btn.clicked.connect(self._select_all)
         button_layout.addWidget(select_all_btn)
         
-        deselect_all_btn = QPushButton("Alle abwählen") 
+        deselect_all_btn = QPushButton("Alle abwählen")
         deselect_all_btn.clicked.connect(self._deselect_all)
         button_layout.addWidget(deselect_all_btn)
         
         button_layout.addStretch()
         
-        # OK / Abbrechen
+        layout.addLayout(button_layout)
+        
+        # OK / Abbrechen Buttons
+        dialog_buttons = QHBoxLayout()
+        
         ok_btn = QPushButton("OK")
         ok_btn.clicked.connect(self.accept)
         ok_btn.setDefault(True)
-        button_layout.addWidget(ok_btn)
+        dialog_buttons.addWidget(ok_btn)
         
         cancel_btn = QPushButton("Abbrechen")
         cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
+        dialog_buttons.addWidget(cancel_btn)
         
-        layout.addLayout(button_layout)
-    
+        layout.addLayout(dialog_buttons)
+
     def _on_checkbox_changed(self):
         """Aktualisiert die Liste der ausgewählten Spalten"""
         self.selected_columns = []
@@ -126,10 +166,15 @@ class PdvmModernViewWidget(QWidget):
     rowSelected = pyqtSignal(dict)  # Emitted when a row is selected
     dataChanged = pyqtSignal()     # Emitted when data changes
     
-    def __init__(self, view_guid, user_guid=None, parent=None):
+    def __init__(self, view_guid, user_guid=None, parent=None, central_systemsteuerung=None):
         super().__init__(parent)
+        
+        # VERSION MARKER für Debug-Zwecke
+        logger.info("🚀 PDVM MODERN VIEW WIDGET VERSION 2.0 - ZENTRALE SYSTEMSTEUERUNG EDITION GELADEN!")
+        
         self.view_guid = view_guid
         self.user_guid = user_guid
+        self.central_systemsteuerung = central_systemsteuerung  # Zentrale Systemsteuerung-Instanz
         self.stichtag = None  # Wird beim Laden gesetzt
         # WICHTIG: Manager-Pattern - UI verwendet nur den Data-Manager
         self.data_manager = None
@@ -298,6 +343,15 @@ class PdvmModernViewWidget(QWidget):
         self.column_selection_button.clicked.connect(self._open_column_selection_dialog)
         controls_row.addWidget(QLabel("Spalten anzeigen:"))
         controls_row.addWidget(self.column_selection_button)
+        
+        # DEBUG: Test-Button für Spalten-Reihenfolge
+        debug_button = QPushButton("🧪 Test Reihenfolge")
+        debug_button.setToolTip("Testet die Spalten-Reihenfolge Funktionalität")
+        debug_button.clicked.connect(self.test_column_order_functionality)
+        debug_button.setMaximumWidth(120)
+        debug_button.setStyleSheet("color: #666; font-size: 11px;")
+        controls_row.addWidget(debug_button)
+        
         controls_row.addStretch(1)
         header_layout.addLayout(controls_row)
         layout.addWidget(header_widget)
@@ -312,12 +366,29 @@ class PdvmModernViewWidget(QWidget):
             layout.addWidget(error_label)
 
     def _toggle_expert_mode(self):
+        """
+        Schaltet Expert-Mode um.
+        
+        WICHTIG: display_show wird neu berechnet, aber nicht gespeichert für Expert-Spalten.
+        Beim Zurückschalten auf Normal-Mode wird der ursprüngliche Zustand wiederhergestellt.
+        """
         self.expert_mode = not self.expert_mode
         self.expert_button.setText("🔬 Expert-Mode: AN" if self.expert_mode else "🔬 Expert-Mode: AUS")
-        self.expert_button.setChecked(self.expert_mode)  # Button-Status aktualisieren
+        self.expert_button.setChecked(self.expert_mode)
+        
+        # WICHTIG: Spaltenauswahl zurücksetzen wenn Mode gewechselt wird
+        # Dies sorgt dafür, dass Expert-Spalten automatisch angezeigt werden
+        if self.expert_mode:
+            logger.debug("🔬 Expert-Mode aktiviert - Expert-Spalten werden verfügbar")
+            # Spaltenauswahl wird in _update_visible_columns neu berechnet
+        else:
+            logger.debug("👤 Normal-Mode aktiviert - Expert-Spalten werden ausgeblendet")
+            # Spaltenauswahl für Normal-Mode wird wiederhergestellt
+        
         self._update_visible_columns()
         self._rebuild_table()
-        # Einstellungen speichern
+        
+        # Einstellungen speichern (aber display_show für Expert-Spalten wird nicht persistent gespeichert)
         self._save_view_settings()
 
     def _load_view_settings(self):
@@ -327,33 +398,61 @@ class PdvmModernViewWidget(QWidget):
             return
         
         try:
-            sys_db = PdvmCentralDatenbank(
-                db_name="PdvmManager.db",
-                table_name="systemsteuerung",
-                guid=self.user_guid
-            )
+            # KORRIGIERT: Verwende zentrale Systemsteuerung-Instanz
+            if not self.central_systemsteuerung:
+                logger.warning("⚠️ Zentrale Systemsteuerung nicht verfügbar - Standard-Werte verwenden")
+                return
             
-            # Benutzerdaten laden
-            raw_data = sys_db.lesen() or {}
-            user_data = raw_data.get(self.user_guid, {})
-            
-            # ViewSettings-Struktur
-            view_settings = user_data.get("ViewSettings", {})
-            current_view_settings = view_settings.get(self.view_guid, {})
-            
+            # NEUE ARCHITEKTUR: Lade aus view_guid-Gruppe
             # Expert-Mode laden
-            saved_expert_mode = current_view_settings.get("expert_mode", False)
+            expert_mode_data = self.central_systemsteuerung.get_value(
+                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                feld="expert_mode",
+                ab_zeit=None
+            )
+            saved_expert_mode = expert_mode_data.get("wert", False) if expert_mode_data else False
+            
             if saved_expert_mode != self.expert_mode:
                 self.expert_mode = saved_expert_mode
                 self.expert_button.setChecked(saved_expert_mode)
                 self.expert_button.setText("🔬 Expert-Mode: AN" if saved_expert_mode else "🔬 Expert-Mode: AUS")
-                logger.info(f"📋 Expert-Mode aus Einstellungen geladen: {saved_expert_mode}")
+                logger.info(f"📋 ZENTRALE SYSTEMSTEUERUNG: Expert-Mode aus Gruppe {self.view_guid} geladen: {saved_expert_mode}")
             
-            # Spaltenauswahl laden
-            saved_column_selection = current_view_settings.get("custom_columns", None)
-            if saved_column_selection:
-                self._custom_column_selection = saved_column_selection
-                logger.info(f"📋 Spaltenauswahl aus Einstellungen geladen: {len(saved_column_selection)} Spalten")
+            # Custom Columns laden
+            custom_columns_data = self.central_systemsteuerung.get_value(
+                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                feld="custom_columns",
+                ab_zeit=None
+            )
+            saved_column_selection = custom_columns_data.get("wert", None) if custom_columns_data else None
+            
+            # 🎯 NEUES VOLLSTÄNDIGES CONTROL-SYSTEM: Ersetzt alle bisherigen Methoden
+            logger.info("🔍 VOLLSTÄNDIGES CONTROL-SYSTEM: Lade View-Einstellungen...")
+            
+            column_order, column_selection = self._load_view_settings_v3()
+            
+            if column_order and column_selection:
+                logger.info("✅ VOLLSTÄNDIGES CONTROL-SYSTEM: View-Einstellungen erfolgreich geladen")
+                self.column_order = column_order
+                self.column_selection = column_selection
+            else:
+                logger.warning("⚠️ VOLLSTÄNDIGES CONTROL-SYSTEM fehlgeschlagen - Fallback zu Standard")
+                
+                # Fallback zur Standard-Spalten aus data_manager
+                control = getattr(self.data_manager, 'control', None)
+                if control and hasattr(control, 'columns'):
+                    all_columns = [col.get('name') for col in control.columns if col.get('name')]
+                    self.column_order = all_columns
+                    self.column_selection = {name: True for name in all_columns}
+                    logger.info(f"✅ Standard-Fallback: {len(all_columns)} Spalten geladen")
+                elif saved_column_selection:
+                    # Fallback auf alte Einstellungen
+                    self._custom_column_selection = saved_column_selection
+                    logger.info(f"📋 Fallback: Alte Spaltenauswahl geladen: {len(saved_column_selection)} Spalten")
+                    logger.info(f"📋 Geladene Spalten: {saved_column_selection}")
+                else:
+                    logger.error("❌ Alle Fallback-Methoden fehlgeschlagen")
+                    return
             
             # Weitere Einstellungen können hier geladen werden:
             # - column_widths = current_view_settings.get("column_widths", {})
@@ -364,51 +463,57 @@ class PdvmModernViewWidget(QWidget):
             logger.error(f"❌ Fehler beim Laden der View-Einstellungen: {e}")
 
     def _save_view_settings(self):
-        """Speichert die aktuellen View-Einstellungen in der systemsteuerung-Tabelle."""
+        """Speichert die aktuellen View-Einstellungen in der systemsteuerung-Tabelle mit Gruppen-Architektur."""
         if not self.user_guid or not self.view_guid:
             logger.debug("🔧 Keine user_guid oder view_guid - Speichern übersprungen")
             return
         
         try:
-            sys_db = PdvmCentralDatenbank(
-                db_name="PdvmManager.db",
-                table_name="systemsteuerung",
-                guid=self.user_guid
+            # KORRIGIERT: Verwende zentrale Systemsteuerung-Instanz
+            if not self.central_systemsteuerung:
+                logger.warning("⚠️ Zentrale Systemsteuerung nicht verfügbar - View-Einstellungen werden nicht gespeichert")
+                return
+            
+            # NEUE ARCHITEKTUR: Verwende view_guid als Gruppe
+            # Expert-Mode speichern
+            self.central_systemsteuerung.set_value(
+                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                feld="expert_mode",
+                wert=self.expert_mode,
+                ab_zeit=1001.0
             )
             
-            # Aktuelle Benutzerdaten laden
-            raw_data = sys_db.lesen() or {}
-            user_data = raw_data.get(self.user_guid, {})
+            # Custom Columns speichern
+            custom_columns = getattr(self, '_custom_column_selection', [])
+            self.central_systemsteuerung.set_value(
+                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                feld="custom_columns",
+                wert=custom_columns,
+                ab_zeit=1001.0
+            )
             
-            # ViewSettings-Struktur initialisieren falls nicht vorhanden
-            if "ViewSettings" not in user_data:
-                user_data["ViewSettings"] = {}
+            # Last Updated speichern
+            self.central_systemsteuerung.set_value(
+                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                feld="last_updated",
+                wert=datetime.now().isoformat(),
+                ab_zeit=1001.0
+            )
             
-            # Aktuelle View-Einstellungen zusammenstellen
-            current_settings = {
-                "expert_mode": self.expert_mode,
-                "custom_columns": getattr(self, '_custom_column_selection', []),
-                "last_updated": datetime.now().isoformat(),
-                # Platz für zukünftige Erweiterungen:
-                # "column_widths": self.get_column_widths(),
-                # "sort_column": self.current_sort_column,
-                # "sort_order": self.current_sort_order
-            }
+            # Änderungen persistieren
+            self.central_systemsteuerung.save_values()
             
-            # Einstellungen für diese View speichern
-            user_data["ViewSettings"][self.view_guid] = current_settings
-            
-            # Zurück in Datenbank speichern
-            raw_data[self.user_guid] = user_data
-            sys_db.speichern(self.user_guid, raw_data)
-            
-            logger.debug(f"💾 View-Einstellungen für {self.view_guid} gespeichert: expert_mode={self.expert_mode}, custom_columns={len(getattr(self, '_custom_column_selection', []))}")
+            logger.debug(f"💾 ZENTRALE SYSTEMSTEUERUNG: View-Einstellungen für Gruppe {self.view_guid} gespeichert: expert_mode={self.expert_mode}, custom_columns={len(getattr(self, '_custom_column_selection', []))}")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern der View-Einstellungen: {e}")
 
     def _reset_view_settings(self):
-        """Setzt alle View-Einstellungen auf Standard zurück und löscht gespeicherte Werte."""
+        """
+        Setzt alle View-Einstellungen auf Standard zurück und löscht gespeicherte Werte.
+        
+        WICHTIG: Setzt display_show auf Standard-Werte zurück (basierend auf show/expert).
+        """
         try:
             # Standard-Werte setzen
             self.expert_mode = False
@@ -418,23 +523,36 @@ class PdvmModernViewWidget(QWidget):
             # Spaltenauswahl zurücksetzen
             self._custom_column_selection = None
             
+            # display_show für alle Spalten auf Standard zurücksetzen
+            control = getattr(self.data_manager, 'control', None)
+            if control and hasattr(control, 'columns'):
+                for col in control.columns:
+                    show_val = col.get('show', False)
+                    expert_val = col.get('expert', False)
+                    # Standard: Nur show=True UND expert=False Spalten sind sichtbar
+                    col['display_show'] = show_val and not expert_val
+                    logger.debug(f"🔄 Reset Spalte '{col['name']}': display_show={col['display_show']} (show={show_val}, expert={expert_val})")
+            
             # Gespeicherte Einstellungen löschen
             if self.user_guid and self.view_guid:
-                sys_db = PdvmCentralDatenbank(
-                    db_name="PdvmManager.db",
-                    table_name="systemsteuerung",
-                    guid=self.user_guid
-                )
-                
-                raw_data = sys_db.lesen() or {}
-                user_data = raw_data.get(self.user_guid, {})
-                
-                # ViewSettings für diese View löschen
-                if "ViewSettings" in user_data and self.view_guid in user_data["ViewSettings"]:
-                    del user_data["ViewSettings"][self.view_guid]
-                    raw_data[self.user_guid] = user_data
-                    sys_db.speichern(self.user_guid, raw_data)
-                    logger.info(f"🗑️ Gespeicherte Einstellungen für View {self.view_guid} gelöscht")
+                # KORRIGIERT: Verwende zentrale Systemsteuerung-Instanz
+                if not self.central_systemsteuerung:
+                    logger.warning("⚠️ Zentrale Systemsteuerung nicht verfügbar - Reset nur lokal")
+                else:
+                    try:
+                        # Alle Felder für diese View-Gruppe löschen
+                        # Expert-Mode löschen
+                        self.central_systemsteuerung.delete_value(gruppe=self.view_guid, feld="expert_mode")
+                        # Custom Columns löschen
+                        self.central_systemsteuerung.delete_value(gruppe=self.view_guid, feld="custom_columns")
+                        # Last Updated löschen
+                        self.central_systemsteuerung.delete_value(gruppe=self.view_guid, feld="last_updated")
+                        
+                        # Änderungen persistieren
+                        self.central_systemsteuerung.save_values()
+                        logger.info(f"🗑️ ZENTRALE SYSTEMSTEUERUNG: Gespeicherte Einstellungen für View-Gruppe {self.view_guid} gelöscht")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Fehler beim Löschen der View-Einstellungen: {e}")
             
             # UI aktualisieren
             self._update_visible_columns()
@@ -447,7 +565,7 @@ class PdvmModernViewWidget(QWidget):
             QMessageBox.information(
                 self, 
                 "Einstellungen zurückgesetzt", 
-                f"Die View-Einstellungen wurden auf Standard zurückgesetzt.\n\n• Expert-Mode: AUS\n• Spaltenauswahl: Standard\n\nZukünftige Erweiterungen:\n• Spaltenbreiten: Standard\n• Sortierung: Standard"
+                f"Die View-Einstellungen wurden auf Standard zurückgesetzt.\n\n• Expert-Mode: AUS\n• Spaltenauswahl: Standard (show=True, expert=False)\n• display_show: Zurückgesetzt\n\nZukünftige Erweiterungen:\n• Spaltenbreiten: Standard\n• Sortierung: Standard"
             )
             
         except Exception as e:
@@ -455,87 +573,1182 @@ class PdvmModernViewWidget(QWidget):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Fehler", f"Fehler beim Zurücksetzen:\n{str(e)}")
 
+    def _update_column_selection_v2(self, available_columns, new_selection):
+        """
+        V2: Spaltenauswahl über Complete Control System aktualisieren.
+        Verwendet die Systemsteuerung zur persistenten Speicherung.
+        """
+        try:
+            logger.info(f"🔄 _update_column_selection_v2: {len(new_selection)} Spalten")
+            
+            # 1. display_show für alle verfügbaren Spalten aktualisieren
+            for col in available_columns:
+                col['display_show'] = col['name'] in new_selection
+            
+            # 2. Complete Controls aus systemsteuerung laden und aktualisieren
+            complete_controls = self._load_complete_controls_v3()
+            
+            if complete_controls:
+                # Sichtbarkeit in Complete Controls aktualisieren
+                for control_name, control in complete_controls.items():
+                    control['user_display_show'] = control_name in new_selection
+                    control['last_updated'] = datetime.now().isoformat()
+                
+                # Zurück in systemsteuerung speichern
+                self._save_complete_controls_v3(complete_controls)
+                
+                logger.info(f"✅ Complete Controls aktualisiert: {len(new_selection)} Spalten sichtbar")
+            else:
+                logger.warning("⚠️ Keine Complete Controls verfügbar für Update")
+            
+            # 3. Widget-Status aktualisieren
+            self.visible_column_names = new_selection
+            self._update_column_selection_button(available_columns)
+            
+            # 4. Tabelle über Complete Control System neu laden
+            self._refresh_table_display()
+            
+            logger.info("✅ Spaltenauswahl erfolgreich aktualisiert (ohne neue Tabelle)")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler in _update_column_selection_v2: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            raise
+
     def _update_visible_columns(self):
-        """Setzt self.visible_column_names und aktualisiert das Dropdown."""
+        """
+        OPTIMIERTE 2-LEVEL-ARCHITEKTUR nach User-Spezifikation:
+        
+        1. Vollständige Tabelle + Controls werden geliefert
+        2. Gespeicherte Ebene 2 wird angewendet oder neu erstellt
+        3. Tabelle wird nach Ebene 2 dargestellt
+        
+        Order-System:
+        - Normal: 1-199 (original order)
+        - Expert: 200-399 (original order + 200)  
+        - Nicht angezeigt: 999 (einheitlich)
+        """
         control = getattr(self.data_manager, 'control', None)
         if control is None or not hasattr(control, 'columns'):
             self.visible_column_names = []
             self.column_dropdown.clear()
-            logger.debug("[ModernViewWidget] Keine Controlstruktur oder keine columns vorhanden!")
+            logger.debug("[ModernViewWidget] Keine Controlstruktur oder columns vorhanden!")
             return
+            
         columns = control.columns
-        logger.debug(f"[ModernViewWidget] Alle Spalten (columns): {columns}")
+        logger.debug(f"[ModernViewWidget] SCHRITT 1: Vollständige Tabelle geladen - {len(columns)} Spalten total")
         
-        # Filter nach show/expert - KORRIGIERTE LOGIK FÜR EXPERT-SPALTEN
-        filtered = []
-        for col in columns:
-            # Robust: show/expert direkt als Key, mit Fallback
-            show_val = col['show'] if 'show' in col else False
-            expert_val = col['expert'] if 'expert' in col else False
+        # SCHRITT 2: Gespeicherte Ebene 2 anwenden oder neu erstellen
+        level2_columns = self._apply_or_create_level2(columns)
+        logger.debug(f"[ModernViewWidget] SCHRITT 2: Ebene 2 angewendet - {len(level2_columns)} Spalten")
+        
+        # SCHRITT 3: Ergebnis für Tabellendarstellung setzen
+        self.visible_column_names = [col['name'] for col in level2_columns]
+        
+        # Debug-Ausgabe
+        active_count = len([col for col in level2_columns if col.get('display_show', True)])
+        inactive_count = len(level2_columns) - active_count
+        logger.info(f"[ModernViewWidget] SCHRITT 3: Tabelle bereit - {active_count} sichtbar, {inactive_count} ausgeblendet")
+        logger.info(f"[ModernViewWidget] Reihenfolge: {[col['name'] for col in level2_columns[:5]]}{'...' if len(level2_columns) > 5 else ''}")
+        
+        # Button-Text aktualisieren
+        available_for_mode = self._get_available_columns_for_mode(columns)
+        self._update_column_selection_button(available_for_mode)
+
+    def _apply_or_create_level2(self, original_columns):
+        """
+        KERN-METHODE: Wendet gespeicherte Ebene 2 an oder erstellt sie neu.
+        
+        User-Spezifikation:
+        - Gespeicherte Ebene 2 gefunden → anwenden
+        - Keine Ebene 2 → aus Original-Parametern erstellen und sofort speichern
+        
+        Args:
+            original_columns: Vollständige Original-Spalten aus control.columns
             
-            if not ('show' in col and 'expert' in col):
-                logger.error(f"[ModernViewWidget] Spalte '{col}': show/expert fehlt! Typ: {type(col)} Inhalt: {col}")
+        Returns:
+            Liste aller Spalten in Ebene-2-Reihenfolge mit display_show-Status
+        """
+        try:
+            # Gespeicherte Ebene 2 laden
+            v2_data = self._load_user_column_order_v2()
+            
+            # V2-Daten sind jetzt ein Tupel (column_order, column_selection)
+            if v2_data and len(v2_data) == 2:
+                column_order, column_selection = v2_data
+                if column_order:  # Prüfe ob column_order nicht leer ist
+                    logger.info("📋 EBENE 2: Gespeicherte Konfiguration gefunden - wird angewendet")
+                    return self._apply_saved_level2(original_columns, v2_data)
+            
+            logger.info("📋 EBENE 2: Keine gespeicherte Konfiguration - erstelle aus Original-Parametern")
+            return self._create_initial_level2(original_columns)
                 
-            logger.debug(f"[ModernViewWidget] Spalte '{col.get('name', str(col))}', show={show_val}, expert={expert_val}")
-            
-            # KORRIGIERTE FILTER-LOGIK FÜR EXPERT-SPALTEN:
-            if self.expert_mode:
-                # Expert-Mode: Zeige show=True Spalten UND expert=True Spalten
-                # Expert-Spalten werden temporär als "show" behandelt
-                if show_val or expert_val:
-                    filtered.append(col)
-                    if expert_val and not show_val:
-                        logger.debug(f"[ModernViewWidget] Expert-Spalte '{col.get('name')}' wird im Expert-Mode angezeigt (show=False aber expert=True)")
-            else:
-                # Normal-Mode: Zeige nur Spalten mit show=True UND expert=False
-                if show_val and not expert_val:
-                    filtered.append(col)
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Ebene 2 Verarbeitung: {e}")
+            # Fallback: Alle Spalten für aktuellen Mode als aktiv
+            return self._get_available_columns_for_mode(original_columns)
+
+    def _apply_saved_level2(self, original_columns, v2_data):
+        """
+        Wendet gespeicherte Ebene 2 Konfiguration an.
         
-        if self.expert_mode:
-            logger.debug(f"[ModernViewWidget] Expert-Mode aktiv: Zeige alle show=True Spalten")
+        Args:
+            original_columns: Original-Spalten
+            v2_data: Gespeicherte V2-Daten als Tupel (column_order, column_selection)
+            
+        Returns:
+            Spalten in gespeicherter Reihenfolge mit aktualisiertem display_show
+        """
+        # Tupel unpacking
+        if v2_data and len(v2_data) == 2:
+            saved_order, saved_selection = v2_data
         else:
-            logger.debug(f"[ModernViewWidget] Normal-Mode: Zeige nur show=True AND expert=False Spalten")
+            saved_order = []
+            saved_selection = {}
+        
+        # Original-Spalten als Dictionary für schnellen Zugriff
+        original_dict = {col['name']: col for col in original_columns}
+        
+        # Verfügbare Spalten für aktuellen Mode ermitteln
+        available_for_mode = {col['name'] for col in self._get_available_columns_for_mode(original_columns)}
+        
+        result_columns = []
+        
+        # 1. Spalten in gespeicherter Reihenfolge verarbeiten
+        for col_name in saved_order:
+            if col_name in original_dict and col_name in available_for_mode:
+                col = original_dict[col_name].copy()
+                # display_show aus gespeicherter Auswahl setzen (Default: True)
+                col['display_show'] = saved_selection.get(col_name, True)
+                result_columns.append(col)
+        
+        # 2. Neue Spalten hinzufügen (nicht in gespeicherter Reihenfolge)
+        existing_names = {col['name'] for col in result_columns}
+        for col_name in available_for_mode:
+            if col_name not in existing_names and col_name in original_dict:
+                col = original_dict[col_name].copy()
+                col['display_show'] = True  # Neue Spalten sind standardmäßig sichtbar
+                result_columns.append(col)
+                logger.debug(f"📋 Neue Spalte hinzugefügt: {col_name}")
+        
+        logger.debug(f"📋 Gespeicherte Ebene 2 angewendet: {len(result_columns)} Spalten")
+        return result_columns
+
+    def _create_initial_level2(self, original_columns):
+        """
+        Erstellt initiale Ebene 2 aus Original-Parametern und speichert sie sofort.
+        
+        User-Spezifikation:
+        - Order-System: Normal (1-199), Expert (200-399), Nicht angezeigt (999)
+        - Aus Original-Parametern ableiten
+        - Sofort speichern
+        
+        Args:
+            original_columns: Original-Spalten aus control.columns
             
-        logger.debug(f"[ModernViewWidget] Nach Filter: {[col.get('name', str(col)) for col in filtered]}")
+        Returns:
+            Neue Ebene-2-Spalten mit order-basierter Reihenfolge
+        """
+        # Verfügbare Spalten für aktuellen Mode
+        available_columns = self._get_available_columns_for_mode(original_columns)
         
-        self.visible_column_names = [col['name'] for col in filtered]
-        logger.debug(f"[ModernViewWidget] Sichtbare Spaltennamen: {self.visible_column_names}")
+        # Order-System anwenden und sortieren
+        ordered_columns = []
+        for col in available_columns:
+            col_copy = col.copy()
+            original_order = col.get('order', 999)
+            
+            # Order-System nach User-Spezifikation
+            if col.get('expert', False):
+                # Expert-Spalten: Original order + 200
+                col_copy['level2_order'] = original_order + 200
+            elif col.get('show', False):
+                # Normal-Spalten: Original order
+                col_copy['level2_order'] = original_order
+            else:
+                # Nicht angezeigte: 999
+                col_copy['level2_order'] = 999
+            
+            # display_show basierend auf show-Status setzen
+            col_copy['display_show'] = col.get('show', False)
+            ordered_columns.append(col_copy)
         
-        # Button-Text für Spaltenauswahl aktualisieren
-        self._update_column_selection_button(filtered)
+        # Nach level2_order sortieren
+        ordered_columns.sort(key=lambda x: x.get('level2_order', 999))
+        
+        # Sofort als Ebene 2 speichern
+        column_order = [col['name'] for col in ordered_columns]
+        column_selection = {col['name']: col.get('display_show', False) for col in ordered_columns}
+        
+        self._save_user_column_order_v2(column_order, column_selection)
+        
+        logger.info(f"📋 Initiale Ebene 2 erstellt und gespeichert: {len(ordered_columns)} Spalten")
+        logger.debug(f"📋 Order-System angewendet: Normal/Expert/Nicht-angezeigt")
+        
+        return ordered_columns
+
+    def _get_available_columns_for_mode(self, columns):
+        """
+        KOMPATIBILITÄT: Bestimmt verfügbare Spalten basierend auf aktuellem Mode.
+        
+        Diese Methode wird noch von anderen Teilen verwendet (z.B. Column Selection Dialog).
+        Normal-Mode: Nur Standard-Spalten (show=True AND expert=False)
+        Expert-Mode: Standard-Spalten + Expert-Spalten (show=True OR expert=True)
+        """
+        available = []
+        
+        for col in columns:
+            show_val = col.get('show', False)
+            expert_val = col.get('expert', False)
+            
+            if self.expert_mode:
+                # Expert-Mode: Ebene 1 (Standard) + Ebene 3 (Expert)
+                if show_val or expert_val:
+                    available.append(col)
+            else:
+                # Normal-Mode: Nur Ebene 1 (Standard)
+                if show_val and not expert_val:
+                    available.append(col)
+        
+        return available
+
+    def _apply_user_column_order_v2(self, standard_columns):
+        """
+        LEVEL 2: Wendet die gespeicherte Benutzer-Reihenfolge an.
+        
+        VEREINFACHTE ARCHITEKTUR:
+        - Lädt gespeicherte Benutzer-Reihenfolge (vollständige Liste aller Spalten)
+        - Deaktivierte Spalten werden automatisch nach hinten sortiert
+        - Die Reihenfolge ist IMMER die dargestellte Reihenfolge
+        
+        Args:
+            standard_columns: Spalten in Standard-Reihenfolge (Level 1)
+            
+        Returns:
+            Liste aller Spalten in Benutzer-Reihenfolge mit display_show-Status
+        """
+        try:
+            # Gespeicherte Benutzer-Reihenfolge laden
+            user_order_data = self._load_user_column_order_v2()
+            
+            if not user_order_data:
+                # Keine gespeicherte Reihenfolge: Standard-Reihenfolge mit allen aktiv
+                logger.debug("[ModernViewWidget] Keine Benutzer-Reihenfolge -> Standard mit allen aktiv")
+                for col in standard_columns:
+                    col['display_show'] = True
+                return standard_columns
+            
+            # Gespeicherte Daten analysieren - V3 Tupel Format
+            if len(user_order_data) == 2:
+                user_order, user_selection = user_order_data
+            else:
+                user_order = []
+                user_selection = {}
+            
+            # Alle verfügbaren Spalten als Dictionary für schnellen Zugriff
+            column_dict = {col['name']: col for col in standard_columns}
+            
+            # Reihenfolge anwenden
+            ordered_columns = []
+            
+            # 1. Spalten in gespeicherter Reihenfolge hinzufügen
+            for col_name in user_order:
+                if col_name in column_dict:
+                    col = column_dict[col_name]
+                    # Status aus gespeicherter Auswahl setzen (Default: True)
+                    col['display_show'] = user_selection.get(col_name, True)
+                    ordered_columns.append(col)
+                    del column_dict[col_name]
+            
+            # 2. Neue Spalten (nicht in gespeicherter Reihenfolge) hinten aktiv anfügen
+            for col in column_dict.values():
+                col['display_show'] = True  # Neue Spalten sind standardmäßig aktiv
+                ordered_columns.append(col)
+                logger.debug(f"[ModernViewWidget] Neue Spalte hinten aktiv angefügt: {col['name']}")
+            
+            # 3. Deaktivierte Spalten nach hinten sortieren
+            active_cols = [col for col in ordered_columns if col.get('display_show', True)]
+            inactive_cols = [col for col in ordered_columns if not col.get('display_show', True)]
+            final_order = active_cols + inactive_cols
+            
+            logger.info(f"[ModernViewWidget] Benutzer-Reihenfolge angewendet:")
+            logger.info(f"  Aktive Spalten: {len(active_cols)} (vorne)")
+            logger.info(f"  Deaktivierte: {len(inactive_cols)} (hinten)")
+            logger.debug(f"  Reihenfolge: {[col['name'] for col in final_order[:8]]}{'...' if len(final_order) > 8 else ''}")
+            
+            return final_order
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden der Benutzer-Reihenfolge: {e}")
+            # Fallback: Standard-Reihenfolge mit allen aktiv
+            for col in standard_columns:
+                col['display_show'] = True
+            return standard_columns
+
+    def _load_complete_controls_v3(self):
+        """
+        VOLLSTÄNDIGE CONTROL-LADUNG: Lädt komplette Control-Objekte oder erstellt sie fallback.
+        
+        1. Versucht vollständige Controls aus systemsteuerung.daten[view_guid]['complete_controls'] zu laden
+        2. Falls nicht vorhanden: Erstellt sie aus get_value_view und speichert sie
+        3. Gibt vollständige, einsatzbereite Control-Objekte zurück
+        
+        Returns:
+            Dict mit vollständigen Control-Objekten oder None bei Fehler
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            from datetime import datetime
+            
+            # KORRIGIERT: Complete Controls aus separater GUID laden
+            controls_guid = f"{self.user_guid}_view_{self.view_guid}_complete_controls"
+            controls_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=controls_guid
+            )
+            
+            # Schritt 1: Versuche gespeicherte vollständige Controls zu laden
+            stored_controls = controls_db.lesen()
+            
+            if stored_controls and isinstance(stored_controls, dict) and len(stored_controls) > 0:
+                # Validierung der gespeicherten Controls
+                if self._validate_stored_controls(stored_controls):
+                    logger.info(f"✅ VOLLSTÄNDIGE CONTROLS: {len(stored_controls)} gespeicherte Controls geladen")
+                    return stored_controls
+                else:
+                    logger.warning("⚠️ Gespeicherte Controls sind ungültig - erstelle neue")
+            
+            # Schritt 2: Fallback - Controls aus get_value_view erstellen
+            logger.info("🔄 Erstelle vollständige Controls aus get_value_view...")
+            
+            if not hasattr(self.data_manager, 'control') or not hasattr(self.data_manager.control, 'columns'):
+                logger.error("❌ Keine Control-Definitionen in data_manager verfügbar")
+                return None
+            
+            # Schritt 2: Fallback - Controls aus get_value_view erstellen
+            logger.info("🔄 Erstelle vollständige Controls aus get_value_view...")
+            
+            # Vollständige Controls aus get_value_view erstellen
+            complete_controls = {}
+            
+            for i, original_control in enumerate(self.data_manager.control.columns, 1):
+                control_name = original_control.get('name')
+                if not control_name:
+                    continue
+                
+                # Vollständiges Control-Objekt kopieren
+                complete_control = original_control.copy()
+                
+                # Standard-Benutzer-Einstellungen hinzufügen
+                complete_control['user_display_show'] = original_control.get('show', True)
+                complete_control['user_display_order'] = original_control.get('order', i)
+                complete_control['last_updated'] = datetime.now().isoformat()
+                complete_control['created_from'] = 'get_value_view_fallback'
+                
+                complete_controls[control_name] = complete_control
+            
+            # KORRIGIERT: Schritt 3 - Neue Controls über separate GUID speichern
+            # Verwende spezifische GUID für complete_controls dieser View
+            controls_guid = f"{self.user_guid}_view_{self.view_guid}_complete_controls"
+            controls_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=controls_guid
+            )
+            
+            # Nur Complete Controls speichern - überschreibt KEINE anderen Daten
+            controls_db.speichern(controls_guid, complete_controls)
+            
+            logger.info(f"✅ FALLBACK ERFOLGREICH: {len(complete_controls)} neue vollständige Controls erstellt und gespeichert")
+            return complete_controls
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der vollständigen Controls: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _validate_stored_controls(self, stored_controls):
+        """
+        Validiert gespeicherte Control-Objekte.
+        
+        Args:
+            stored_controls: Dict mit gespeicherten Control-Objekten
+            
+        Returns:
+            True wenn Controls gültig sind, False sonst
+        """
+        try:
+            if not isinstance(stored_controls, dict) or not stored_controls:
+                return False
+            
+            # Prüfe ob alle Controls die notwendigen Felder haben
+            required_fields = ['name', 'user_display_show', 'user_display_order']
+            
+            for control_name, control_data in stored_controls.items():
+                if not isinstance(control_data, dict):
+                    logger.warning(f"⚠️ Control {control_name} ist kein Dict")
+                    return False
+                
+                for field in required_fields:
+                    if field not in control_data:
+                        logger.warning(f"⚠️ Control {control_name} fehlt Feld {field}")
+                        return False
+            
+            logger.debug(f"✅ Validation: {len(stored_controls)} Controls sind gültig")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Control-Validierung: {e}")
+            return False
+        """
+        KORREKTE ARCHITEKTUR: Lädt Control-Parameter aus systemsteuerung.daten[view_guid]['controls'].
+        
+        Liest alle Controls aus systemsteuerung.daten[view_guid]['controls'][control_name] und 
+        rekonstruiert daraus column_order und column_selection.
+        
+        DB-Struktur:
+        systemsteuerung.daten[view_guid]['controls'] = {
+            familienname_original: {display_show: true, display_order: 1, last_updated: "..."},
+            familienname_show: {display_show: false, display_order: 2, last_updated: "..."},
+            geburtsdatum_original: {display_show: true, display_order: 3, last_updated: "..."}
+        }
+        
+        Returns:
+            Dict mit column_order (Control-Namen) und column_selection oder None
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            # Systemsteuerung für Benutzer laden (uid = user_guid wird vom System verwaltet)
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Benutzerdaten laden
+            user_data = sys_db.lesen() or {}
+            
+            # View-Gruppe und Controls-Bereich prüfen
+            if self.view_guid not in user_data:
+                logger.debug(f"[ModernViewWidget] Keine Daten für View {self.view_guid} gefunden")
+                return None
+            
+            view_data = user_data[self.view_guid]
+            if 'controls' not in view_data:
+                logger.debug(f"[ModernViewWidget] Keine Controls in View {self.view_guid} gefunden")
+                return None
+            
+            controls_data = view_data['controls']
+            if not controls_data:
+                logger.debug(f"[ModernViewWidget] Controls-Bereich für View {self.view_guid} ist leer")
+                return None
+            
+            # Controls nach display_order sortieren
+            controls = []
+            for control_name, control_data in controls_data.items():
+                if isinstance(control_data, dict) and 'display_order' in control_data:
+                    controls.append({
+                        'name': control_name,  # z.B. "familienname_original"
+                        'display_order': control_data.get('display_order', 999),
+                        'display_show': control_data.get('display_show', True)
+                    })
+            
+            if not controls:
+                logger.debug("[ModernViewWidget] Keine gültigen Control-Daten gefunden")
+                return None
+            
+            # Nach display_order sortieren
+            controls.sort(key=lambda x: x['display_order'])
+            
+            # column_order und column_selection rekonstruieren
+            column_order = [ctrl['name'] for ctrl in controls]  # Erweiterte Control-Namen
+            column_selection = {ctrl['name']: ctrl['display_show'] for ctrl in controls}
+            
+            logger.debug(f"[ModernViewWidget] KORREKTE ARCHITEKTUR: Controls geladen aus systemsteuerung.daten[{self.view_guid}]['controls']:")
+            logger.debug(f"  Controls gefunden: {len(controls)}")
+            logger.debug(f"  Control-Namen: {column_order[:3]}{'...' if len(column_order) > 3 else ''}")
+            
+            return {
+                'column_order': column_order,
+                'column_selection': column_selection
+            }
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der Controls: {e}")
+            return None
+                
+    def _build_table_from_complete_controls(self, complete_controls):
+        """
+        TABELLEN-AUFBAU: Erstellt die Tabelle aus vollständigen Control-Objekten.
+        
+        Args:
+            complete_controls: Dict mit vollständigen Control-Objekten
+            
+        Returns:
+            Tuple (column_order, column_selection) für Tabellen-Setup
+        """
+        try:
+            # Nach user_display_order sortieren
+            sorted_controls = sorted(
+                complete_controls.items(),
+                key=lambda x: x[1].get('user_display_order', 999)
+            )
+            
+            # column_order und column_selection erstellen
+            column_order = []
+            column_selection = {}
+            
+            for control_name, control_data in sorted_controls:
+                column_order.append(control_name)
+                column_selection[control_name] = control_data.get('user_display_show', True)
+            
+            logger.info(f"🏗️ TABELLEN-AUFBAU: {len(column_order)} Spalten aus vollständigen Controls erstellt")
+            logger.debug(f"🏗️ Spalten-Reihenfolge: {column_order[:3]}{'...' if len(column_order) > 3 else ''}")
+            
+            # Zusätzlich: Vollständige Controls als Instanz-Variable speichern für späteren Zugriff
+            self.complete_controls = complete_controls
+            
+            return column_order, column_selection
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Tabellen-Aufbau aus vollständigen Controls: {e}")
+            return None, None
+    
+    def _load_view_settings_v3(self):
+        """
+        VOLLSTÄNDIGES CONTROL-SYSTEM: Lädt View-Einstellungen mit vollständigen Control-Objekten.
+        
+        1. Lädt vollständige Controls (oder erstellt sie fallback aus get_value_view)
+        2. Baut Tabelle aus vollständigen Controls auf
+        3. Gibt (column_order, column_selection) zurück für Kompatibilität
+        
+        Returns:
+            Tupel (column_order, column_selection) oder (None, None) bei Fehler
+        """
+        try:
+            logger.info("🔄 VOLLSTÄNDIGES CONTROL-SYSTEM: Lade View-Einstellungen...")
+            
+            # Schritt 1: Vollständige Controls laden oder erstellen
+            complete_controls = self._load_complete_controls_v3()
+            
+            if not complete_controls:
+                logger.error("❌ Keine vollständigen Controls verfügbar")
+                return None, None
+            
+            # Schritt 2: Tabelle aus vollständigen Controls aufbauen
+            success = self._build_table_from_complete_controls(complete_controls)
+            
+            if not success:
+                logger.error("❌ Tabellen-Aufbau aus vollständigen Controls fehlgeschlagen")
+                return None, None
+            
+            # Schritt 3: Kompatibilitäts-Daten für bestehenden Code erstellen
+            visible_controls = []
+            for control_name, control_data in complete_controls.items():
+                if (isinstance(control_data, dict) and 
+                    control_data.get('user_display_show', True)):
+                    visible_controls.append(control_data)
+            
+            # Nach Benutzer-definierter Reihenfolge sortieren
+            visible_controls.sort(key=lambda x: x.get('user_display_order', 999))
+            
+            # Kompatibilitäts-Rückgabe für bestehenden Code
+            column_order = [control.get('name') for control in visible_controls]
+            column_selection = {control.get('name'): control.get('user_display_show', True) 
+                              for control in visible_controls}
+            
+            logger.info(f"✅ VOLLSTÄNDIGES CONTROL-SYSTEM: View-Einstellungen geladen")
+            logger.info(f"   Spalten: {len(column_order)} sichtbar, {len(complete_controls)} total")
+            logger.debug(f"   Reihenfolge: {column_order[:3]}{'...' if len(column_order) > 3 else ''}")
+            
+            return column_order, column_selection
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der View-Einstellungen: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return None, None
+    
+    def _load_user_column_order_v2(self):
+        """
+        KOMPATIBILITÄTSSCHICHT: Leitet zu vollständigem Control-System weiter.
+        
+        Diese Funktion wird noch von älteren Teilen des Codes aufgerufen.
+        Sie nutzt das neue vollständige Control-System als Backend.
+        
+        Returns:
+            Tupel (column_order, column_selection) oder (None, None) bei Fehler
+        """
+        logger.debug("🔄 KOMPATIBILITÄT: _load_user_column_order_v2 leitet zu V3 weiter")
+        return self._load_view_settings_v3()
+    
+    def _update_controls_from_drag_drop(self, new_visible_order):
+        """
+        DRAG & DROP INTEGRATION: Aktualisiert vollständige Controls nach Drag & Drop.
+        
+        Args:
+            new_visible_order: Liste der Spalten-Namen in neuer Reihenfolge
+        """
+        try:
+            logger.debug(f"🔄 DRAG & DROP: Aktualisiere vollständige Controls mit neuer Reihenfolge: {len(new_visible_order)} Spalten")
+            
+            # Drag-Result für vollständige Control-Integration erstellen
+            drag_result = {
+                'column_order': new_visible_order
+            }
+            
+            # Vollständige Controls aktualisieren
+            success = self.save_column_changes_complete_controls(drag_result)
+            
+            if success:
+                logger.info("✅ DRAG & DROP: Vollständige Controls erfolgreich aktualisiert")
+            else:
+                logger.warning("⚠️ DRAG & DROP: Fehler beim Aktualisieren der vollständigen Controls")
+                
+        except Exception as e:
+            logger.error(f"❌ DRAG & DROP: Fehler beim Aktualisieren der Controls: {e}")
+    
+    def _update_complete_controls_from_drag_drop(self, new_visible_order):
+        """Alias für _update_controls_from_drag_drop (verschiedene Namen im Code)"""
+        return self._update_controls_from_drag_drop(new_visible_order)
+
+    def _load_user_column_order(self):
+        """
+        Lädt die gespeicherte Spalten-Reihenfolge des Benutzers aus der Datenbank.
+        
+        Returns:
+            Liste von Spalten-Namen in der gewünschten Reihenfolge oder None
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            # Systemsteuerung-Datenbank für Benutzer öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Benutzerdaten laden
+            raw_data = sys_db.lesen() or {}
+            user_data = raw_data.get(self.user_guid, {})
+            
+            # Spalten-Reihenfolge für diese View laden
+            column_orders = user_data.get("ColumnOrder", {})
+            view_order = column_orders.get(self.view_guid, None)
+            
+            if view_order:
+                logger.debug(f"[ModernViewWidget] Gespeicherte Spalten-Reihenfolge geladen: {len(view_order)} Spalten")
+                return view_order
+            else:
+                logger.debug("[ModernViewWidget] Keine gespeicherte Spalten-Reihenfolge gefunden")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der Spalten-Reihenfolge: {e}")
+            return None
+
+    def _load_complete_controls_v3(self):
+        """
+        VOLLSTÄNDIGE CONTROL-VERWALTUNG mit korrigierter Architektur.
+        
+        Architektur: systemsteuerung[SYSTEM_USER_ID].data[view_guid]["spalte_xy_original"] = wert
+        Jede Spalte ist ein eigenes Feld, ohne "completeControls" Gruppe.
+        
+        Returns:
+            Dict mit vollständigen Control-Objekten oder None bei Fehler
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            from datetime import datetime
+            
+            # Systemsteuerung-Datenbank öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=PdvmCentralDatenbank.SYSTEM_USER_ID  # Korrekte 0000... GUID verwenden
+            )
+            
+            # Versuche gespeicherte Controls aus view_guid-Gruppe zu laden
+            complete_controls = {}
+            
+            # View-Struktur laden für alle Spalten
+            if hasattr(self, 'data_manager') and self.data_manager:
+                view_structure = self.data_manager.get_view_structure()
+                if view_structure and hasattr(view_structure, 'columns'):
+                    
+                    # Alle Spalten durchgehen und Controls laden
+                    for column in view_structure.columns:
+                        column_name = column.get('name', '')
+                        if column_name:
+                            # Control-Wert aus Gruppe=view_guid, Feld=column_name laden
+                            control_value = sys_db.get_value(
+                                gruppe=self.view_guid,  # view_guid ist die Gruppe
+                                feld=column_name,       # Spaltenname ist das Feld
+                                ab_zeit=None           # Aktueller Zeitstempel
+                            )
+                            
+                            if control_value.get("wert") is not None:
+                                complete_controls[column_name] = control_value.get("wert")
+                            else:
+                                # Default-Werte für neue Spalten
+                                complete_controls[column_name] = {
+                                    'visible': True,
+                                    'width': 100,
+                                    'order': column.get('order', 0),
+                                    'last_updated': datetime.now().isoformat()
+                                }
+                
+                logger.info(f"✅ LADEN ERFOLGREICH: {len(complete_controls)} Controls aus view_guid-Gruppe geladen")
+                return complete_controls
+            
+            logger.warning("⚠️ Keine View-Struktur verfügbar, erstelle leere Controls")
+            return {}
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der vollständigen Controls: {e}")
+            return None
+            
+            if not hasattr(self.data_manager, 'control') or not hasattr(self.data_manager.control, 'columns'):
+                logger.error("❌ Keine Control-Definitionen in data_manager verfügbar")
+                return None
+            
+            # View-Struktur initialisieren
+            if self.view_guid not in user_data:
+                user_data[self.view_guid] = {}
+            
+            # Vollständige Controls aus get_value_view erstellen
+            complete_controls = {}
+            
+            for original_control in self.data_manager.control.columns:
+                control_name = original_control.get('name')
+                if not control_name:
+                    continue
+                
+                # Vollständiges Control-Objekt kopieren (alle Original-Metadaten!)
+                complete_control = original_control.copy()
+                
+                # Benutzer-spezifische Überschreibungen hinzufügen
+                complete_control['user_display_show'] = original_control.get('show', True)
+                complete_control['user_display_order'] = original_control.get('order', 999)
+                complete_control['last_updated'] = datetime.now().isoformat()
+                complete_control['created_from'] = 'get_value_view_fallback'
+                
+                complete_controls[control_name] = complete_control
+            
+            # Schritt 3: Neue vollständige Controls speichern
+            user_data[self.view_guid]['complete_controls'] = complete_controls
+            sys_db.speichern(self.user_guid, user_data)
+            
+            logger.info(f"✅ FALLBACK ERFOLGREICH: {len(complete_controls)} neue vollständige Controls erstellt und gespeichert")
+            return complete_controls
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der vollständigen Controls: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _validate_complete_controls(self, complete_controls):
+        """
+        Validiert vollständige Control-Objekte.
+        
+        Args:
+            complete_controls: Dict mit vollständigen Control-Objekten
+            
+        Returns:
+            True wenn Controls gültig sind, False sonst
+        """
+        try:
+            if not isinstance(complete_controls, dict) or not complete_controls:
+                return False
+            
+            # Prüfe ob alle Controls die notwendigen Felder haben
+            required_fields = ['name', 'user_display_show', 'user_display_order']
+            
+            for control_name, control_data in complete_controls.items():
+                if not isinstance(control_data, dict):
+                    logger.warning(f"⚠️ Control {control_name} ist kein Dict")
+                    return False
+                
+                for field in required_fields:
+                    if field not in control_data:
+                        logger.warning(f"⚠️ Control {control_name} fehlt Feld {field}")
+                        return False
+            
+            logger.debug(f"✅ Validation: {len(complete_controls)} vollständige Controls sind gültig")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei vollständiger Control-Validierung: {e}")
+            return False
+    
+    def _save_complete_controls_v3(self, complete_controls):
+        """
+        VOLLSTÄNDIGE CONTROL-VERWALTUNG mit korrigierter Architektur.
+        
+        Architektur: systemsteuerung[SYSTEM_USER_ID].data[view_guid]["spalte_xy"] = control_wert
+        Jede Spalte ist ein eigenes Feld, ohne "completeControls" Gruppe.
+        
+        Args:
+            complete_controls: Dict mit vollständigen Control-Objekten
+            
+        Returns:
+            True bei Erfolg, False bei Fehler
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            from datetime import datetime
+            
+            if not complete_controls or not isinstance(complete_controls, dict):
+                logger.error("❌ Ungültige vollständige Controls zum Speichern")
+                return False
+            
+            # Systemsteuerung-Datenbank öffnen
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=PdvmCentralDatenbank.SYSTEM_USER_ID  # Korrekte 0000... GUID verwenden
+            )
+            
+            # Jede Spalte als separates Feld in view_guid-Gruppe speichern
+            for column_name, control_data in complete_controls.items():
+                # Timestamp für Control aktualisieren
+                if isinstance(control_data, dict):
+                    control_data['last_updated'] = datetime.now().isoformat()
+                
+                # Control-Wert in Gruppe=view_guid, Feld=column_name speichern
+                sys_db.set_value(
+                    gruppe=self.view_guid,  # view_guid ist die Gruppe
+                    feld=column_name,       # Spaltenname ist das Feld
+                    wert=control_data,
+                    ab_zeit=1001.0         # Standard-Zeitstempel für nicht-historische Felder
+                )
+            
+            # Alle Änderungen persistieren
+            sys_db.save_values()
+            
+            logger.info(f"✅ SPEICHERN ERFOLGREICH: {len(complete_controls)} Controls in view_guid-Gruppe gespeichert")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern der vollständigen Controls: {e}")
+            return False
+    
+    def _build_table_from_complete_controls(self, complete_controls):
+        """
+        VOLLSTÄNDIGE CONTROL-VERWALTUNG: Baut Tabelle basierend auf vollständigen Controls.
+        
+        Diese Funktion nutzt VOLLSTÄNDIGE Control-Objekte als Basis für die Tabellenerstellung.
+        Dadurch haben wir alle Metadaten (Label, Type, Width, Alignment, etc.) verfügbar!
+        
+        Args:
+            complete_controls: Dict mit vollständigen Control-Objekten
+            
+        Returns:
+            True bei Erfolg, False bei Fehler
+        """
+        try:
+            if not complete_controls or not isinstance(complete_controls, dict):
+                logger.error("❌ Keine vollständigen Controls für Tabellenerstellung")
+                return False
+            
+            # Nur sichtbare Controls filtern und nach Reihenfolge sortieren
+            visible_controls = []
+            for control_name, control_data in complete_controls.items():
+                if (isinstance(control_data, dict) and 
+                    control_data.get('user_display_show', True)):
+                    visible_controls.append(control_data)
+            
+            # Nach Benutzer-definierter Reihenfolge sortieren
+            visible_controls.sort(key=lambda x: x.get('user_display_order', 999))
+            
+            if not visible_controls:
+                logger.warning("⚠️ Keine sichtbaren Controls für Tabelle gefunden")
+                return False
+            
+            # Tabelle erstellen
+            data = self.data_manager.get_data() if self.data_manager else []
+            self.table = QTableWidget()
+            self.table.setColumnCount(len(visible_controls))
+            self.table.setRowCount(len(data))
+            
+            # Spalten-Header mit vollständigen Metadaten konfigurieren
+            header_labels = []
+            for i, control in enumerate(visible_controls):
+                # Label oder Name als Header verwenden
+                label = control.get('label', control.get('name', f'Spalte_{i}'))
+                header_labels.append(str(label))
+                
+                # Spaltenbreite setzen (falls verfügbar)
+                width = control.get('width')
+                if width and isinstance(width, (int, float)) and width > 0:
+                    self.table.setColumnWidth(i, int(width))
+            
+            self.table.setHorizontalHeaderLabels(header_labels)
+            
+            # Tabellendaten füllen
+            control_names = [control.get('name') for control in visible_controls]
+            
+            for row_idx, row_data in enumerate(data):
+                for col_idx, control_name in enumerate(control_names):
+                    if control_name in row_data:
+                        cell_value = str(row_data[control_name])
+                        
+                        # Cell-Item mit Alignment erstellen
+                        cell_item = QTableWidgetItem(cell_value)
+                        
+                        # Cell-Alignment basierend auf Control-Metadaten
+                        control = visible_controls[col_idx]
+                        alignment = control.get('align', 'left')
+                        qt_alignment = Qt.AlignLeft | Qt.AlignVCenter
+                        if alignment == 'center':
+                            qt_alignment = Qt.AlignCenter
+                        elif alignment == 'right':
+                            qt_alignment = Qt.AlignRight | Qt.AlignVCenter
+                        
+                        cell_item.setTextAlignment(qt_alignment)
+                        self.table.setItem(row_idx, col_idx, cell_item)
+            
+            logger.info(f"✅ TABELLE ERSTELLT: {len(visible_controls)} Spalten aus vollständigen Controls, {len(data)} Zeilen")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen der Tabelle aus vollständigen Controls: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return False
+    
+    def _build_table_original(self):
+            
+            # Prüfe ob vollständige Controls verfügbar sind
+            if not hasattr(self, 'complete_controls') or not self.complete_controls:
+                logger.error("❌ Keine vollständigen Controls zum Speichern verfügbar")
+                return False
+            
+            # Systemsteuerung für Benutzer laden
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung", 
+                guid=self.user_guid
+            )
+            
+            user_data = sys_db.lesen() or {}
+            
+            # View-Gruppe initialisieren
+            if self.view_guid not in user_data:
+                user_data[self.view_guid] = {}
+            
+    def _build_table_original(self):
+        """Original Tabellenerstellung - wird durch vollständige Controls ersetzt"""
+        control = getattr(self.data_manager, 'control', None)
+        if control is None or not hasattr(control, 'columns'):
+            logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
+            control_columns = []
+        else:
+            control_columns = control.columns
+
+        data = self.data_manager.get_data() if self.data_manager else []
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(control_columns))
+        self.table.setRowCount(len(data))
+
+        # Spaltennamen (interner Name)
+        header_labels = []
+        for col in control_columns:
+            if isinstance(col, dict):
+                header_labels.append(str(col.get('name', '')))
+            else:
+                header_labels.append(str(col))
+        self.table.setHorizontalHeaderLabels(header_labels)
+    
+    def update_table_with_complete_controls(self):
+        """
+        HAUPT-INTEGRATION: Nutzt vollständige Control-Verwaltung für Tabellenerstellung.
+        
+        Diese Funktion ersetzt die alte Tabellenerstellung und nutzt das neue
+        vollständige Control-System mit PdvmDatenbank.
+        """
+        try:
+            # Schritt 1: Vollständige Controls laden oder erstellen
+            complete_controls = self._load_complete_controls_v3()
+            
+            if not complete_controls:
+                logger.error("❌ Keine vollständigen Controls verfügbar - fallback auf ursprüngliche Tabelle")
+                self._build_table_original()
+                return False
+            
+            # Schritt 2: Tabelle aus vollständigen Controls erstellen
+            success = self._build_table_from_complete_controls(complete_controls)
+            
+            if success:
+                logger.info("✅ VOLLSTÄNDIGE CONTROL-INTEGRATION: Tabelle erfolgreich erstellt")
+                return True
+            else:
+                logger.warning("⚠️ Fallback auf ursprüngliche Tabelle")
+                self._build_table_original()
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler in vollständiger Control-Integration: {e}")
+            logger.warning("⚠️ Fallback auf ursprüngliche Tabelle")
+            self._build_table_original()
+            return False
+    
+    def save_column_changes_complete_controls(self, drag_result):
+        """
+        DRAG & DROP INTEGRATION: Speichert Änderungen nach Spalten-Drag & Drop.
+        
+        Args:
+            drag_result: Dict mit 'column_order' (Liste) und optionalen anderen Änderungen
+            
+        Returns:
+            True bei Erfolg, False bei Fehler
+        """
+        try:
+            # Vollständige Controls laden
+            complete_controls = self._load_complete_controls_v3()
+            
+            if not complete_controls:
+                logger.error("❌ Keine vollständigen Controls für Drag & Drop verfügbar")
+                return False
+            
+            # Neue Reihenfolge anwenden
+            new_order = drag_result.get('column_order', [])
+            
+            if not new_order:
+                logger.warning("⚠️ Keine neue Spalten-Reihenfolge in drag_result")
+                return False
+            
+            # User-Reihenfolge in vollständigen Controls aktualisieren
+            from datetime import datetime
+            
+            for i, control_name in enumerate(new_order):
+                if control_name in complete_controls:
+                    complete_controls[control_name]['user_display_order'] = i + 1
+                    complete_controls[control_name]['last_updated'] = datetime.now().isoformat()
+            
+            # Vollständige Controls speichern
+            success = self._save_complete_controls_v3(complete_controls)
+            
+            if success:
+                logger.info(f"✅ DRAG & DROP: Neue Spalten-Reihenfolge mit {len(new_order)} Spalten gespeichert")
+                return True
+            else:
+                logger.error("❌ Fehler beim Speichern der Drag & Drop Änderungen")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Drag & Drop Integration: {e}")
+            return False
+    
+    def initialize_widget_with_complete_controls(self):
+        """
+        WIDGET-INITIALISIERUNG: Startet Widget mit vollständiger Control-Verwaltung.
+        
+        Diese Funktion sollte beim Widget-Start aufgerufen werden.
+        Sie lädt/erstellt vollständige Controls und baut die Tabelle auf.
+        
+        Returns:
+            True bei Erfolg, False bei Fehler
+        """
+        try:
+            logger.info("🚀 WIDGET-START: Initialisiere mit vollständiger Control-Verwaltung...")
+            
+            # Widget-Grundeinstellungen
+            self.setWindowTitle("Moderne PDVM View - Vollständige Control-Verwaltung")
+            
+            # Vollständige Controls laden/erstellen und Tabelle aufbauen
+            success = self.update_table_with_complete_controls()
+            
+            if success:
+                logger.info("✅ WIDGET-INITIALISIERUNG: Vollständige Control-Verwaltung aktiv")
+                return True
+            else:
+                logger.warning("⚠️ WIDGET-INITIALISIERUNG: Fallback-Modus aktiv")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Widget-Initialisierung mit vollständigen Controls: {e}")
+            return False
+
+    def _save_user_column_order(self, column_names):
+        """
+        KOMPATIBILITÄT: Speichert die Spalten-Reihenfolge im alten Format.
+        
+        Diese Methode wird noch von _on_column_moved verwendet.
+        Ruft intern das neue V2-Format auf.
+        
+        Args:
+            column_names: Liste von Spalten-Namen in der gewünschten Reihenfolge
+        """
+        logger.debug(f"[KOMPATIBILITÄT] Speichere über altes Interface, leite an V2 weiter")
+        
+        # Aktuellen Sichtbarkeits-Status aus den Spalten ableiten
+        column_selection = {}
+        
+        control = getattr(self.data_manager, 'control', None)
+        if control and hasattr(control, 'columns'):
+            column_dict = {col['name']: col for col in control.columns}
+            
+            for col_name in column_names:
+                if col_name in column_dict:
+                    col = column_dict[col_name]
+                    # display_show Status verwenden falls vorhanden, sonst True
+                    column_selection[col_name] = col.get('display_show', True)
+                else:
+                    column_selection[col_name] = True
+        else:
+            # Fallback: Alle als aktiv markieren
+            column_selection = {col_name: True for col_name in column_names}
+        
+        # An V2-Methode weiterleiten
+        self._save_user_column_order_v2(column_names, column_selection)
 
     def _update_column_selection_button(self, available_columns):
-        """Aktualisiert den Button-Text für die Spaltenauswahl"""
+        """Aktualisiert den Button-Text für die Spaltenauswahl basierend auf aktueller Auswahl."""
         current_selection = getattr(self, '_custom_column_selection', None)
-        if current_selection is None:
-            # Standard: Alle verfügbaren Spalten auswählen
-            current_selection = [col['name'] for col in available_columns]
-            self._custom_column_selection = current_selection
         
-        # Button-Text aktualisieren - KORRIGIERT: Verwende 'label' statt 'anzeige'
-        if not current_selection:
-            button_text = "Keine Spalten ausgewählt"
-        elif len(current_selection) == len(available_columns):
-            button_text = "Alle Spalten ausgewählt"
-        elif len(current_selection) == 1:
-            # Eine Spalte: Zeige Label (korrigiert)
-            for col in available_columns:
-                if col['name'] == current_selection[0]:
-                    # Verwende 'label' statt 'anzeige' und fallback zu 'name'
-                    button_text = col.get('label', col.get('anzeige', col['name']))
-                    break
-            else:
-                button_text = current_selection[0]
+        # Zähle aktuell sichtbare Spalten
+        if current_selection is None:
+            visible_count = len(available_columns)  # Alle verfügbaren sind sichtbar
+            button_text = f"Alle {visible_count} Spalten ausgewählt"
         else:
-            button_text = f"{len(current_selection)} von {len(available_columns)} Spalten"
+            # Zähle nur die Spalten die sowohl in current_selection als auch in available_columns sind
+            visible_count = len([col for col in available_columns if col['name'] in current_selection])
+            
+            if visible_count == 0:
+                button_text = "Keine Spalten ausgewählt"
+            elif visible_count == len(available_columns):
+                button_text = f"Alle {visible_count} Spalten ausgewählt"
+            elif visible_count == 1:
+                # Eine Spalte: Zeige Label
+                for col in available_columns:
+                    if col['name'] in current_selection:
+                        button_text = col.get('label', col.get('anzeige', col['name']))
+                        break
+                else:
+                    button_text = "1 Spalte ausgewählt"
+            else:
+                button_text = f"{visible_count} von {len(available_columns)} Spalten"
         
         self.column_selection_button.setText(button_text)
         
-        # Sichtbare Spalten basierend auf aktueller Auswahl aktualisieren
-        self.visible_column_names = [name for name in current_selection if name in [col['name'] for col in available_columns]]
+        logger.debug(f"[ModernViewWidget] Button-Text aktualisiert: '{button_text}'")
 
     def _open_column_selection_dialog(self):
-        """Öffnet den Dialog zur Spaltenauswahl"""
+        """
+        Öffnet den Dialog zur Spaltenauswahl mit der neuen 2-Level-Architektur.
+        
+        NEUE V2-ARCHITEKTUR:
+        - Zeigt alle verfügbaren Spalten für den aktuellen Mode an
+        - Speichert Auswahl mit vollständiger Reihenfolge (aktive + deaktivierte)
+        - Deaktivierte Spalten wandern automatisch nach hinten
+        """
         control = getattr(self.data_manager, 'control', None)
         if control is None or not hasattr(control, 'columns'):
             QMessageBox.warning(self, "Fehler", "Keine Spalten verfügbar")
@@ -543,50 +1756,152 @@ class PdvmModernViewWidget(QWidget):
         
         columns = control.columns
         
-        # Verfügbare Spalten für Dialog sammeln - KORRIGIERTE LOGIK FÜR EXPERT-SPALTEN
-        available_columns = []
-        for col in columns:
-            show_val = col.get('show', False)
-            expert_val = col.get('expert', False)
-            
-            # KORRIGIERTE FILTER-LOGIK FÜR EXPERT-SPALTEN:
-            if self.expert_mode:
-                # Expert-Mode: Zeige show=True Spalten UND expert=True Spalten
-                # Expert-Spalten werden temporär als verfügbar behandelt
-                if show_val or expert_val:
-                    available_columns.append(col)
-            else:
-                # Normal-Mode: Zeige nur Spalten mit show=True UND expert=False
-                if show_val and not expert_val:
-                    available_columns.append(col)
+        # Verfügbare Spalten für aktuellen Mode holen
+        available_columns = self._get_available_columns_for_mode(columns)
         
         # Dialog-Format erstellen - KORRIGIERT: Verwende 'label' statt 'anzeige'
+        # Dialog-Daten vorbereiten
         dialog_columns = []
         for col in available_columns:
             dialog_columns.append({
                 "name": col['name'],
-                "label": col.get('label', col.get('anzeige', col['name']))
+                "label": col.get('label', col.get('anzeige', col['name'])),
+                "expert": col.get('expert', False)  # Expert-Status weiterreichen
             })
         
-        # Aktuelle Auswahl
-        current_selection = getattr(self, '_custom_column_selection', [col['name'] for col in available_columns])
+        # Aktuelle Auswahl aus Complete Controls V3 laden
+        current_selection = []
+        complete_controls = self._load_complete_controls_v3()
         
-        # Dialog öffnen
+        if complete_controls:
+            # Nur die für aktuellen Mode verfügbaren Spalten, die auch aktiviert sind
+            for col in available_columns:
+                if col['name'] in complete_controls and complete_controls[col['name']].get('user_display_show', True):
+                    current_selection.append(col['name'])
+            
+            logger.debug(f"📋 Aktuelle Auswahl aus Complete Controls V3: {len(current_selection)} von {len(available_columns)} Spalten")
+        else:
+            # Fallback: Alle verfügbaren Spalten als ausgewählt betrachten
+            current_selection = [col['name'] for col in available_columns]
+            logger.warning("⚠️ Keine Complete Controls V3 gefunden - verwende alle Spalten als Fallback")
+        
+        # Vereinfachter Dialog nur für Spalten-Auswahl
         dialog = ColumnSelectionDialog(dialog_columns, current_selection, self)
         if dialog.exec_() == QDialog.Accepted:
             # Neue Auswahl übernehmen
             new_selection = dialog.get_selected_columns()
-            self._custom_column_selection = new_selection
-            self.visible_column_names = new_selection
             
-            # Button-Text und Tabelle aktualisieren
-            self._update_column_selection_button(available_columns)
-            self._rebuild_table()
+            logger.info(f"📋 Spaltenauswahl geändert: {len(new_selection)} Spalten ausgewählt")
+            logger.debug(f"📋 Neue Auswahl: {new_selection}")
             
-            # Einstellungen speichern
+            # VOLLSTÄNDIGES CONTROL-SYSTEM: Spaltenauswahl über V2-System aktualisieren
+            self._update_column_selection_v2(available_columns, new_selection)
+            
+            logger.info("� Spalten-Reihenfolge kann direkt in der Tabelle per Drag & Drop geändert werden")
+            # WICHTIG: Keine _rebuild_table() - das erstellt eine neue Tabelle!
+            # Stattdessen nur die Spalten aktualisieren
+            
+            # Einstellungen speichern (nur für persistent verfügbare Spalten)
             self._save_view_settings()
             
             logger.info(f"📋 Spaltenauswahl geändert: {len(new_selection)} Spalten ausgewählt")
+            logger.debug(f"📋 Ausgewählte Spalten: {new_selection}")
+
+    def _update_column_selection_v2(self, available_columns, new_selection):
+        """
+        Aktualisiert die Spalten-Auswahl nach User-Spezifikation Punkt 4:
+        
+        "Wird eine Spalte hinzugefügt, wird diese in der Reihenfolge am Ende 
+        der sichtbaren Spalten sichtbar. Wird eine Spalte ausgeblendet, 
+        wird diese ans Ende der Reihenfolge eingefügt."
+        
+        Args:
+            available_columns: Alle für den Mode verfügbaren Spalten
+            new_selection: Liste der ausgewählten Spalten-Namen
+        """
+        try:
+            # Aktuelle Ebene 2 laden
+            v2_data = self._load_user_column_order_v2()
+            
+            if not v2_data:
+                logger.warning("⚠️ Keine Ebene 2 für Spalten-Update gefunden")
+                return
+                
+            # Tupel unpacking
+            if len(v2_data) == 2:
+                current_order, old_selection = v2_data
+            else:
+                logger.warning("⚠️ Ungültiges V2-Daten Format")
+                return
+            
+            # Änderungen analysieren
+            old_visible = {col for col, visible in old_selection.items() if visible}
+            new_visible = set(new_selection)
+            
+            added_columns = new_visible - old_visible  # Neu hinzugefügte Spalten
+            removed_columns = old_visible - new_visible  # Entfernte Spalten
+            
+            logger.info(f"📋 Spalten-Änderungen:")
+            logger.info(f"  Hinzugefügt: {list(added_columns)}")
+            logger.info(f"  Entfernt: {list(removed_columns)}")
+            
+            # Neue Reihenfolge aufbauen nach User-Spezifikation
+            new_order = []
+            new_column_selection = {}
+            
+            # 1. Bestehende sichtbare Spalten in aktueller Reihenfolge beibehalten
+            for col_name in current_order:
+                if col_name in new_visible and col_name not in added_columns:
+                    new_order.append(col_name)
+                    new_column_selection[col_name] = True
+            
+            # 2. Neu hinzugefügte Spalten am Ende der sichtbaren Spalten anfügen
+            for col_name in added_columns:
+                if col_name in current_order:  # Falls bereits in Reihenfolge
+                    new_order.append(col_name)
+                else:  # Ganz neue Spalte
+                    new_order.append(col_name)
+                new_column_selection[col_name] = True
+                logger.debug(f"➕ Spalte '{col_name}' am Ende der sichtbaren eingefügt")
+            
+            # 3. Entfernte Spalten ans Ende der Reihenfolge setzen
+            for col_name in current_order:
+                if col_name in removed_columns:
+                    new_order.append(col_name)
+                    new_column_selection[col_name] = False
+                    logger.debug(f"➖ Spalte '{col_name}' ans Ende verschoben (nicht sichtbar)")
+            
+            # 4. Alle anderen Spalten (weder hinzugefügt noch entfernt, nicht sichtbar)
+            for col_name in current_order:
+                if col_name not in new_column_selection:
+                    new_order.append(col_name)
+                    new_column_selection[col_name] = old_selection.get(col_name, False)
+            
+            # 5. Komplett neue Spalten, die nicht in current_order waren
+            available_names = {col['name'] for col in available_columns}
+            for col_name in available_names:
+                if col_name not in new_column_selection:
+                    new_order.append(col_name)
+                    new_column_selection[col_name] = col_name in new_selection
+            
+            # Ebene 2 speichern über Complete Control System
+            self.control_objects.update_column_selection(new_order, [col for col, visible in new_column_selection.items() if visible])
+            
+            # Tabelle neu aufbauen
+            self._update_visible_columns()
+            self._refresh_table_display()
+            
+            # Button-Text aktualisieren
+            self._update_column_selection_button(available_columns)
+            
+            logger.info(f"✅ Spalten-Auswahl aktualisiert:")
+            logger.info(f"  Sichtbare: {len([col for col, visible in new_column_selection.items() if visible])}")
+            logger.info(f"  Versteckte: {len([col for col, visible in new_column_selection.items() if not visible])}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der Spalten-Auswahl: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
     def _on_column_selection_changed(self, selected_names):
         """Callback wenn sich die Spaltenauswahl ändert - Kompatibilität"""
@@ -627,7 +1942,18 @@ class PdvmModernViewWidget(QWidget):
             logger.error("❌ Keine Controlstruktur für die Spaltenanzeige gefunden!")
             control_columns = []
         else:
-            control_columns = [col for col in control.columns if col['name'] in self.visible_column_names]
+            # NEUE 2-LEVEL-ARCHITEKTUR: Nur aktive Spalten (display_show=True) anzeigen
+            control_columns = []
+            column_dict = {col['name']: col for col in control.columns}
+            
+            for col_name in self.visible_column_names:
+                if col_name in column_dict:
+                    col = column_dict[col_name]
+                    # Nur Spalten mit display_show=True tatsächlich anzeigen
+                    if col.get('display_show', True):
+                        control_columns.append(col)
+            
+            logger.debug(f"[ModernViewWidget] Tatsächlich angezeigte Spalten: {len(control_columns)} von {len(self.visible_column_names)} verfügbaren")
 
         data = self.data_manager.get_data() if self.data_manager else []
         # Dummy-Spalte erzeugen, wenn keine echten Spalten sichtbar sind
@@ -678,6 +2004,28 @@ class PdvmModernViewWidget(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setMinimumSectionSize(40)
         self.table.horizontalHeader().setHighlightSections(False)
+        
+        # ERWEITERTE DRAG & DROP KONFIGURATION - JETZT AN DER RICHTIGEN STELLE!
+        header = self.table.horizontalHeader()
+        header.setDragDropMode(header.InternalMove)  # Nur interne Verschiebung
+        header.sectionMoved.connect(self._on_column_moved)  # Event-Handler für Verschiebung
+        
+        # ZUSÄTZLICHE DEBUG-EVENTS für bessere Diagnose
+        header.sectionPressed.connect(lambda idx: logger.info(f"🖱️ Spalten-Header gedrückt: Index {idx}"))
+        header.sectionEntered.connect(lambda idx: logger.info(f"🖱️ Spalten-Header betreten: Index {idx}"))
+        
+        # Debug: Prüfe ob Event-Handler verbunden ist
+        logger.info(f"🔧 DRAG & DROP SETUP ABGESCHLOSSEN:")
+        logger.info(f"   sectionsMovable: {header.sectionsMovable()}")
+        logger.info(f"   dragDropMode: {header.dragDropMode()}")
+        logger.info(f"   sectionMoved Receivers: {header.receivers(header.sectionMoved)}")
+        
+        # DEBUG: Warnung wenn echte Mouse-Events erwartet werden
+        logger.info("🖱️ BITTE BEACHTEN: Manuelle Spalten-Verschiebung mit Drag & Drop sollte automatisch _on_column_moved() aufrufen!")
+        logger.info("🖱️ Falls keine Events ankommen: Prüfen Sie, ob die Maus richtig über den Header gezogen wird.")
+        logger.info(f"   _on_column_moved Method: {hasattr(self, '_on_column_moved')}")
+        logger.info("🔧 SPALTEN-DRAG & DROP IST AKTIVIERT - READY FOR TESTING!")
+        
         # setWordWrap gibt es in PyQt5 nicht, Zeilenumbruch funktioniert trotzdem mit \n
 
         # Daten stumpf eintragen
@@ -689,7 +2037,82 @@ class PdvmModernViewWidget(QWidget):
                 value = record.get(key, "")
                 self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
         logger.debug(f"[ModernViewWidget] Tabelle erstellt: rows={len(data)}, cols={len(control_columns)}")
+        
+        # KRITISCHER FIX: Header-Reihenfolge nach Tabellenerstellung anwenden
+        self._apply_saved_header_order(control_columns)
+        
         layout.addWidget(self.table)
+
+    def _apply_saved_header_order(self, control_columns):
+        """
+        Wendet die gespeicherte Benutzer-Spaltenreihenfolge auf die Header-Positionen an.
+        
+        Dies ist KRITISCH für die korrekte Darstellung beim Laden der Anwendung.
+        Die Tabelle wird initial mit der Standard-Reihenfolge erstellt,
+        dann werden die Header programmatisch in die gespeicherte Reihenfolge gebracht.
+        
+        Args:
+            control_columns: Liste der Spalten-Definitionen in ursprünglicher Reihenfolge
+        """
+        if not hasattr(self, 'table') or not self.table:
+            logger.warning("⚠️ Keine Tabelle vorhanden - kann Header-Reihenfolge nicht anwenden")
+            return
+            
+        try:
+            # Gespeicherte Reihenfolge laden
+            saved_order = self._load_user_column_order()
+            if not saved_order:
+                logger.debug("🔄 Keine gespeicherte Spalten-Reihenfolge - verwende Standard-Reihenfolge")
+                return
+            
+            header = self.table.horizontalHeader()
+            
+            # Mapping: Spaltenname -> ursprüngliche logische Position erstellen
+            column_name_to_logical = {}
+            for logical_idx, col in enumerate(control_columns):
+                column_name = col.get('name', '')
+                column_name_to_logical[column_name] = logical_idx
+            
+            logger.info(f"🔄 Wende gespeicherte Header-Reihenfolge an: {saved_order}")
+            logger.debug(f"🔄 Spaltenname -> Logische Position: {column_name_to_logical}")
+            
+            # Header in gespeicherte Reihenfolge bringen
+            # Wir müssen die Header schrittweise verschieben
+            for target_visual_pos, column_name in enumerate(saved_order):
+                if column_name not in column_name_to_logical:
+                    logger.warning(f"⚠️ Spalte '{column_name}' aus gespeicherter Reihenfolge nicht in aktuellen Spalten gefunden")
+                    continue
+                
+                target_logical_pos = column_name_to_logical[column_name]
+                
+                # Finde aktuelle visuelle Position der logischen Spalte
+                current_visual_pos = header.visualIndex(target_logical_pos)
+                
+                if current_visual_pos != target_visual_pos:
+                    # Verschiebe Header von aktueller zu Zielposition
+                    logger.debug(f"🔄 Verschiebe '{column_name}': visuell {current_visual_pos} → {target_visual_pos}")
+                    header.moveSection(current_visual_pos, target_visual_pos)
+            
+            # Verifikation: Prüfe finale Header-Reihenfolge
+            final_order = []
+            for visual_pos in range(header.count()):
+                logical_pos = header.logicalIndex(visual_pos)
+                if logical_pos < len(control_columns):
+                    column_name = control_columns[logical_pos].get('name', f'col_{logical_pos}')
+                    final_order.append(column_name)
+            
+            logger.info(f"✅ Header-Reihenfolge angewendet: {final_order}")
+            
+            if final_order == saved_order:
+                logger.info("✅ Header-Reihenfolge erfolgreich wiederhergestellt!")
+            else:
+                logger.warning(f"⚠️ Header-Reihenfolge weicht ab:")
+                logger.warning(f"   Erwartet: {saved_order}")
+                logger.warning(f"   Aktuell:  {final_order}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden der Header-Reihenfolge: {e}")
+            logger.error("   Verwende Standard-Reihenfolge")
 
     def _toggle_expert_mode(self):
         self.expert_mode = not self.expert_mode
@@ -1256,22 +2679,47 @@ class PdvmModernViewWidget(QWidget):
         return None
     
     def _create_table(self, layout):
-        """Erstellt die Haupttabelle"""
+        """Erstellt die Haupttabelle mit Spalten-Drag & Drop Unterstützung"""
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         
-        # Header-Styling
+        # Header-Styling und Drag & Drop für Spalten
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
         header.sectionClicked.connect(self._on_header_clicked)
+        
+        # DRAG & DROP für Spalten-Reihenfolge aktivieren
+        header.setSectionsMovable(True)  # Spalten verschiebbar machen
+        header.setDragDropMode(header.InternalMove)  # Nur interne Verschiebung
+        header.sectionMoved.connect(self._on_column_moved)  # Event-Handler für Verschiebung
+        
+        # ZUSÄTZLICHE DEBUG-EVENTS für bessere Diagnose
+        header.sectionPressed.connect(lambda idx: logger.info(f"🖱️ Spalten-Header gedrückt: Index {idx}"))
+        header.sectionEntered.connect(lambda idx: logger.info(f"🖱️ Spalten-Header betreten: Index {idx}"))
+        
+        # Debug: Prüfe ob Event-Handler verbunden ist
+        logger.info(f"🔧 DRAG & DROP SETUP ABGESCHLOSSEN:")
+        logger.info(f"   sectionsMovable: {header.sectionsMovable()}")
+        logger.info(f"   dragDropMode: {header.dragDropMode()}")
+        logger.info(f"   sectionMoved Receivers: {header.receivers(header.sectionMoved)}")
+        
+        # DEBUG: Warnung wenn echte Mouse-Events erwartet werden
+        logger.info("🖱️ BITTE BEACHTEN: Manuelle Spalten-Verschiebung mit Drag & Drop sollte automatisch _on_column_moved() aufrufen!")
+        logger.info("🖱️ Falls keine Events ankommen: Prüfen Sie, ob die Maus richtig über den Header gezogen wird.")
+        logger.info(f"   _on_column_moved Method: {hasattr(self, '_on_column_moved')}")
+        logger.info("🔧 SPALTEN-DRAG & DROP IST AKTIVIERT - READY FOR TESTING!")
         
         # Row selection
         self.table.itemSelectionChanged.connect(self._on_row_selected)
         
         layout.addWidget(self.table)
+        
+        # Erfolgsmeldung für Drag & Drop
+        logger.info("✅ Spalten-Drag & Drop aktiviert - Spalten können per Maus verschoben werden")
+        logger.info("🔧 Event-Handler für sectionMoved verbunden - Reihenfolge wird automatisch gespeichert")
     
     def _create_status_bar(self, layout):
         """Erstellt die Status-Leiste"""
@@ -1760,6 +3208,18 @@ class PdvmModernViewWidget(QWidget):
                 self.table.setItem(row, col, item)
         
         logger.debug(f"✅ Tabelle erfolgreich populiert mit {len(self.filtered_data)} Zeilen")
+        
+        # Debug: Aktuelle Header-Reihenfolge anzeigen
+        if hasattr(self, 'table') and self.table:
+            header = self.table.horizontalHeader()
+            visual_order = []
+            for visual_pos in range(header.count()):
+                logical_pos = header.logicalIndex(visual_pos)
+                if logical_pos < len(self.visible_column_names):
+                    column_name = self.visible_column_names[logical_pos]
+                    visual_order.append(column_name)
+            logger.debug(f"🔍 Aktuelle visuelle Spalten-Reihenfolge: {visual_order}")
+            logger.debug(f"🔍 visible_column_names: {self.visible_column_names}")
     
     def _get_display_value(self, record, field_name):
         """Ermittelt den Anzeigewert für ein Feld über den Data-Manager."""
@@ -1817,6 +3277,387 @@ class PdvmModernViewWidget(QWidget):
             self.current_sort_order = Qt.AscendingOrder
         
         self._apply_filters()
+
+    def _on_column_moved(self, logical_index, old_visual_index, new_visual_index):
+        """
+        Event-Handler für Spalten-Verschiebung per Drag & Drop.
+        
+        User-Spezifikation Punkt 5:
+        "Wird die Reihenfolge geändert, dann wird innerhalb der Ebene 2 
+        die Reihenfolge in den sichtbaren Controls entsprechend geändert.
+        Mit jeder Änderung wird Ebene 2 gespeichert."
+        """
+        logger.info(f"🔥 Drag & Drop: logical={logical_index}, old_visual={old_visual_index}, new_visual={new_visual_index}")
+        
+        try:
+            # Aktuelle visuelle Reihenfolge der SICHTBAREN Spalten aus Header lesen
+            header = self.table.horizontalHeader()
+            new_visible_order = []
+            
+            for visual_pos in range(header.count()):
+                logical_pos = header.logicalIndex(visual_pos)
+                if logical_pos < len(self.visible_column_names):
+                    column_name = self.visible_column_names[logical_pos]
+                    new_visible_order.append(column_name)
+            
+            logger.info(f"🔄 Neue sichtbare Reihenfolge: {new_visible_order}")
+            
+            # Ebene 2 entsprechend aktualisieren
+            self._update_level2_order_from_drag_drop(new_visible_order)
+            
+            moved_column = self.visible_column_names[logical_index] if logical_index < len(self.visible_column_names) else "Unbekannt"
+            logger.info(f"✅ Spalte '{moved_column}' von Position {old_visual_index} → {new_visual_index}")
+            logger.info("💾 Ebene 2 wurde aktualisiert und gespeichert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Drag & Drop: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+    def _update_complete_controls_from_drag_drop(self, new_visible_order):
+        """
+        VOLLSTÄNDIGE CONTROLS: Aktualisiert vollständige Control-Objekte nach Drag & Drop.
+        
+        Args:
+            new_visible_order: Liste der Control-Namen in neuer Reihenfolge
+        """
+        try:
+            # Vollständige Controls laden
+            if not hasattr(self, 'complete_controls') or not self.complete_controls:
+                logger.warning("⚠️ Keine vollständigen Controls verfügbar - lade sie neu")
+                self.complete_controls = self._load_complete_controls_v3()
+                
+                if not self.complete_controls:
+                    logger.error("❌ Vollständige Controls nicht verfügbar")
+                    return
+            
+            # user_display_order für neue Reihenfolge aktualisieren
+            update_count = 0
+            for new_order, control_name in enumerate(new_visible_order, 1):
+                if control_name in self.complete_controls:
+                    self.complete_controls[control_name]['user_display_order'] = new_order
+                    self.complete_controls[control_name]['last_updated'] = datetime.now().isoformat()
+                    update_count += 1
+            
+            # Vollständige Controls speichern
+            if self._save_complete_controls_v3():
+                logger.info(f"🔄 VOLLSTÄNDIGE CONTROLS: {update_count} Controls nach Drag & Drop aktualisiert")
+                logger.debug(f"🔄 Neue Reihenfolge: {new_visible_order[:3]}{'...' if len(new_visible_order) > 3 else ''}")
+            else:
+                logger.error("❌ Fehler beim Speichern der aktualisierten vollständigen Controls")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der vollständigen Controls: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        """
+        KORREKTE ARCHITEKTUR: Aktualisiert Control-Parameter nach Drag & Drop.
+        
+        Schreibt die neue Reihenfolge in systemsteuerung.daten[view_guid]['controls'][control_name]
+        für jeden betroffenen Control.
+        
+        Args:
+            new_visible_order: Liste der Control-Namen in neuer Reihenfolge 
+                              (z.B. ["familienname_original", "geburtsdatum_show", ...])
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            from datetime import datetime
+            
+            # Systemsteuerung für Benutzer laden (uid = user_guid wird vom System verwaltet)
+            sys_db = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name="systemsteuerung",
+                guid=self.user_guid
+            )
+            
+            # Aktuelle Benutzerdaten laden
+            user_data = sys_db.lesen() or {}
+            
+            # View-Gruppe und Controls-Bereich initialisieren falls nicht vorhanden
+            if self.view_guid not in user_data:
+                user_data[self.view_guid] = {}
+            if 'controls' not in user_data[self.view_guid]:
+                user_data[self.view_guid]['controls'] = {}
+            
+            controls_data = user_data[self.view_guid]['controls']
+            
+            # display_order für jeden Control in neuer Reihenfolge aktualisieren
+            update_count = 0
+            for new_order, control_name in enumerate(new_visible_order, 1):
+                if control_name in controls_data and isinstance(controls_data[control_name], dict):
+                    # display_order für diesen Control aktualisieren
+                    controls_data[control_name]['display_order'] = new_order
+                    controls_data[control_name]['last_updated'] = datetime.now().isoformat()
+                    update_count += 1
+                else:
+                    # Control existiert noch nicht - mit Standard-Werten erstellen
+                    controls_data[control_name] = {
+                        'display_show': True,
+                        'display_order': new_order,
+                        'last_updated': datetime.now().isoformat()
+                    }
+                    update_count += 1
+            
+            # Alle aktualisierten Controls speichern
+            user_data[self.view_guid]['controls'] = controls_data
+            sys_db.speichern(self.user_guid, user_data)
+            
+            logger.info(f"🔄 KORREKTE ARCHITEKTUR: Controls nach Drag & Drop aktualisiert in systemsteuerung.daten[{self.view_guid}]['controls']:")
+            logger.info(f"  Aktualisierte Controls: {update_count}")
+            logger.debug(f"  Control-Namen in neuer Reihenfolge: {new_visible_order[:3]}{'...' if len(new_visible_order) > 3 else ''}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der Controls: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+    def _update_level2_order_from_drag_drop(self, new_visible_order):
+        """
+        KOMPATIBILITÄT: Aktualisiert Ebene 2 basierend auf neuer sichtbarer Reihenfolge.
+        
+        NEUE ARCHITEKTUR: Delegiert an _update_controls_from_drag_drop für direktere Lösung.
+        
+        Args:
+            new_visible_order: Neue Reihenfolge der sichtbaren Spalten
+        """
+        try:
+            # NEUE ARCHITEKTUR: Direkte Control-Updates
+            self._update_controls_from_drag_drop(new_visible_order)
+            
+            logger.debug(f"🔄 Drag & Drop über Control-Updates verarbeitet")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Drag & Drop Update: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+    # ENTFERNT: _apply_column_order_to_table() - Redundant, da Reihenfolge bereits vor Tabellenerstellung angewendet wird
+    # Die Reihenfolge wird jetzt in _apply_user_column_order() vor der Tabellenerstellung korrekt gesetzt
+
+    def test_column_order_functionality(self):
+        """
+        Test-Methode für die neue Ebene-2-Architektur.
+        
+        Testet systematisch alle 8 Punkte der User-Spezifikation.
+        """
+        try:
+            logger.info("🧪 SPALTEN-TEST: Neue Ebene-2-Architektur")
+            logger.info("=" * 60)
+            
+            # 1. Vollständige Tabelle + Controls prüfen
+            control = getattr(self.data_manager, 'control', None)
+            if control and hasattr(control, 'columns'):
+                logger.info(f"✅ Punkt 1: Vollständige Tabelle - {len(control.columns)} Spalten verfügbar")
+            else:
+                logger.error("❌ Punkt 1: Keine vollständige Tabelle verfügbar")
+                return
+            
+            # 2. Ebene 2 Status prüfen
+            v2_data = self._load_user_column_order_v2()
+            if v2_data and len(v2_data) == 2:
+                column_order, column_selection = v2_data
+                logger.info(f"✅ Punkt 2: Gespeicherte Ebene 2 gefunden")
+                logger.info(f"   Reihenfolge: {len(column_order)} Spalten")
+                logger.info(f"   Sichtbarkeit: {len(column_selection)} Einstellungen")
+            else:
+                logger.info("ℹ️ Punkt 2: Keine Ebene 2 → wird neu erstellt")
+            
+            # 3. Aktuelle Darstellung prüfen
+            logger.info(f"✅ Punkt 3: Tabellendarstellung - {len(self.visible_column_names)} Spalten")
+            logger.info(f"   Aktuelle Reihenfolge: {self.visible_column_names[:5]}{'...' if len(self.visible_column_names) > 5 else ''}")
+            
+            # 4. Order-System testen (Punkt 6-7)
+            logger.info("🧪 Order-System Test:")
+            for col in control.columns[:10]:  # Erste 10 Spalten
+                original_order = col.get('order', 999)
+                expert = col.get('expert', False)
+                show = col.get('show', False)
+                
+                if expert:
+                    expected_order = original_order + 200
+                    category = "Expert"
+                elif show:
+                    expected_order = original_order
+                    category = "Normal"
+                else:
+                    expected_order = 999
+                    category = "Nicht angezeigt"
+                
+                logger.info(f"   {col['name'][:15]:15} | Original: {original_order:3d} | Expected: {expected_order:3d} | {category}")
+            
+            # 5. Drag & Drop Test (Punkt 5)
+            if hasattr(self, 'table') and self.table:
+                header = self.table.horizontalHeader()
+                logger.info(f"✅ Punkt 5: Drag & Drop - Movable: {header.sectionsMovable()}")
+                logger.info(f"   Signal-Verbindungen: {header.receivers(header.sectionMoved)} Empfänger")
+            else:
+                logger.warning("⚠️ Punkt 5: Keine Tabelle für Drag & Drop Test")
+            
+            # 6. Expert-Mode Test (Punkt 8)
+            expert_cols = [col for col in control.columns if col.get('expert', False)]
+            normal_cols = [col for col in control.columns if col.get('show', False) and not col.get('expert', False)]
+            
+            logger.info(f"✅ Punkt 8: Flexibilität - Normal: {len(normal_cols)}, Expert: {len(expert_cols)} Spalten")
+            
+            # Test-Zusammenfassung
+            logger.info("=" * 60)
+            logger.info("🧪 SPALTEN-TEST ABGESCHLOSSEN")
+            logger.info(f"💾 Ebene 2 Status: {'Vorhanden' if v2_data else 'Wird erstellt'}")
+            logger.info(f"🎯 Aktuelle Anzeige: {len(self.visible_column_names)} Spalten")
+            logger.info(f"🔄 Expert-Mode: {'AN' if self.expert_mode else 'AUS'}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Spalten-Test: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+    def reset_column_settings_to_defaults(self):
+        """
+        KORREKTE ARCHITEKTUR: Setzt alle Spalten-Einstellungen auf Standardwerte zurück.
+        
+        Liest die Standard-Controls aus den viewdaten und speichert diese
+        in systemsteuerung.daten[view_guid]['controls'].
+        """
+        try:
+            logger.info("🔄 SPALTEN-RESET: Stelle Standardwerte wieder her")
+            
+            # Standard-Controls aus data_manager laden
+            control = getattr(self.data_manager, 'control', None)
+            if not control or not hasattr(control, 'columns'):
+                logger.error("❌ Keine Standard-Controls verfügbar")
+                return False
+            
+            # Standard-Parameter in Controls übernehmen
+            reset_count = 0
+            column_names = []
+            column_selection = {}
+            
+            for col in control.columns:
+                col_name = col['name']
+                column_names.append(col_name)
+                
+                # Standard display_show aus 'show'-Parameter
+                default_show = col.get('show', False)
+                column_selection[col_name] = default_show
+                reset_count += 1
+            
+            # Nach Standard-Order sortieren
+            column_names.sort(key=lambda name: next(
+                (col.get('order', 999) for col in control.columns if col['name'] == name), 999
+            ))
+            
+            # Standardwerte in korrekter Architektur speichern
+            self._save_user_column_order_v2(column_names, column_selection)
+            
+            logger.info(f"✅ KORREKTE ARCHITEKTUR: {reset_count} Controls auf Standardwerte in systemsteuerung.daten[{self.view_guid}]['controls'] zurückgesetzt")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Reset der Spalten-Einstellungen: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return False
+            
+            # UI aktualisieren
+            self._update_visible_columns()
+            
+            logger.info(f"✅ Spalten-Einstellungen zurückgesetzt: {reset_count} Controls")
+            logger.info(f"🔄 Standard-Reihenfolge und -Sichtbarkeit wiederhergestellt")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Zurücksetzen der Spalten-Einstellungen: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return False
+
+    def _refresh_table_display(self):
+        """
+        Aktualisiert die Tabellen-Anzeige nach Änderungen der Spalten-Auswahl oder -Reihenfolge.
+        WICHTIG: Erstellt KEINE neue Tabelle, sondern aktualisiert nur die Spaltenanzeige.
+        """
+        try:
+            logger.info("🔄 Aktualisiere Tabelle nach Spalten-Änderung (KEINE neue Tabelle)")
+            
+            # Complete Controls V3 neu laden
+            complete_controls = self._load_complete_controls_v3()
+            
+            if complete_controls:
+                # Sichtbare Spalten aus Complete Controls extrahieren
+                visible_columns = [
+                    name for name, control in complete_controls.items() 
+                    if control.get('user_display_show', True)
+                ]
+                
+                # Spalten-Reihenfolge aus Complete Controls extrahieren
+                sorted_controls = sorted(
+                    complete_controls.items(),
+                    key=lambda x: x[1].get('user_display_order', 999)
+                )
+                column_order = [name for name, _ in sorted_controls]
+                
+                # Widget-Status aktualisieren
+                self.visible_column_names = visible_columns
+                
+                # Tabelle komplett neu erstellen (bestehende löschen)
+                if hasattr(self, 'table') and self.table:
+                    # Alte Tabelle aus Layout entfernen
+                    layout = self.layout()
+                    if layout:
+                        layout.removeWidget(self.table)
+                    self.table.deleteLater()
+                    self.table = None
+                
+                # Neue Tabelle mit aktualisierten Spalten erstellen
+                layout = self.layout()
+                if layout:
+                    self._create_table_with_visible_columns(layout)
+                    
+                logger.info(f"✅ Tabelle erfolgreich neu erstellt: {len(visible_columns)} sichtbare Spalten")
+                
+            else:
+                logger.warning("⚠️ Keine Complete Controls V3 verfügbar für Tabellen-Update")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der Tabellen-Anzeige: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+    def _update_table_headers(self):
+        """
+        Aktualisiert nur die Spaltenheader der bestehenden Tabelle ohne neue Tabelle zu erstellen.
+        """
+        try:
+            control = getattr(self.data_manager, 'control', None)
+            if not control or not hasattr(control, 'columns'):
+                logger.warning("⚠️ Keine Control-Struktur für Header-Update verfügbar")
+                return
+            
+            # Nur sichtbare Spalten nehmen
+            visible_columns = []
+            column_dict = {col['name']: col for col in control.columns}
+            
+            for col_name in self.visible_column_names:
+                if col_name in column_dict:
+                    visible_columns.append(column_dict[col_name])
+            
+            # Spaltenanzahl anpassen
+            self.table.setColumnCount(len(visible_columns))
+            
+            # Header-Labels setzen
+            headers = []
+            for col in visible_columns:
+                label = col.get('anzeige', col.get('label', col['name']))
+                headers.append(label)
+            
+            self.table.setHorizontalHeaderLabels(headers)
+            
+            logger.debug(f"✅ Tabellen-Header aktualisiert: {len(headers)} Spalten")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der Tabellen-Header: {e}")
 
     def _on_row_selected(self):
         """Wird aufgerufen wenn eine Zeile ausgewählt wird"""

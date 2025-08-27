@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from pdvm_input_manager import PdvmInputManager, FieldMeta
-from pd_datetime import Pdvm_DateTime
+from pdvm_datetime import Pdvm_DateTime
 from pdvm_date_time_picker import PdvmDateTimePicker
 from pdvm_dropdown_picker import PdvmDropdownPicker
 from pdvm_input_control_widget import PdvmInputControlWidget

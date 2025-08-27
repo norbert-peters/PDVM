@@ -235,6 +235,38 @@ class Pdvm_DateTime(object):
     PdvmDateTime = property(__getPdvmDateTime,__setPdvmDateTime)
 
     # --------------------------------------------------------------------
+    # PdvmDateTimeStr - ZENTRALE STRING-FORMATIERUNG für Millisekunden-Genauigkeit
+    # --------------------------------------------------------------------
+    def __getPdvmDateTimeStr(self):
+        """
+        Gibt PdvmDateTime als formatierten String zurück - ZENTRALE LÖSUNG
+        - Millisekunden-Genauigkeit mit 5 Nachkommastellen
+        - Wenn Nachkommastellen = 0 (00:00:00.000): .00000
+        - Konsistente Formatierung system-weit
+        
+        Returns:
+            str: PdvmDateTime als String mit 5 Nachkommastellen
+        """
+        try:
+            pdvm_float = self.pdvmdatetime
+            if self.vChr:
+                pdvm_float = pdvm_float * -1
+                
+            # Prüfen ob Zeit vorhanden (Nachkommastellen != 0)
+            if abs(pdvm_float - int(pdvm_float)) < 0.000001:  # Praktisch keine Nachkommastellen
+                # Keine Zeit -> 5 Nullen für 00:00:00.000
+                return f"{int(pdvm_float)}.00000"
+            else:
+                # Zeit vorhanden -> 5 Nachkommastellen für Millisekunden-Genauigkeit
+                return f"{pdvm_float:.5f}"
+                
+        except Exception as e:
+            # Fallback für Fehlerfall
+            return f"{self.pdvmdatetime:.5f}"
+
+    PdvmDateTimeStr = property(__getPdvmDateTimeStr)
+
+    # --------------------------------------------------------------------
     # PdvmDateTimeT 
     # --------------------------------------------------------------------
     def __setPdvmDateTimeT(self,pdvmdtt):
@@ -1298,68 +1330,119 @@ def stringToLength (pdvmstr, pdvml):
 
 # --------------------------------------------------------------------
 # Hilfsklasse, um den aktuellen PDVM-Datum/-Zeit-Wert bzw. nur Datum oder nur Zeit
-class PdvmDateTimeUtils:
-    """
-    Statische Hilfsklasse, um den aktuellen PDVM-Datum/-Zeit-Wert bzw. nur Datum oder nur Zeit
-    im PDVM-Format zu liefern. Intern wird die Pdvm_DateTime-Klasse verwendet.
-
-    Methoden:
-      - PdvmDateTimeNow() → float (voller PDVM-Zeitstempel)
-      - PdvmDateNow()     → float (nur Datum, Zeitanteil = 0)
-      - PdvmTimeNow()     → float (nur Zeitanteil als Bruchteil eines Tages)
-    """
-    @staticmethod
-    def PdvmDateTimeNow():
+class PdvmDateTimeUtilsMeta(type):
+    """Metaclass für PdvmDateTimeUtils um Class Properties zu ermöglichen"""
+    
+    @property
+    def PdvmDateTimeNow(cls):
+        """Property: Aktueller PDVM-Zeitstempel als float"""
         import time
         from pd_datetime import Pdvm_DateTime
 
-        # Aktuellen lokalen Zeitpunkt auslesen
         lt = time.localtime()
         year, month, day = lt.tm_year, lt.tm_mon, lt.tm_mday
         hour, minute, second = lt.tm_hour, lt.tm_min, lt.tm_sec
 
-        # Neue Pdvm_DateTime-Instanz nur zur reinen Konvertierung verwenden
         tmp = Pdvm_DateTime()
-
-        # PdvmDateTimeT setzt Jahr, Monat, Tag, Stunde, Minute, Sekunde, Mikrosekunde
         tmp.PdvmDateTimeT = (year, month, day, hour, minute, second, 0)
-
-        # pdvmdatetime enthält den vollen Float-Wert: YYYYDDD + .hhmmss
         return tmp.pdvmdatetime
 
-    @staticmethod
-    def PdvmDateNow():
+    @property  
+    def PdvmDateNow(cls):
+        """Property: Aktuelles Datum als float (ohne Zeit)"""
         import time
         from pd_datetime import Pdvm_DateTime
 
-        # Aktuelles Datum ermitteln
         lt = time.localtime()
         year, month, day = lt.tm_year, lt.tm_mon, lt.tm_mday
 
         tmp = Pdvm_DateTime()
-
-        # PdvmDateT setzt nur das Datum (Zeit = 00:00:00)
         tmp.PdvmDateT = (year, month, day)
-
-        # pdvmdatetime enthält als Ganzzahlteil das Datum (Dezimalanteil = 0)
         return float(int(tmp.pdvmdatetime))
 
-    @staticmethod
-    def PdvmTimeNow():
+    @property
+    def PdvmTimeNow(cls):
+        """Property: Aktuelle Zeit als float (Dezimalanteil des Tages)"""
         import time
         from pd_datetime import Pdvm_DateTime
 
-        # Aktuelle Uhrzeit ermitteln
         lt = time.localtime()
         hour, minute, second = lt.tm_hour, lt.tm_min, lt.tm_sec
 
         tmp = Pdvm_DateTime()
-
-        # PdvmTimeT setzt nur die Zeit (Datum bleibt 0 bzw. uninteressant)
         tmp.PdvmTimeT = (hour, minute, second, 0)
-
-        # pdvmtime enthält den Dezimalanteil des Tages (z. B. 0.500000 für 12:00 Uhr)
         return tmp.pdvmtime
+
+    @property
+    def PdvmDateTimeNowStr(cls):
+        """
+        Property: Aktuelle DateTime als formatierter String
+        ZENTRALE LÖSUNG für konsistente String-Formatierung
+        """
+        import time
+        from pd_datetime import Pdvm_DateTime
+
+        lt = time.localtime()
+        year, month, day = lt.tm_year, lt.tm_mon, lt.tm_mday
+        hour, minute, second = lt.tm_hour, lt.tm_min, lt.tm_sec
+
+        tmp = Pdvm_DateTime()
+        tmp.PdvmDateTimeT = (year, month, day, hour, minute, second, 0)
+        return tmp.PdvmDateTimeStr
+
+    @property
+    def PdvmDateNowStr(cls):
+        """
+        Property: Aktuelles Datum als formatierter String (00:00:00.000)
+        """
+        import time
+        from pd_datetime import Pdvm_DateTime
+
+        lt = time.localtime()
+        year, month, day = lt.tm_year, lt.tm_mon, lt.tm_mday
+
+        tmp = Pdvm_DateTime()
+        tmp.PdvmDateT = (year, month, day)
+        return tmp.PdvmDateTimeStr
+
+    @property
+    def PdvmTimeNowStr(cls):
+        """
+        Property: Aktuelle Zeit als formatierter String
+        """
+        import time
+        from pd_datetime import Pdvm_DateTime
+
+        lt = time.localtime()
+        hour, minute, second = lt.tm_hour, lt.tm_min, lt.tm_sec
+
+        tmp = Pdvm_DateTime()
+        tmp.PdvmTimeT = (hour, minute, second, 0)
+        
+        # Zeit-Property für String-Formatierung mit zentraler PdvmDateTimeStr
+        tmp_time_dt = Pdvm_DateTime()
+        tmp_time_dt.PdvmDateTime = tmp.pdvmtime
+        return tmp_time_dt.PdvmDateTimeStr
+
+
+class PdvmDateTimeUtils(metaclass=PdvmDateTimeUtilsMeta):
+    """
+    Zentrale Utilities-Klasse für PDVM-DateTime-Werte mit Class Properties.
+    Keine Instanziierung erforderlich - direkter Zugriff via Properties:
+    
+    Properties:
+      - PdvmDateTimeNow     → float (voller PDVM-Zeitstempel)
+      - PdvmDateNow         → float (nur Datum, Zeitanteil = 0)
+      - PdvmTimeNow         → float (nur Zeitanteil als Bruchteil eines Tages)
+      - PdvmDateTimeNowStr  → str (zentrale String-Formatierung mit 5 Dezimalstellen)
+      - PdvmDateNowStr      → str (Datum als String mit .00000)
+      - PdvmTimeNowStr      → str (Zeit als String mit 5 Dezimalstellen)
+    
+    Verwendung:
+      zeitstempel = PdvmDateTimeUtils.PdvmDateTimeNow
+      string_format = PdvmDateTimeUtils.PdvmDateTimeNowStr
+    """
+    pass
 
 
 # --------------------------------------------------------------------# Hilfsfunktionen für Tests

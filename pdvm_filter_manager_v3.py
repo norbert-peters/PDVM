@@ -282,7 +282,7 @@ class PdvmFilterManagerV3:
             
             # PDVM-DateTime-Bereich berechnen
             if ab_jahr and ab_monat and ab_tag:
-                from pd_datetime import Pdvm_DateTime
+                from pdvm_datetime import Pdvm_DateTime
                 ab_dt = Pdvm_DateTime("DEU")
                 ab_dt.PdvmDateTimeT = (ab_jahr, ab_monat, ab_tag, 0, 0, 0, 0)
                 ab_value = ab_dt.PdvmDateTime
@@ -290,7 +290,7 @@ class PdvmFilterManagerV3:
                 ab_value = None
             
             if bis_jahr and bis_monat and bis_tag:
-                from pd_datetime import Pdvm_DateTime
+                from pdvm_datetime import Pdvm_DateTime
                 bis_dt = Pdvm_DateTime("DEU")
                 bis_dt.PdvmDateTimeT = (bis_jahr, bis_monat, bis_tag, 23, 59, 59, 999999)
                 bis_value = bis_dt.PdvmDateTime

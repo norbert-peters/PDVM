@@ -26,7 +26,7 @@ import json
 
 # Import PDVM modules
 try:
-    from pd_datetime import Pdvm_DateTime, PdvmDateTimeNow
+    from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeNow
     from pdvm_central_datenbank import PdvmCentralDatenbank
 except ImportError as e:
     logging.warning(f"PDVM Module nicht verfügbar: {e}")

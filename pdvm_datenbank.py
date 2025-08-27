@@ -4,7 +4,7 @@
 import sqlite3
 import json
 import allgemeines as all  # Enthält all.neue_guid(), all.convert_from_time() 
-import pd_datetime as dt  # Enthält PdvmDateTimeNow()
+import pdvm_datetime as dt  # Enthält PdvmDateTimeNow()
 
 # looging setup
 import logging
@@ -137,6 +137,55 @@ class PdvmDatenbank:
         # Systemsteuerung aktualisieren
         logging.log(logging.INFO,f"Systemsteuerung aktualisieren für {self.table_name}")
         self._update_last_change()
+
+    def set_historisch_kennzeichen(self, historisch=False):
+        """
+        Setzt das historische Kennzeichen für diese Tabelle in der Systemsteuerung.
+        Wird von PdvmCentralDatenbank verwendet um zu ermitteln, ob Daten historisch sind.
+        """
+        try:
+            # Lade aktuellen Systemsteuerungs-Datensatz
+            sys_db = PdvmDatenbank(self.db_name, table_name="systemsteuerung", historisch=False)
+            sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
+            
+            # WICHTIG: Null-Prüfung für sys_record
+            if sys_record is None:
+                logging.log(logging.INFO, f"Erstelle neuen Systemsteuerung-Datensatz für {self.SYSTEM_USER_ID}")
+                sys_record = {}
+            
+            # Stelle sicher, dass der Eintrag für diese Tabelle existiert
+            sys_record[self.table_name] = sys_record.get(self.table_name, {})
+            
+            # Setze historisch-Kennzeichen
+            sys_record[self.table_name]["historisch"] = bool(historisch)
+            
+            logging.log(logging.INFO, f"Setze historisch-Kennzeichen für {self.table_name}: {historisch}")
+            
+            # Schreibe zurück in die Systemsteuerung
+            sys_db.speichern(self.SYSTEM_USER_ID, sys_record)
+            
+        except Exception as e:
+            logging.log(logging.ERROR, f"Fehler beim Setzen des historisch-Kennzeichens für {self.table_name}: {e}")
+
+    def get_historisch_kennzeichen(self):
+        """
+        Liest das historische Kennzeichen für diese Tabelle aus der Systemsteuerung.
+        """
+        try:
+            # Lade aktuellen Systemsteuerungs-Datensatz
+            sys_db = PdvmDatenbank(self.db_name, table_name="systemsteuerung", historisch=False)
+            sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
+            
+            if sys_record and isinstance(sys_record, dict):
+                table_settings = sys_record.get(self.table_name, {})
+                if isinstance(table_settings, dict):
+                    return bool(table_settings.get('historisch', False))
+            
+            return False
+            
+        except Exception as e:
+            logging.log(logging.ERROR, f"Fehler beim Lesen des historisch-Kennzeichens für {self.table_name}: {e}")
+            return False
 
     def loeschen(self, guid):
         """Löscht einen Datensatz anhand der GUID"""

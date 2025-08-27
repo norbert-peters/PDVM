@@ -1,4 +1,4 @@
-﻿# pdvm_field_widget.py
+# pdvm_field_widget.py
 # -*- coding: utf-8 -*-
 
 from PyQt5.QtWidgets import (
@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 )
 from pdvm_dropdown_picker import PdvmDropdownPicker
 from pdvm_date_time_picker import PdvmDateTimePicker
-from pd_datetime import Pdvm_DateTime, getFormTimeStamp
+from pdvm_datetime import Pdvm_DateTime, getFormTimeStamp
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,13 +51,13 @@ class PdvmFieldWidget(QWidget):
         btn_help.setFixedHeight(row_height)
         btn_help.clicked.connect(self.show_help_dialog)
         row1.addWidget(btn_help)
-        btn_edit = QPushButton("✎", self)
+        btn_edit = QPushButton("?", self)
         btn_edit.setFixedWidth(row_height)
         btn_edit.setFixedHeight(row_height)
         btn_edit.clicked.connect(self._on_edit_dialog)
         row1.addWidget(btn_edit)
         if getattr(self.control, 'show_history', False):
-            btn_history = QPushButton("⏳", self)
+            btn_history = QPushButton("?", self)
             btn_history.setFixedWidth(row_height)
             btn_history.setFixedHeight(row_height)
             btn_history.clicked.connect(self._on_history_dialog)
@@ -68,7 +68,7 @@ class PdvmFieldWidget(QWidget):
     def show_help_dialog(self):
         from PyQt5.QtWidgets import QMessageBox
         header = self.help_header or "Hilfe"
-        text = self.help_text or "Keine Hilfe verfügbar."
+        text = self.help_text or "Keine Hilfe verf�gbar."
         QMessageBox.information(self, header, text)
 
     def update_view(self):
@@ -126,10 +126,10 @@ class HistoryDialog(QDialog):
         self.setModal(True)
         self.resize(600, 400)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Historie für Feld: {getattr(meta, 'label', 'Unbekannt')}"))
+        layout.addWidget(QLabel(f"Historie f�r Feld: {getattr(meta, 'label', 'Unbekannt')}"))
         history_text = "\n".join([f"Wert: {h.get('db_value', 'N/A')}, Ab: {h.get('abdatum', 'N/A')}" for h in history])
         history_label = QLabel(history_text if history_text else "Keine Historie vorhanden.")
         layout.addWidget(history_label)
-        btn_close = QPushButton("Schließen", self)
+        btn_close = QPushButton("Schlie�en", self)
         btn_close.clicked.connect(self.close)
         layout.addWidget(btn_close)

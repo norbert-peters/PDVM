@@ -5,7 +5,7 @@ import logging
 import json
 from typing import List, Dict, Tuple, Any
 
-from pd_datetime import Pdvm_DateTime
+from pdvm_datetime import Pdvm_DateTime
 from pdvm_central_datenbank import PdvmCentralDatenbank
 
 logger = logging.getLogger(__name__)
@@ -952,14 +952,14 @@ class PdvmInputManager:
         
         abdatum_inst = self.get_abdatum_instance(key)
         if abdatum_inst is None:
-            from pd_datetime import Pdvm_DateTime
+            from pdvm_datetime import Pdvm_DateTime
             abdatum_inst = Pdvm_DateTime("DEU")
             abdatum_inst.PdvmDateTime = abdatum if abdatum is not None else 1001.0
             self.register_abdatum_instance(key, abdatum_inst)
         # Wert-Instanz für Datetime-Felder sicherstellen!
         value_inst = self.get_value_instance(key) if getattr(meta, 'type', None) == "datetime" else None
         if getattr(meta, 'type', None) == "datetime" and value_inst is None:
-            from pd_datetime import Pdvm_DateTime
+            from pdvm_datetime import Pdvm_DateTime
             value_inst = Pdvm_DateTime("DEU")
             value_inst.PdvmDateTime = value if value is not None else 1001.0
             self.register_value_instance(key, value_inst)
@@ -1359,7 +1359,7 @@ class PdvmInputManager:
             history_data = []
             for timestamp_float, value in history_dict.items():
                 # Erstelle PdvmDateTime Instanz für jeden historischen Zeitstempel
-                from pd_datetime import Pdvm_DateTime
+                from pdvm_datetime import Pdvm_DateTime
                 dt_inst = Pdvm_DateTime("DEU")
                 dt_inst.PdvmDateTime = float(timestamp_float)
                 

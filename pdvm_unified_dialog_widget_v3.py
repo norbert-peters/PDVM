@@ -27,7 +27,7 @@ import json
 
 # Import PDVM modules
 try:
-    from pd_datetime import Pdvm_DateTime
+    from pdvm_datetime import Pdvm_DateTime
     from pdvm_central_datenbank import PdvmCentralDatenbank
 except ImportError as e:
     logging.warning(f"PDVM Basis-Module nicht verfügbar: {e}")

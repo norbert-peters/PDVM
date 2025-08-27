@@ -22,7 +22,7 @@ from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont
 
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from pd_datetime import Pdvm_DateTime
+from pdvm_datetime import Pdvm_DateTime
 
 logger = logging.getLogger(__name__)
 

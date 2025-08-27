@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from pdvm_dropdown_picker import PdvmDropdownPicker
 from pdvm_date_time_picker import PdvmDateTimePicker
-from pd_datetime import Pdvm_DateTime, getFormTimeStamp
+from pdvm_datetime import Pdvm_DateTime, getFormTimeStamp
 import logging
 
 logger = logging.getLogger(__name__)

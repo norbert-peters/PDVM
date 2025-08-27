@@ -1,7 +1,7 @@
 # pdvm_date_time_picker.py
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QDateEdit, QTimeEdit, QAbstractSpinBox
 from PyQt5.QtCore import QDate, QTime
-from pd_datetime import Pdvm_DateTime, PdvmDateTimeUtils
+from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 
 import logging
 logger = logging.getLogger(__name__)

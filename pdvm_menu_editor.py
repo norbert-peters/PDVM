@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt
 import logging
 
 logger = logging.getLogger(__name__)
-logger.info("🔹 PdvmMenuEdditor gestartet")
+logger.info("🔹 PdvmMenuEditor gestartet")
 
 
 class PdvmMenuEditor(QWidget):

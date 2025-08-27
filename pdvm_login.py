@@ -107,10 +107,42 @@ class LoginApp(QWidget):
             QMessageBox.critical(self, "Login fehlgeschlagen", "Falsches Passwort.")
 
     def _open_main_app(self, user_daten):
-        self.close()
-        # Hier starten wir erst die MainApp mit den validierten user_daten:
-        self.main_window = self.main_app_class(user_daten)
-        self.main_window.show()
+        """
+        🎯 POST-LOGIN: MainApp mit vorab-initialisierter CentralSystemsteuerung starten
+        
+        ARCHITEKTUR:
+        1. Login erfolgreich -> user_guid verfügbar
+        2. CentralSystemsteuerung DIREKT initialisieren mit user_guid
+        3. Erst DANN MainApp erstellen (kann sofort auf globale Systemsteuerung zugreifen)
+        """
+        try:
+            # user_guid aus Login-Daten extrahieren
+            user_guid = user_daten[3]  # [email, password, user_json, guid]
+            logger.info(f"🎯 Post-Login: Initialisiere CentralSystemsteuerung für user_guid: {user_guid}")
+
+            # ZENTRALE SYSTEMSTEUERUNG VOR MainApp-Erstellung initialisieren
+            from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung
+            import central_systemsteuerung_global
+
+            central_systemsteuerung_global.central_systemsteuerung = PdvmCentralSystemsteuerung(
+                user_guid=user_guid,
+                db_name="PdvmManager.db"
+            )
+            logger.info("🎛️ PdvmCentralSystemsteuerung initialisiert (global)")
+            logger.info("🎯 ExpertMode verfügbar über: central_systemsteuerung_global.central_systemsteuerung.global_expert_mode")
+
+            # Login-Dialog schließen
+            self.close()
+
+            # Erst JETZT MainApp mit bereits verfügbarer globaler Systemsteuerung starten
+            self.main_window = self.main_app_class(user_daten)
+            self.main_window.show()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei MainApp-Initialisierung: {e}")
+            QMessageBox.critical(self, "Systemfehler", f"Anwendung konnte nicht gestartet werden: {e}")
+            # Bei Fehler Login-Dialog nicht schließen
+            return
 
 
 # Falls du direkt nur die LoginApp testen willst:

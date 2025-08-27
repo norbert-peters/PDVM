@@ -22,7 +22,7 @@ import json
 
 # Import PDVM modules (optional)
 try:
-    from pd_datetime import Pdvm_DateTime
+    from pdvm_datetime import Pdvm_DateTime
     from pdvm_central_datenbank import PdvmCentralDatenbank
     PDVM_AVAILABLE = True
 except ImportError as e:

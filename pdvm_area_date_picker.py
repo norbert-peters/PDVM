@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QIntValidator
-from pd_datetime import Pdvm_DateTime, PdvmDateTimeUtils
+from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 import logging
 
 logger = logging.getLogger(__name__)

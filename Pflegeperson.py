@@ -1,6 +1,6 @@
 import Personalstamm as ps
 import allgemeines as all
-from pd_datetime import Pdvm_DateTime as pdd
+from pdvm_datetime import Pdvm_DateTime as pdd
 import pdvm_datenbank as db
 import pdvm_default as pd_df
 

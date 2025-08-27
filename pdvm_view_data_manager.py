@@ -62,43 +62,27 @@ class PdvmViewDataManager:
 
     def _load_view_configuration(self):
         """Lädt die View-Konfiguration aus der Datenbank."""
-        try:
-            view_db = PdvmCentralDatenbank(
-                db_name="PdvmManager.db",
-                table_name="viewdaten",
-                guid=self.view_guid
-            )
-            self.view_config = view_db.lesen()
-            if not self.view_config:
-                raise ValueError(f"View-Konfiguration nicht gefunden für GUID: {self.view_guid}")
-            # ROOT-Konfiguration extrahieren
-            root_config = self.view_config.get("ROOT", {})
-            self.table_name = root_config.get("view_table")
-            if not self.table_name:
-                raise ValueError("Kein view_table in ROOT-Konfiguration gefunden")
-            # Feld-Konfigurationen extrahieren
-            metadata = self.view_config.get("metadata", {})
-            table_metadata = metadata.get(self.table_name, {})
-            self.fields_config = table_metadata.get("felder", [])
-            # View-Parameter laden
-            self.show_YMD = root_config.get("show_YMD", False)
-            self.show_alter = root_config.get("show_alter", False)
-            # Sortierungs-Einstellungen pro Feld
-            for field_config in self.fields_config:
-                field_name = field_config.get("feld")
-                if field_name:
-                    self.sort_by_original[field_name] = field_config.get("sortByOriginal", False)
-            logger.info(f"✅ View-Konfiguration geladen: {self.table_name}")
-            logger.info(f"📊 Parameter: show_YMD={self.show_YMD}, show_alter={self.show_alter}")
-            logger.info(f"🔢 Felder mit Original-Sortierung: {[k for k, v in self.sort_by_original.items() if v]}")
-            # Datenbank-Manager für Zieltabelle
-            self.db_manager = PdvmCentralDatenbank(
-                db_name="PdvmManager.db",
-                table_name=self.table_name
-            )
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Laden der View-Konfiguration: {e}")
-            raise
+#        try:
+        view_db = PdvmCentralDatenbank(
+            db_name="PdvmManager.db",
+            table_name="viewdaten",
+            guid=self.view_guid
+        )
+        self.table_name = view_db.get_value("ROOT","VIEW_TABLE",self.stichtag)
+        logger.debug(f"🔄 Lade Tabellenname: {self.table_name}")
+        if not self.table_name:
+            raise ValueError("Kein view_table in ROOT-Konfiguration gefunden")
+        # Feld-Konfigurationen extrahieren
+        table_metadata = view_db.get_value("METADATEN",self.table_name.upper(), self.stichtag)
+        self.fields_config = table_metadata.get("felder", [])
+        # Datenbank-Manager für Zieltabelle
+        self.db_manager = PdvmCentralDatenbank(
+            db_name="PdvmManager.db",
+            table_name=self.table_name
+        )
+#        except Exception as e:
+#            logger.error(f"❌ Fehler beim Laden der View-Konfiguration: {e}")
+#            raise
 
     def _load_user_settings(self):
         """Lädt Benutzer-Einstellungen aus systemsteuerung"""
@@ -142,7 +126,7 @@ class PdvmViewDataManager:
         """
         try:
             if stichtag is None:
-                from pd_datetime import Pdvm_DateTime
+                from pdvm_datetime import Pdvm_DateTime
                 dt_inst = Pdvm_DateTime("DEU")
                 stichtag = dt_inst.PdvmDateTimeNow()
             # Daten und Controls gemeinsam laden
