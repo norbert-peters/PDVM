@@ -80,14 +80,15 @@ class PdvmViewDatenManager:
     
     @property
     def stichtag(self):
-        """Zentrale Stichtag-Property"""
+        """Zentrale Stichtag-Property: Holt immer den Wert aus der globalen Systemsteuerung."""
         try:
-            if (hasattr(self, '_parent_app') and self._parent_app and 
-                hasattr(self._parent_app, 'stichtag_manager') and 
-                self._parent_app.stichtag_manager):
-                return self._parent_app.stichtag_manager.akt_stichtag
+            import pdvm_central_systemsteuerung_global
+            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+            if gcs:
+                return gcs.global_stichtag
             return 1001.0
-        except:
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Zugriff auf zentralen Stichtag: {e}")
             return 1001.0
     
     def _build_system(self):

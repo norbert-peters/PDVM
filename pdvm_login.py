@@ -122,9 +122,9 @@ class LoginApp(QWidget):
 
             # ZENTRALE SYSTEMSTEUERUNG VOR MainApp-Erstellung initialisieren
             from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung
-            import central_systemsteuerung_global
+            import pdvm_central_systemsteuerung_global
 
-            central_systemsteuerung_global.central_systemsteuerung = PdvmCentralSystemsteuerung(
+            pdvm_central_systemsteuerung_global.central_systemsteuerung = PdvmCentralSystemsteuerung(
                 user_guid=user_guid,
                 db_name="PdvmManager.db"
             )

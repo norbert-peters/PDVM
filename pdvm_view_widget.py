@@ -15,8 +15,8 @@ from PyQt5.QtCore import Qt
 # GLOBALE IMPORTS: Einfacher Zugriff auf zentrale Funktionen
 
 # Globale Instanz direkt importieren
-import central_systemsteuerung_global
-gcs = central_systemsteuerung_global.central_systemsteuerung
+import pdvm_central_systemsteuerung_global
+gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class PdvmViewWidget(QWidget):
     def __init__(self, call_daten, parent=None, reload_callback=None):
         super().__init__(parent)
         self.call_daten = call_daten
-        # BEREINIGT: self.stichtag entfernt - verwende zentrale StichtagManager
+    # self.stichtag entfernt - verwende zentralen Stichtag aus Systemsteuerung
         self.view_manager = None
         self.reload_callback = reload_callback  # Parent-Callback für echten Reload
         
@@ -75,27 +75,6 @@ class PdvmViewWidget(QWidget):
             logger.debug(f"⚠️ Verzögerte ExpertMode-Synchronisation noch nicht möglich: {e}")
             # Nicht weiter versuchen - lokaler Wert bleibt
 
-    # 🎯 SUPER ELEGANTE PROPERTY: Direkte Delegation an CentralSystemsteuerung
-    def __get_expert_mode(self):
-        """🎯 ELEGANT: ExpertMode aus CentralSystemsteuerung - super einfach!"""
-        try:
-            return gcs.global_expert_mode  # 🎯 EINE ZEILE!
-        except Exception as e:
-            logger.debug(f"⚠️ Zentrale Systemsteuerung nicht verfügbar - lokaler Cache: {e}")
-            return getattr(self, 'expert_mode', False)  # Fallback
-
-    def __set_expert_mode(self, value):
-        """🎯 ELEGANT: ExpertMode in CentralSystemsteuerung speichern - super einfach!"""
-        try:
-            gcs.global_expert_mode = bool(value)  # 🎯 EINE ZEILE!
-            logger.info(f"✅ ExpertMode über zentrale Systemsteuerung gespeichert: {bool(value)}")
-        except Exception as e:
-            logger.warning(f"⚠️ Zentrale Systemsteuerung nicht verfügbar: {e}")
-            # Lokaler Fallback - wird beim nächsten Zugriff synchronisiert
-
-    # Property-Definition - bleibt gleich
-    global_expert_mode = property(__get_expert_mode, __set_expert_mode)
-
     def setup_ui(self):
         """UI Komponenten erstellen"""
         layout = QVBoxLayout(self)
@@ -103,18 +82,18 @@ class PdvmViewWidget(QWidget):
         # Header-Label hinzufügen
         from PyQt5.QtWidgets import QLabel
         
-        # BEREINIGT: Stichtag aus zentralem StichtagManager holen - OHNE Import
+    # Stichtag aus zentraler Systemsteuerung holen
         try:
-            # Versuch 1: Über Parent-App zugreifen
-            if hasattr(self.parent(), 'stichtag_manager') and self.parent().stichtag_manager:
-                current_stichtag = self.parent().stichtag_manager.akt_stichtag
-                logger.info(f"✅ Stichtag über Parent geholt: {current_stichtag}")
+            import pdvm_central_systemsteuerung_global
+            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+            if gcs:
+                current_stichtag = gcs.global_stichtag
+                logger.info(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
             else:
-                # Fallback: Standard-Anzeige
                 current_stichtag = "Login erforderlich"
-                logger.warning(f"⚠️ Parent-StichtagManager nicht verfügbar")
+                logger.warning(f"⚠️ Systemsteuerung nicht verfügbar")
         except Exception as e:
-            logger.warning(f"⚠️ Stichtag aus Manager nicht verfügbar: {e}")
+            logger.warning(f"⚠️ Stichtag aus Systemsteuerung nicht verfügbar: {e}")
             current_stichtag = "N/A"
         
         # Header-Zeile mit Titel und Einstellungs-Menü
@@ -190,9 +169,8 @@ class PdvmViewWidget(QWidget):
         view_header = self.call_daten.get('view_header', 'PDVM View')
         
         if self.expert_mode:
-            # ExpertMode: view_header + Stichtag aus ViewManager
-            stichtag_text = self.view_manager.stichtag if self.view_manager else current_stichtag
-            header_text = f"{view_header} - Stichtag: {stichtag_text}"
+            # ExpertMode: view_header + zentraler Stichtag
+            header_text = f"{view_header} - Stichtag: {current_stichtag}"
         else:
             # NormalMode: nur view_header
             header_text = view_header
@@ -210,22 +188,17 @@ class PdvmViewWidget(QWidget):
         current_stichtag = "N/A"
         
         try:
-            # Versuch 1: Aus call_daten 
-            if 'stichtag' in self.call_daten:
-                current_stichtag = self.call_daten['stichtag']
-                logger.debug(f"✅ Stichtag aus call_daten: {current_stichtag}")
-            # Versuch 2: Aus Parent StichtagManager
-            elif hasattr(self.parent(), 'stichtag_manager') and self.parent().stichtag_manager:
-                current_stichtag = self.parent().stichtag_manager.akt_stichtag
-                logger.debug(f"✅ Stichtag aus Parent StichtagManager: {current_stichtag}")
-            # Versuch 3: Aus self.stichtag falls vorhanden
-            elif hasattr(self, 'stichtag'):
-                current_stichtag = self.stichtag
-                logger.debug(f"✅ Stichtag aus self.stichtag: {current_stichtag}")
+            import pdvm_central_systemsteuerung_global
+            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+            if gcs:
+                current_stichtag = gcs.global_stichtag
+                logger.debug(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
             else:
+                current_stichtag = "N/A"
                 logger.warning("⚠️ Kein Stichtag verfügbar - verwende N/A")
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Stichtag-Abruf: {e}")
+            current_stichtag = "N/A"
         
         # Header-Text neu erstellen und setzen
         if self.header_label:
@@ -329,20 +302,20 @@ class PdvmViewWidget(QWidget):
         """
         # BEREINIGT: ExpertMode ist bereits beim Widget-Init geladen - kein Lazy Loading nötig!
         
-        # BEREINIGT: Stichtag aus zentralem StichtagManager holen - OHNE Import
+        # Stichtag aus zentraler Systemsteuerung holen
         try:
-            # Versuch 1: Über Parent-App zugreifen
-            if hasattr(self.parent(), 'stichtag_manager') and self.parent().stichtag_manager:
-                current_stichtag = self.parent().stichtag_manager.akt_stichtag
-                logger.info(f"✅ Stichtag über Parent geholt: {current_stichtag}")
+            import pdvm_central_systemsteuerung_global
+            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+            if gcs:
+                current_stichtag = gcs.global_stichtag
+                logger.info(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
             else:
-                # Fallback: Standard-Stichtag
                 current_stichtag = 2025216.0
-                logger.warning(f"⚠️ Parent-StichtagManager nicht verfügbar, Fallback: {current_stichtag}")
+                logger.warning(f"⚠️ Systemsteuerung nicht verfügbar, Fallback: {current_stichtag}")
         except Exception as e:
-            logger.warning(f"⚠️ Stichtag aus Manager nicht verfügbar: {e}")
+            logger.warning(f"⚠️ Stichtag aus Systemsteuerung nicht verfügbar: {e}")
             current_stichtag = 2025216.0
-        
+
         logger.info(f"📊 Load data mit zentralem Stichtag: {current_stichtag}")
         
         try:
@@ -361,11 +334,7 @@ class PdvmViewWidget(QWidget):
                 initial_call_data.pop('stichtag', None)
                 
                 from pdvm_view_daten_manager import PdvmViewDatenManager
-                # Parent-App für StichtagManager-Zugriff übergeben
-                if hasattr(self, 'parent') and self.parent():
-                    self.view_manager = PdvmViewDatenManager(initial_call_data, parent_app=self.parent())
-                else:
-                    self.view_manager = PdvmViewDatenManager(initial_call_data)
+                self.view_manager = PdvmViewDatenManager(initial_call_data)
             else:
                 # Fall 2: Bestehenden ViewManager für Stichtag-Refresh verwenden
                 logger.info("🔄 Verwende bestehenden ViewManager (first_call=False - nur Refresh)")

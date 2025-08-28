@@ -29,9 +29,8 @@ from PyQt5.QtGui import QFont
 
 # 🔒 SICHERE IMPORTS: Nur grundlegende Komponenten - Handler werden lazy geladen
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from pdvm_central_stichtag_manager import PdvmCentralStichtagManager
 from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung
-import central_systemsteuerung_global
+import pdvm_central_systemsteuerung_global
 
 # 🔒 LAZY IMPORTS: Werden erst nach Login geladen
 # from pdvm_login import LoginApp                 # ← Lazy Import
@@ -39,40 +38,6 @@ import central_systemsteuerung_global
 # from pdvm_menu_handler import PdvmMenuHandler        # ← Lazy Import
 # from pdvm_menu_editor import PdvmMenuEditor          # ← Lazy Import
 
-# GLOBALE STICHTAG-MANAGER INSTANZ für zentrale Architektur
-_global_stichtag_manager = None
-_global_central_systemsteuerung = None
-
-def get_global_stichtag_manager():
-    """
-    🎯 GLOBALER ZUGRIFF: Zentrale StichtagManager-Instanz abrufen
-    
-    Wird nach erfolgreichem Login in MainApp initialisiert.
-    Ermöglicht allen Komponenten (Widget, ViewManager) zentralen Stichtag-Zugriff.
-    
-    Returns:
-        PdvmCentralStichtagManager: Die globale StichtagManager-Instanz
-        
-    Raises:
-        RuntimeError: Falls noch nicht initialisiert
-    """
-    global _global_stichtag_manager
-    if _global_stichtag_manager is None:
-        raise RuntimeError("❌ Globaler StichtagManager noch nicht initialisiert! Login erforderlich.")
-    return _global_stichtag_manager
-
-def set_global_stichtag_manager(stichtag_manager):
-    """
-    🎯 GLOBALE INITIALISIERUNG: StichtagManager-Instanz setzen
-    
-    Wird von MainApp nach erfolgreicher Initialisierung aufgerufen.
-    
-    Args:
-        stichtag_manager (PdvmCentralStichtagManager): Die zu setzende Instanz
-    """
-    global _global_stichtag_manager
-    _global_stichtag_manager = stichtag_manager
-    logger.info("🎯 Globaler StichtagManager gesetzt - zentrale Architektur aktiv")
 
             
 
@@ -141,7 +106,6 @@ class MainApp(QMainWindow):
         # NEUER ZENTRALER STICHTAG-BALKEN nach Systemsteuerung-Initialisierung
         logger.info("🔧 Erstelle Stichtag-Balken...")
         self.stichtag_bar = self._create_stichtag_bar()
-        
         if self.stichtag_bar:
             logger.info("✅ Stichtag-Balken erstellt, füge zu Layout hinzu...")
             self.content_layout.insertWidget(0, self.stichtag_bar)  # Am Anfang einfügen
@@ -174,12 +138,11 @@ class MainApp(QMainWindow):
         from PyQt5.QtGui import QFont
         from pdvm_date_time_picker import PdvmDateTimePicker
         
-        # Prüfe StichtagManager zuerst
-        if not hasattr(self, 'stichtag_manager') or not self.stichtag_manager:
-            logger.error("❌ Stichtag-Manager nicht verfügbar - kann Balken nicht erstellen")
-            return QLabel("❌ Stichtag-Manager nicht verfügbar")
-            
-        logger.info("✅ Stichtag-Manager verfügbar")
+        # Prüfe zentrale Systemsteuerung
+        if not hasattr(self, 'central_systemsteuerung') or not self.central_systemsteuerung:
+            logger.error("❌ Zentrale Systemsteuerung nicht verfügbar - kann Balken nicht erstellen")
+            return QLabel("❌ Systemsteuerung nicht verfügbar")
+        logger.info("✅ Systemsteuerung verfügbar")
         
         # Hauptcontainer für Stichtag-Balken
         stichtag_widget = QFrame()
@@ -205,28 +168,22 @@ class MainApp(QMainWindow):
         layout.addWidget(stichtag_label)
         logger.info("✅ Stichtag-Label hinzugefügt")
         
-        # PdvmDateTimePicker mit der ZENTRALEN Instanz aus dem StichtagManager
+        # Stichtag-Instanz aus Systemsteuerung holen (neue Architektur)
         try:
-            central_pdvm_datetime = self.stichtag_manager.get_pdvm_datetime()
-            logger.info(f"✅ Zentrale PdvmDateTime-Instanz erhalten: {central_pdvm_datetime.PdvmDateTime}")
-            
-            # PdvmDateTimePicker - der bewährte Picker mit der zentralen Instanz!
+            stichtag_inst = self.central_systemsteuerung.global_stichtag_inst
+            # PdvmDateTimePicker arbeitet direkt auf der Instanz
             self.stichtag_picker = PdvmDateTimePicker(
                 parent=self,
-                pdvm_datetime=central_pdvm_datetime,  # ← ZENTRALE INSTANZ!
-                display="all",  # Datum + Zeit
-                display_time_short=False  # Mit Sekunden
+                pdvm_datetime=stichtag_inst,  # Instanz!
+                display="all",
+                display_time_short=False
             )
-            
-            # Kalender-Popup-Optimierung für bessere Darstellung
             if hasattr(self.stichtag_picker, '_date_edit'):
                 calendar = self.stichtag_picker._date_edit.calendarWidget()
                 if calendar:
-                    calendar.setMinimumSize(350, 220)  # Mindestgröße für bessere Spalten-Darstellung
-            
+                    calendar.setMinimumSize(350, 220)
             layout.addWidget(self.stichtag_picker)
-            logger.info("✅ PdvmDateTimePicker erstellt und hinzugefügt")
-            
+            logger.info("✅ PdvmDateTimePicker (Instanz) erstellt und hinzugefügt")
         except Exception as e:
             logger.error(f"❌ Fehler beim Erstellen des PdvmDateTimePicker: {e}")
             return QLabel(f"❌ Fehler beim Erstellen des DateTimePicker: {e}")
@@ -290,16 +247,14 @@ class MainApp(QMainWindow):
         Verwendet PdvmTimeStamp aus der zentralen Stichtag-Instanz.
         """
         try:
-            if hasattr(self, 'stichtag_manager') and self.stichtag_manager:
-                # Hole die zentrale PdvmDateTime-Instanz
-                central_datetime = self.stichtag_manager.get_pdvm_datetime()
-                # Verwende PdvmTimeStamp Property für die Anzeige
-                timestamp_display = central_datetime.FormTimeStamp
-                self.stichtag_display.setText(timestamp_display)
-                logger.debug(f"🔄 Stichtag-Anzeige aktualisiert: {timestamp_display}")
+            if hasattr(self, 'central_systemsteuerung') and self.central_systemsteuerung:
+                stichtag_inst = self.central_systemsteuerung.global_stichtag_inst
+                # Anzeige als PdvmTimeStamp (schönes Format)
+                self.stichtag_display.setText(str(getattr(stichtag_inst, 'FormTimeStamp', stichtag_inst.PdvmDateTime)))
+                logger.debug(f"🔄 Stichtag-Anzeige aktualisiert: {getattr(stichtag_inst, 'FormTimeStamp', stichtag_inst.PdvmDateTime)}")
             else:
-                self.stichtag_display.setText("Stichtag-Manager lädt...")
-                logger.warning("⚠️ Stichtag-Manager nicht verfügbar für Display-Update")
+                self.stichtag_display.setText("Stichtag lädt...")
+                logger.warning("⚠️ Systemsteuerung nicht verfügbar für Display-Update")
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren der Stichtag-Anzeige: {e}")
             self.stichtag_display.setText("Fehler beim Laden")
@@ -315,29 +270,21 @@ class MainApp(QMainWindow):
         4. Aktuellen Menüpunkt neu laden (zukünftig)
         """
         try:
-            logger.info("🔄 Stichtag-Refresh ausgelöst")
-            
-            # 1. Picker-Werte in zentrale Instanz übertragen
-            old_stichtag = self.stichtag_manager.get_stichtag_float()
-            self.stichtag_picker.save()  # ← Ändert direkt die zentrale Instanz!
-            new_stichtag = self.stichtag_manager.get_stichtag_float()
-            
-            # 2. Manager über Änderung informieren (für Persistierung)
-            if old_stichtag != new_stichtag:
-                self.stichtag_manager.set_stichtag(new_stichtag)  # Speichert in DB
-                logger.info(f"✅ Stichtag erfolgreich geändert: {old_stichtag} → {new_stichtag}")
-            else:
-                logger.debug("ℹ️ Stichtag nicht geändert")
-                
-            # 3. Anzeige aktualisieren  
+            logger.info("🔄 Stichtag-Refresh ausgelöst (neue Instanz-Architektur)")
+            if hasattr(self, 'central_systemsteuerung') and self.central_systemsteuerung:
+                # 1. Picker speichert direkt in die Instanz
+                if hasattr(self.stichtag_picker, 'save'):
+                    self.stichtag_picker.save()
+                    logger.info("✅ Picker.save() ausgeführt → Wert in Instanz geschrieben")
+                # 2. Persistiere über zentrale Systemsteuerung
+                self.central_systemsteuerung.save_stichtag()
+                logger.info("✅ Stichtag in DB gespeichert (save_stichtag)")
+            # 3. Anzeige aktualisieren
             self._update_stichtag_display()
-            
-            # 4. Aktuellen Menüpunkt neu laden (TODO: Zukünftige Erweiterung)
+            # 4. Aktuellen Menüpunkt neu laden (wie gehabt)
             self._reload_current_menu_content()
-            
         except Exception as e:
             logger.error(f"❌ Fehler beim Stichtag-Refresh: {e}")
-            # Bei Fehler Anzeige auf ursprünglichen Wert zurücksetzen
             self._update_stichtag_display()
 
     def _reload_current_menu_content(self):
@@ -467,34 +414,14 @@ class MainApp(QMainWindow):
         try:
             # 🎯 GLOBALE SYSTEMSTEUERUNG BEREITS VERFÜGBAR: Vom Login initialisiert
             # Zugriff auf globale Instanz aus dem zentralen Modul
-            self.central_systemsteuerung = central_systemsteuerung_global.central_systemsteuerung
+            self.central_systemsteuerung = pdvm_central_systemsteuerung_global.central_systemsteuerung
             if self.central_systemsteuerung is None:
                 raise RuntimeError("❌ Globale Central-Systemsteuerung nicht initialisiert! Login erforderlich.")
             
-            # ZENTRALER STICHTAG-MANAGER initialisieren (benötigt MainApp-Kontext)
-            self.stichtag_manager = PdvmCentralStichtagManager(
-                central_systemsteuerung=self.central_systemsteuerung._db,  # DB-Layer für Manager
-                user_guid=self.user_guid,
-                initial_stichtag="2025216"
-            )
-            
-            # 🎯 GLOBALE VERFÜGBARKEIT: StichtagManager setzen
-            set_global_stichtag_manager(self.stichtag_manager)
-            logger.info("🎯 Globaler StichtagManager initialisiert - zentrale Architektur vollständig")
-            
-            # Kompatibilität: self.stichtag für Legacy-Code bereitstellen
-            self.stichtag = self.stichtag_manager.get_stichtag_string()
-            
-            # Signal-Verbindung für Stichtag-Updates
-            self.stichtag_manager.stichtag_changed.connect(self._on_stichtag_changed)
-            
             # Sprache laden - jetzt über elegante Property
             self.language = self.central_systemsteuerung.language
-            
-            logger.info(f"🎛️ Zentrale Architektur bereit: Stichtag={self.stichtag_manager.get_formatted_stichtag()}, Sprache={self.language}")
-            logger.info(f"🗓️ Zentraler Stichtag-Manager aktiv - einheitliche Stichtag-Verwaltung")
+            logger.info(f"🎛️ Zentrale Architektur bereit: Stichtag={self.central_systemsteuerung.global_stichtag}, Sprache={self.language}")
             logger.info(f"🎯 ExpertMode verfügbar über: central_systemsteuerung.global_expert_mode")
-            
             # Stichtag-Balken nach vollständiger Initialisierung aktualisieren
             self._refresh_stichtag_bar_after_init()
             
@@ -505,24 +432,6 @@ class MainApp(QMainWindow):
             self.stichtag_manager = None
             self.stichtag = "2025216"
             self.language = "DE"
-
-    def _on_stichtag_changed(self, new_stichtag_float):
-        """Callback für Stichtag-Änderungen - aktualisiert Legacy-Kompatibilität"""
-        self.stichtag = str(int(new_stichtag_float))
-        logger.info(f"🔄 Legacy-Stichtag aktualisiert: {self.stichtag}")
-
-    def get_stichtag_manager(self):
-        """
-        Gibt den zentralen Stichtag-Manager zurück
-        
-        Returns:
-            PdvmCentralStichtagManager: Der zentrale Stichtag-Manager
-        """
-        if hasattr(self, 'stichtag_manager') and self.stichtag_manager:
-            return self.stichtag_manager
-        else:
-            logger.warning("⚠️ Stichtag-Manager nicht verfügbar")
-            return None
 
     def _refresh_stichtag_bar_after_init(self):
         """Aktualisiert die Stichtag-Balken nach der vollständigen Initialisierung"""
@@ -729,12 +638,6 @@ class MainApp(QMainWindow):
         
         try:
             logger.info(f"🎯 PDVM Modern View gestartet für Frame: {frame_guid}")
-            
-            # PRÜFUNG: StichtagManager muss verfügbar sein
-            if not hasattr(self, 'stichtag_manager') or not self.stichtag_manager:
-                logger.error("❌ StichtagManager nicht verfügbar - Login erforderlich")
-                self._show_label("❌ Bitte zuerst einloggen!", small=False, clear_content=False)
-                return
             
             # Frame-Daten laden
             framedaten_db = PdvmCentralDatenbank(
@@ -970,10 +873,9 @@ class MainApp(QMainWindow):
         
         try:
             # Globale Instanzen zurücksetzen (Sicherheit!)
-            global _global_stichtag_manager, _global_central_systemsteuerung
-            _global_stichtag_manager = None
+            global _global_central_systemsteuerung
             _global_central_systemsteuerung = None
-            logger.info("🧹 Globale Systemsteuerung-Instanzen zurückgesetzt")
+            logger.info("🧹 Globale Systemsteuerung-Instanz zurückgesetzt")
             
             # Sauberes Beenden der Anwendung
             QApplication.quit()

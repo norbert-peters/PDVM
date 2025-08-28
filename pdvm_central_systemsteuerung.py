@@ -14,6 +14,7 @@ Architektur:
 
 import logging
 from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 
 logger = logging.getLogger(__name__)
 
@@ -26,41 +27,85 @@ class PdvmCentralSystemsteuerung:
     
     def __init__(self, user_guid, db_name="PdvmManager.db"):
         """
-        Initialisiert die zentrale Systemsteuerung
-        
-        Args:
-            user_guid (str): GUID des Benutzers
-            db_name (str): Name der Datenbank
+        Initialisiert die zentrale Systemsteuerung für einen Benutzer.
+        - Legt immer die Stichtag-Instanz für user_guid an (wird immer benötigt)
+        - ExpertMode wird nicht mehr im Init initialisiert, sondern on-demand
         """
         self.user_guid = user_guid
-        
-        # PdvmCentralDatenbank für Persistierung
         self._db = PdvmCentralDatenbank(
             db_name=db_name,
             table_name="systemsteuerung",
             guid=user_guid
         )
-        
         logger.info(f"🎛️ CentralSystemsteuerung initialisiert für User: {user_guid}")
+        # Stichtag-Instanz immer initialisieren (wird überall benötigt)
+        self._init_stichtag_inst()
 
-        # Sicherstellen, dass ExpertMode immer initialisiert ist
-        try:
-            expert_mode_data = self._db.get_value(
+    # =================================================================
+    # STICHTAG PROPERTY - Globaler Stichtag für die gesamte Anwendung
+    # =================================================================
+    def _init_stichtag_inst(self):
+        """
+        Initialisiert die Stichtag-Instanz für user_guid und legt sie immer an.
+        Schützt vor property-Objekten als Wert.
+        """
+        stichtag_data = self._db.get_value(
+            gruppe=self.user_guid,
+            feld="stichtag",
+            ab_zeit=1001.0
+        )
+        if stichtag_data is None or stichtag_data.get("wert") is None:
+            aktueller_stichtag = PdvmDateTimeUtils.PdvmDateTimeNow
+            stichtag_wert = aktueller_stichtag
+            self._db.set_value(
                 gruppe=self.user_guid,
-                feld="ExpertMode",
-                ab_zeit=None
+                feld="stichtag",
+                wert=stichtag_wert,
+                ab_zeit=1001.0
             )
-            if expert_mode_data is None or "wert" not in expert_mode_data:
-                logger.info("🔧 Initialisiere ExpertMode für neuen User auf False")
-                self._db.set_value(
-                    gruppe=self.user_guid,
-                    feld="ExpertMode",
-                    wert=False,
-                    ab_zeit=1001.0
-                )
-                self._db.save_values()
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler bei Initialisierung von ExpertMode: {e}")
+            self._db.save_values()
+            logger.info(f"🔧 Initialisiere Stichtag für neuen User auf {aktueller_stichtag}")
+        else:
+            stichtag_wert = stichtag_data.get("wert")
+        # Schutz: property-Objekte abfangen
+        if isinstance(stichtag_wert, property):
+            logger.error("Stichtag-Wert ist ein property-Objekt! Setze Default 1001.0.")
+            stichtag_wert = 1001.0
+        self._global_stichtag_inst = Pdvm_DateTime('DEU')
+        self._global_stichtag_inst.PdvmDateTime = stichtag_wert
+
+    @property
+    def global_stichtag(self):
+        """
+        Gibt den aktuellen Stichtag im PdvmFormat (float) zurück.
+        Instanz ist garantiert vorhanden (durch __init__).
+        """
+        return self._global_stichtag_inst.PdvmDateTime
+
+    @property
+    def global_stichtag_inst(self):
+        """
+        Gibt die globale Pdvm_DateTime Instanz zurück (immer vorhanden).
+        """
+        return self._global_stichtag_inst
+
+    def save_stichtag(self):
+        """
+        Persistiert den aktuellen Wert der globalen Stichtag-Instanz in der Datenbank.
+        Instanz ist garantiert vorhanden. Schützt vor property-Objekten.
+        """
+        wert = self._global_stichtag_inst.PdvmDateTime
+        if isinstance(wert, property):
+            logger.error("Stichtag-Wert ist ein property-Objekt beim Speichern! Setze Default 1001.0.")
+            wert = 1001.0
+        self._db.set_value(
+            gruppe=self.user_guid,
+            feld="stichtag",
+            wert=wert,
+            ab_zeit=1001.0
+        )
+        self._db.save_values()
+        logger.info(f"✅ Stichtag gespeichert: {wert}")
 
     # =================================================================
     # EXPERT MODE PROPERTY - Elegant und linear
@@ -69,10 +114,7 @@ class PdvmCentralSystemsteuerung:
     @property
     def global_expert_mode(self):
         """
-        🎯 ELEGANT: ExpertMode aus Systemsteuerung lesen
-        
-        Returns:
-            bool: True wenn ExpertMode aktiv, sonst False
+        ExpertMode aus Systemsteuerung lesen. Falls nicht vorhanden, wird automatisch auf False gesetzt und zurückgegeben.
         """
         try:
             expert_mode_data = self._db.get_value(
@@ -80,21 +122,24 @@ class PdvmCentralSystemsteuerung:
                 feld="ExpertMode",
                 ab_zeit=None
             )
-            
-            if expert_mode_data is None:
-                logger.debug("🔧 ExpertMode nicht gesetzt - verwende Standard: False")
+            if expert_mode_data is None or "wert" not in expert_mode_data:
+                # Wert anlegen, falls nicht vorhanden
+                self._db.set_value(
+                    gruppe=self.user_guid,
+                    feld="ExpertMode",
+                    wert=False,
+                    ab_zeit=1001.0
+                )
+                self._db.save_values()
+                logger.debug("🔧 ExpertMode nicht gesetzt - lege False an und gebe False zurück")
                 return False
-            
-            # Wert extrahieren und zu Boolean konvertieren
             wert = expert_mode_data.get("wert", False)
             if isinstance(wert, str):
                 result = wert.upper() == "TRUE"
             else:
                 result = bool(wert)
-            
             logger.debug(f"✅ ExpertMode geladen: {result}")
             return result
-            
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Laden von ExpertMode: {e}")
             return False
@@ -102,27 +147,18 @@ class PdvmCentralSystemsteuerung:
     @global_expert_mode.setter
     def global_expert_mode(self, value):
         """
-        🎯 ELEGANT: ExpertMode in Systemsteuerung speichern
-        
-        Args:
-            value (bool): Neuer ExpertMode-Status
+        ExpertMode in Systemsteuerung speichern. Legt Wert immer an, falls nicht vorhanden.
         """
         try:
             bool_value = bool(value)
-            
-            # In Datenbank speichern
             self._db.set_value(
                 gruppe=self.user_guid,
                 feld="ExpertMode",
                 wert=bool_value,
-                ab_zeit=1001.0  # Standard-Zeitstempel
+                ab_zeit=1001.0
             )
-            
-            # Sofort persistieren
             self._db.save_values()
-            
             logger.info(f"✅ ExpertMode gespeichert: {bool_value}")
-            
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern von ExpertMode: {e}")
 

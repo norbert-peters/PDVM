@@ -519,10 +519,26 @@ class PdvmCentralDatenbank:
     def save_values(self):
         """
         Speichert (update) die Instanz in der Datenbank.
+        Prüft vor dem Serialisieren, ob nicht-serialisierbare Werte (z.B. property-Objekte) im Dict sind und entfernt sie.
         """
         logging.info(f"🔹 Datensatz mit GUID {self.guid} wird in der Datenbank gespeichert.")
-        self.speichern(self.guid, self.data)
-        logging.info(f"🔹 gespeicherte Daten: {json.dumps(self.data, indent=4)} ")
+        clean_data = self._remove_non_serializable(self.data)
+        self.speichern(self.guid, clean_data)
+        try:
+            logging.info(f"🔹 gespeicherte Daten: {json.dumps(clean_data, indent=4)} ")
+        except Exception as e:
+            logging.warning(f"⚠️ Fehler beim JSON-Dump der gespeicherten Daten: {e}")
+
+    def _remove_non_serializable(self, obj):
+        """
+        Entfernt nicht-serialisierbare Werte (z.B. property-Objekte) rekursiv aus Dictionaries.
+        """
+        if isinstance(obj, dict):
+            return {k: self._remove_non_serializable(v) for k, v in obj.items() if not isinstance(v, property)}
+        elif isinstance(obj, list):
+            return [self._remove_non_serializable(v) for v in obj]
+        else:
+            return obj
 
     def _normalize_historic_keys(self, gruppe: str, feld: str):
         """
