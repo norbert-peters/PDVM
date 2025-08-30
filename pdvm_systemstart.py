@@ -650,22 +650,37 @@ class MainApp(QMainWindow):
             if not view_guid:
                 logger.error(f"❌ Keine view_guid in Frame-Daten gefunden")
                 return
-            
-            # BEREINIGT: call_daten ohne 'stichtag' - Widget holt zentral
+
+            # Prüfe und ergänze 'mode' in zentraler Systemsteuerung, falls nicht vorhanden
+            mode_data = self.central_systemsteuerung.get_value(
+                gruppe=self.user_guid,
+                feld="mode",
+                ab_zeit=None
+            )
+            if not mode_data or "wert" not in mode_data:
+                self.central_systemsteuerung.set_value(
+                    gruppe=self.user_guid,
+                    feld="mode",
+                    wert="user",
+                    ab_zeit=1001.0
+                )
+                self.central_systemsteuerung.save_values()
+                logger.info("✅ 'mode' in Systemsteuerung initialisiert auf 'user'")
+
+
+            # BEREINIGT: call_daten ohne 'mode' und 'stichtag' - Widget holt zentral
             call_daten = {
                 "view_guid": view_guid,
                 "user_guid": self.user_guid,
-                # BEREINIGT: 'stichtag' entfernt - schädlich für zentrale Architektur
                 "view_header": "Übersicht Personaldaten",
-                "first_call": True,
-                "mode": "admin"  # Admin-Modus für Expert-Mode Zugang
+                "first_call": True
             }
-            
+
             logger.info(f"📋 call_daten: {call_daten}")
-            
+
             # PDVM View Widget erstellen
             from pdvm_view_widget import PdvmViewWidget
-            
+
             view_widget = PdvmViewWidget(
                 call_daten=call_daten,
                 parent=self,

@@ -41,6 +41,23 @@ class PdvmCentralSystemsteuerung:
         # Stichtag-Instanz immer initialisieren (wird überall benötigt)
         self._init_stichtag_inst()
 
+        # ExpertMode-Konsistenz: Wenn mode != 'admin', setze ExpertMode immer auf False
+        mode_data = self._db.get_value(
+            gruppe=self.user_guid,
+            feld="mode",
+            ab_zeit=None
+        )
+        mode_value = mode_data.get("wert", "user") if mode_data else "user"
+        if mode_value != 'admin':
+            self._db.set_value(
+                gruppe=self.user_guid,
+                feld="ExpertMode",
+                wert=False,
+                ab_zeit=1001.0
+            )
+            self._db.save_values()
+            logger.info("🔒 ExpertMode in Systemsteuerung auf False gesetzt (Init), da mode != 'admin'")
+
     # =================================================================
     # STICHTAG PROPERTY - Globaler Stichtag für die gesamte Anwendung
     # =================================================================

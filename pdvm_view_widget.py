@@ -24,47 +24,70 @@ class PdvmViewWidget(QWidget):
     def __init__(self, call_daten, parent=None, reload_callback=None):
         super().__init__(parent)
         self.call_daten = call_daten
-    # self.stichtag entfernt - verwende zentralen Stichtag aus Systemsteuerung
         self.view_manager = None
         self.reload_callback = reload_callback  # Parent-Callback für echten Reload
-        
+
         # ExpertMode-Status: 🎯 SUPER EINFACH mit neuer CentralSystemsteuerung
+
         try:
-            self.expert_mode = gcs.global_expert_mode  # 🎯 ELEGANT!
+            # Wenn mode != 'admin', setze global_expert_mode immer auf False (auch in DB!)
+            if self.mode != 'admin':
+                if gcs.global_expert_mode:
+                    gcs.global_expert_mode = False
+                    logger.info("🔒 ExpertMode wurde deaktiviert und in Systemsteuerung auf False gesetzt, da mode != 'admin'")
+                self.expert_mode = False
+            else:
+                # Nur wenn admin, Wert aus Systemsteuerung übernehmen
+                self.expert_mode = gcs.global_expert_mode
+            # Sicherstellen, dass Wert in DB immer konsistent ist
+            if self.mode != 'admin':
+                # Schreibe False in die Systemsteuerung, falls noch True
+                try:
+                    gcs.set_value(gruppe=gcs.user_guid, feld="ExpertMode", wert=False, ab_zeit=1001.0)
+                    gcs.save_values()
+                except Exception as e2:
+                    logger.warning(f"⚠️ Fehler beim Erzwingen von ExpertMode=False in Systemsteuerung: {e2}")
             logger.info(f"✅ ExpertMode aus zentraler Systemsteuerung geladen: {self.expert_mode}")
         except Exception as e:
             logger.warning(f"⚠️ Zentrale Systemsteuerung noch nicht verfügbar: {e}")
             self.expert_mode = False  # Lokaler Fallback
-            
+
+        # Lese 'mode' aus zentraler Systemsteuerung
+        try:
+            mode_data = gcs.get_value(gruppe=gcs.user_guid, feld="mode", ab_zeit=None)
+            self.mode = mode_data.get("wert", "user") if mode_data else "user"
+            logger.info(f"✅ Mode aus zentraler Systemsteuerung geladen: {self.mode}")
+        except Exception as e:
+            logger.warning(f"⚠️ Mode aus Systemsteuerung nicht verfügbar: {e}")
+            self.mode = "user"
+
         self.header_label = None  # Referenz auf Header-Label für Updates
-        
+
         # Versuche ExpertMode aus globaler Systemsteuerung zu laden
         self._initialize_expert_mode()
-        
+
         # UI Setup
         self.setup_ui()
-        
+
         # Daten laden
         self.load_data()
 
     def _initialize_expert_mode(self):
-        """
-        🎯 SUPER EINFACH: ExpertMode-Nachladung falls bei Init nicht verfügbar
-        
-        Wird nur aufgerufen wenn bei der ersten Initialisierung die zentrale
-        Systemsteuerung noch nicht verfügbar war.
-        """
-        # Nur wenn noch nicht geladen - sonst Überprüfung nach 1 Sekunde
+        # Set expert_mode from global system control
+        try:
+            self.expert_mode = gcs.global_expert_mode
+        except Exception as e:
+            logger.warning(f"⚠️ Zentrale Systemsteuerung noch nicht verfügbar: {e}")
+            self.expert_mode = False
+        # Falls beim ersten Init die zentrale Systemsteuerung noch nicht verfügbar war,
+        # versuche nach 1 Sekunde erneut zu synchronisieren.
         if not hasattr(self, '_expert_mode_loaded') or not self._expert_mode_loaded:
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(1000, self._delayed_expert_mode_sync)
 
     def _delayed_expert_mode_sync(self):
-        """
-        🎯 ELEGANT: Verzögerte ExpertMode-Synchronisation
-        """
+        # Verzögerte ExpertMode-Synchronisation
         try:
-            # 🎯 SUPER EINFACH: Ein Zugriff, fertig!
             current_mode = gcs.global_expert_mode
             if current_mode != self.expert_mode:
                 self.expert_mode = current_mode
@@ -233,28 +256,27 @@ class PdvmViewWidget(QWidget):
             """Zeigt aktualisiertes Menü basierend auf aktuellem Status"""
             # Menü erstellen
             settings_menu = QMenu(self)
-            
+
             # Menüpunkte hinzufügen
             # 1. Spalten verwalten
             action_spalten = QAction("📊 Spalten verwalten", self)
             action_spalten.triggered.connect(self.on_spalten_verwalten)
             settings_menu.addAction(action_spalten)
-            
+
             # 2. Experten Modus ein/aus (nur bei mode='admin')
-            admin_mode = self.call_daten.get('mode', '') == 'admin'
-            if admin_mode:
+            if self.mode == 'admin':
                 # Status-abhängiger Menütext - AKTUELLER Status
                 expert_status = "ausschalten" if self.expert_mode else "einschalten"
                 action_expert = QAction(f"🔧 Experten Modus {expert_status}", self)
                 action_expert.triggered.connect(self.on_expert_modus_toggle)
                 settings_menu.addAction(action_expert)
                 logger.debug(f"🔧 Experten Modus: '{expert_status}' (aktuell: {self.expert_mode})")
-            
+
             # 3. Filter ein/aus
             action_filter = QAction("🔍 Filter ein/aus", self)
             action_filter.triggered.connect(self.on_filter_toggle)
             settings_menu.addAction(action_filter)
-            
+
             # Menü anzeigen
             settings_menu.exec_(settings_button.mapToGlobal(settings_button.rect().bottomLeft()))
         
@@ -265,30 +287,57 @@ class PdvmViewWidget(QWidget):
         return settings_button
     
     def on_spalten_verwalten(self):
-        """Spalten verwalten - noch ohne Funktion"""
-        logger.info("📊 Spalten verwalten geklickt (noch ohne Funktion)")
+        """Spalten verwalten: Öffnet den Matrix-Spaltendialog und übernimmt Änderungen."""
+        try:
+            from pdvm_view_column_settings_dialog import ColumnSettingsDialog
+            import pdvm_central_systemsteuerung_global
+            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+            # Hole die aktuelle Spaltenprojektion und den Modus direkt aus dem Datenmanager
+            _, display_columns = self.view_manager.get_table_data_for_display()
+            columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
+            # Modus: 'all' = ExpertMode, 'show' = NormalMode
+            mode = 'all' if gcs.global_expert_mode else 'show'
+            dlg = ColumnSettingsDialog(columns, mode, self)
+            if dlg.exec_() and dlg.result_controls is not None:
+                # Schreibe die neuen Controls in die Systemsteuerung
+                persist_map = {col['name']: {
+                    'show': col['show'],
+                    'expertOrder': col['expertOrder'],
+                    'displayOrder': col['displayOrder']
+                } for col in dlg.result_controls}
+                gcs.set_value(gruppe=self.view_manager.view_guid, feld="ColumnControls", wert=persist_map, ab_zeit=1001.0)
+                gcs.save_values()
+                # Datenmanager komplett neu initialisieren (wie bei Mode-Wechsel)
+                call_daten = dict(self.view_manager.call_daten)
+                call_daten['first_call'] = False
+                from pdvm_view_daten_manager import PdvmViewDatenManager
+                self.view_manager = PdvmViewDatenManager(call_daten)
+                logger.info("✅ Spalteneinstellungen übernommen und Datenmanager neu initialisiert")
+                self.reload()
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Öffnen des Spaltendialogs: {e}")
         
     def on_expert_modus_toggle(self):
-        """
-        🎯 SUPER ELEGANT: ExpertMode umschalten - nur 3 Zeilen!
-        """
+        """Moduswechsel zwischen ExpertMode (all) und NormalMode (show) mit Persistenz in Systemsteuerung"""
         try:
-            # 🎯 ELEGANT: Toggle über Property - automatische Persistierung!
-            new_mode = not gcs.global_expert_mode
-            gcs.global_expert_mode = new_mode
-            self.expert_mode = new_mode  # Lokaler Cache sync
-            
-            logger.debug(f"🔧 ExpertMode umgeschaltet auf: {new_mode}")
-            
+            new_mode = not self.expert_mode
+            # Wert persistent in Systemsteuerung speichern
+            try:
+                gcs.set_value(gruppe=gcs.user_guid, feld="ExpertMode", wert=new_mode, ab_zeit=1001.0)
+                gcs.save_values()
+                logger.info(f"� ExpertMode in Systemsteuerung gespeichert: {new_mode}")
+            except Exception as e2:
+                logger.warning(f"⚠️ Fehler beim Speichern von ExpertMode in Systemsteuerung: {e2}")
+            # Wert aus Systemsteuerung holen (immer synchronisieren)
+            try:
+                self.expert_mode = gcs.global_expert_mode
+                logger.info(f"🔧 ExpertMode aus Systemsteuerung übernommen: {self.expert_mode}")
+            except Exception as e3:
+                logger.warning(f"⚠️ Fehler beim Lesen von ExpertMode aus Systemsteuerung: {e3}")
+                self.expert_mode = new_mode
+            self.reload()
         except Exception as e:
-            logger.warning(f"⚠️ ExpertMode Toggle fehlgeschlagen: {e}")
-            # Fallback: Lokaler Toggle
-            self.expert_mode = not getattr(self, 'expert_mode', False)
-            logger.debug(f"🔧 Fallback ExpertMode umgeschaltet auf: {self.expert_mode}")
-        
-        # Header in jedem Fall aktualisieren
-        self.update_header_text()
-        logger.info(f"✅ ExpertMode {'aktiviert' if self.expert_mode else 'deaktiviert'}")
+            logger.error(f"❌ Fehler beim Moduswechsel: {e}")
 
     def on_filter_toggle(self):
         """Filter ein/aus - noch ohne Funktion"""
@@ -358,55 +407,47 @@ class PdvmViewWidget(QWidget):
             
     def _load_table_data(self):
         """
-        Lädt Daten vom ViewManager und füllt die Tabelle
+        Lädt Daten vom ViewManager und füllt die Tabelle (Matrix-Logik wie im Prototyp)
         """
-        logger.info("📊 Lade Tabelle mit ViewManager-Daten")
-        
+        logger.info("📊 Lade Tabelle mit Matrix-Logik und ColumnControls (Prototyp)")
         try:
-            if self.view_manager and hasattr(self.view_manager, 'get_table_data_for_display'):
-                # Daten vom ViewManager holen
-                result = self.view_manager.get_table_data_for_display(show_only=True)
-                
-                if isinstance(result, tuple) and len(result) == 2:
-                    # Erwartetes Format: (data, headers)
-                    data, headers = result
-                else:
-                    # Fallback: Nur Daten ohne Headers
-                    data = result if result else []
-                    headers = []
-                
-                # Tabelle neu aufbauen
-                if data and len(data) > 0:
+            if self.view_manager:
+                # Hole Daten und Spaltenprojektion ausschließlich aus get_table_data_for_display
+                data, display_columns = self.view_manager.get_table_data_for_display()
+                columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
+                headers = [col.get('spaltenueberschrift', col.get('name', '')) for col in columns]
+                col_names = [col['name'] for col in columns]
+                abdatum_matrix = None
+                if hasattr(self.view_manager, 'get_abdatum_matrix'):
+                    abdatum_matrix = self.view_manager.get_abdatum_matrix(show_only=(not self.expert_mode))
+                if data and len(data) > 0 and headers:
                     self.table.setRowCount(len(data))
-                    self.table.setColumnCount(len(data[0]) if data[0] else 0)
-                    
-                    # Headers setzen falls verfügbar
-                    if headers and len(headers) > 0:
-                        self.table.setHorizontalHeaderLabels([str(h) for h in headers])
-                    
-                    # Daten einfügen
+                    self.table.setColumnCount(len(col_names))
+                    self.table.setHorizontalHeaderLabels([str(h) for h in headers])
                     for row_idx, row_data in enumerate(data):
                         for col_idx, cell_value in enumerate(row_data):
                             item = QTableWidgetItem(str(cell_value))
+                            # Tooltip für Abdatum anzeigen, falls vorhanden
+                            if abdatum_matrix is not None:
+                                try:
+                                    ab_value = abdatum_matrix[row_idx][col_idx]
+                                    if ab_value is not None:
+                                        item.setToolTip(f"abdatum: {ab_value}")
+                                except Exception:
+                                    pass
                             self.table.setItem(row_idx, col_idx, item)
-                    
-                    # Spaltenbreite anpassen
                     self.table.resizeColumnsToContents()
-                            
-                    logger.info(f"📊 Tabelle geladen: {len(data)} Zeilen mit ViewManager")
+                    logger.info(f"📊 Tabelle geladen: {len(data)} Zeilen mit Matrix-Logik (Datenmanager-Projektion)")
                 else:
-                    logger.warning("📊 Keine Daten vom ViewManager erhalten")
+                    logger.warning(f"📊 Keine Daten oder keine Spaltennamen erhalten: data={len(data)}, headers={headers}")
                     self._create_fallback_table()
             else:
-                logger.warning("⚠️ ViewManager nicht verfügbar für Datenladen")
+                logger.warning("⚠️ ViewManager nicht verfügbar für Matrix-Datenladen")
                 self._create_fallback_table()
-                
         except Exception as e:
-            logger.error(f"❌ Fehler beim Tabelle-Laden: {e}")
+            logger.error(f"❌ Fehler beim Matrix-Tabelle-Laden: {e}")
             import traceback
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            
-            # Bei Fehler: Fallback-Tabelle anzeigen
             self._create_fallback_table()
             
     def _create_fallback_table(self):

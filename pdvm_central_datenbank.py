@@ -733,14 +733,3 @@ class PdvmCentralDatenbank:
         else:
             logger.debug(f"[PdvmCentralDatenbank] Keine Änderungen zu speichern für GUID {self.guid}.")
 
-#    def reload_instance_from_db(self, table: str, guid: str):
-#        """
-#        Lädt die Instanz mit der angegebenen GUID neu aus der Datenbank.
-#        """
-#        logger.info(f"[PdvmCentralDatenbank] Reload aus DB für {table}.{guid}")
-#        if guid:
-#            raw = self._lesen_rogue(guid)
-#            if raw is not None:
-#                self.data = raw
-#                self.guid = guid
-#                self._dirty = False
