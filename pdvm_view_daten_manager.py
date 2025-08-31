@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional
 # Logging Setup
 logger = logging.getLogger(__name__)
 
+import pdvm_central_systemsteuerung_global
+gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+
+
 class ColumnControl:
     """Vereinfachte Column Control Klasse"""
     
@@ -63,17 +67,6 @@ class PdvmViewDatenManager:
         self.user_guid = call_daten.get("user_guid")
         self.first_call = call_daten.get("first_call", True)
 
-        # Lese 'mode' aus zentraler Systemsteuerung
-        try:
-            import pdvm_central_systemsteuerung_global
-            self.gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            mode_data = self.gcs.get_value(gruppe=self.gcs.user_guid, feld="mode", ab_zeit=None)
-            self.mode = mode_data.get("wert", "user") if mode_data else "user"
-            logger.info(f"✅ Mode aus zentraler Systemsteuerung geladen: {self.mode}")
-        except Exception as e:
-            logger.warning(f"⚠️ Mode aus Systemsteuerung nicht verfügbar: {e}")
-            self.mode = "user"
-
         # Column Control System
         self.column_control = None
         self.basis_columns = []
@@ -85,57 +78,64 @@ class PdvmViewDatenManager:
         # Daten laden
         self._build_system()
 
-    @property
-    def current_view_mode(self):
-        """
-        Dynamisch: 'expert' wenn globaler ExpertMode True, sonst 'normal'.
-        """
-        try:
-            return 'expert' if getattr(self.gcs, 'global_expert_mode', False) else 'normal'
-        except Exception:
-            return 'normal'
-    
-    @property
-    def stichtag(self):
-        """Zentrale Stichtag-Property: Holt immer den Wert aus der globalen Systemsteuerung."""
-        try:
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            if gcs:
-                return gcs.global_stichtag
-            return 1001.0
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Zugriff auf zentralen Stichtag: {e}")
-            return 1001.0
-    
     def _build_system(self):
         """
         SCHRITT-FÜR-SCHRITT AUFBAU:
         1. ViewDaten laden
         2. Controls aufbauen
-        3. Daten laden
+        3. Daten laden (nur bei first_call oder Stichtagswechsel)
         """
         try:
             logger.info("🔧 SCHRITT 1: ViewDaten laden")
             view_felder = self._load_view_felder()
-            
+
             logger.info("🔧 SCHRITT 2: Column Controls aufbauen")
             self.column_control = self._build_column_controls(view_felder)
-            
+
             logger.info("🔧 SCHRITT 3: Basis-Spalten ableiten")
             self.basis_columns = self._get_columns_from_controls()
-            
-            logger.info("🔧 SCHRITT 4: Daten laden (falls first_call)")
+
+            logger.info("🔧 SCHRITT 4: Daten laden (nur falls first_call)")
             if self.first_call:
                 records_loaded = self._load_records_data(limit=100)
                 logger.info(f"✅ {records_loaded} Datensätze geladen")
             else:
                 logger.info("📊 SKIP: Datenladen übersprungen (first_call=False)")
-                
+
         except Exception as e:
             logger.error(f"❌ Fehler beim System-Aufbau: {e}")
             traceback.print_exc()
             raise
+
+    def refresh_controls_and_projection(self):
+        """
+        Lädt die aktuellen Control-Attribute aus der Systemsteuerung und baut die Projektion neu auf,
+        ohne die Datenbasis (Matrix) neu zu laden. Wird nach Änderungen an den Controls (z.B. show/order) aufgerufen.
+        """
+        try:
+            logger.info("🔄 Controls und Projektion werden neu geladen (ohne Datenbasis-Neuladen)")
+            # View-Felder werden nicht neu geladen, da sie sich nicht ändern
+            # Controls aus Systemsteuerung laden und anwenden
+            if hasattr(self, 'view_table') and self.view_table:
+                # Felder aus Basis-Initialisierung merken
+                from pdvm_central_datenbank import PdvmCentralDatenbank
+                view_db = PdvmCentralDatenbank(
+                    db_name="PdvmManager.db",
+                    table_name="viewdaten",
+                    guid=self.view_guid
+                )
+                view_table = self.view_table
+                view_metadaten = view_db.get_static_value(gruppe='METADATEN', feld=view_table.upper())
+                felder = view_metadaten['felder'] if view_metadaten and 'felder' in view_metadaten else []
+            else:
+                # Fallback: Felder aus Systemsteuerung holen
+                felder = []
+            self.column_control = self._build_column_controls(felder)
+            self.basis_columns = self._get_columns_from_controls()
+            logger.info("✅ Controls und Projektion aktualisiert (Matrix/Datenbasis bleibt unverändert)")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Refresh der Controls/Projektion: {e}")
+            traceback.print_exc()
 
 
     def get_abdatum_matrix(self, show_only=True):
@@ -162,8 +162,6 @@ class PdvmViewDatenManager:
         - Das Feld 'anzeige' entfällt, der interne Spaltenname ist immer der Control-Key.
         """
         try:
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
             cc_data = gcs.get_value(gruppe=self.view_guid, feld="ColumnControls", ab_zeit=None)
             if cc_data and "wert" in cc_data and isinstance(cc_data["wert"], dict):
                 logger.info(f"✅ ColumnControl-Attribute aus Systemsteuerung geladen für {self.view_guid}")
@@ -188,17 +186,18 @@ class PdvmViewDatenManager:
             # _original Control
             name_orig = f"{feld_name}_original"
             attr = attr_map.get(name_orig, {})
-            columns.append({
+            col = {
                 'name': name_orig,
                 'type': feld_type,
                 'gruppe': gruppe,
                 'feld': feldname_gross,
-                'show': attr.get('show', False),
-                'expertOrder': attr.get('expertOrder', expert_order),
-                'displayOrder': attr.get('displayOrder', display_order),
+                'show': attr.get('show', False) if 'show' in attr else False,
+                'expertOrder': attr.get('expertOrder', expert_order) if 'expertOrder' in attr else expert_order,
+                'displayOrder': attr.get('displayOrder', display_order) if 'displayOrder' in attr else display_order,
                 'field_config': feld_config,
                 'spaltenueberschrift': f"{spaltenname} (orig.)"
-            })
+            }
+            columns.append(col)
             expert_order += 1
             display_order += 1
 
@@ -209,17 +208,18 @@ class PdvmViewDatenManager:
                     zusatz_field_config["type"] = f"date_{zusatz}"
                     name_zusatz = f"{feld_name}_{zusatz}_original"
                     attr = attr_map.get(name_zusatz, {})
-                    columns.append({
+                    col = {
                         'name': name_zusatz,
                         'type': f"date_{zusatz}",
                         'gruppe': gruppe,
                         'feld': feldname_gross,
-                        'show': attr.get('show', False),
-                        'expertOrder': attr.get('expertOrder', expert_order),
-                        'displayOrder': attr.get('displayOrder', display_order),
+                        'show': attr.get('show', False) if 'show' in attr else False,
+                        'expertOrder': attr.get('expertOrder', expert_order) if 'expertOrder' in attr else expert_order,
+                        'displayOrder': attr.get('displayOrder', display_order) if 'displayOrder' in attr else display_order,
                         'field_config': zusatz_field_config,
                         'spaltenueberschrift': f"{spaltenname} {zusatz} (orig.)"
-                    })
+                    }
+                    columns.append(col)
                     expert_order += 1
                     display_order += 1
 
@@ -228,17 +228,18 @@ class PdvmViewDatenManager:
             if col['name'].endswith('_original'):
                 show_name = col['name'].replace('_original', '_show')
                 attr = attr_map.get(show_name, {})
-                columns.append({
+                show_col = {
                     'name': show_name,
                     'type': col['type'],
                     'gruppe': col.get('gruppe'),
                     'feld': col.get('feld'),
-                    'show': attr.get('show', True),
-                    'expertOrder': attr.get('expertOrder', expert_order),
-                    'displayOrder': attr.get('displayOrder', display_order),
+                    'show': attr.get('show', True) if 'show' in attr else True,
+                    'expertOrder': attr.get('expertOrder', expert_order) if 'expertOrder' in attr else expert_order,
+                    'displayOrder': attr.get('displayOrder', display_order) if 'displayOrder' in attr else display_order,
                     'field_config': col.get('field_config', {}),
                     'spaltenueberschrift': feld_config.get("name", col['name'].replace('_show', ''))
-                })
+                }
+                columns.append(show_col)
                 expert_order += 1
                 display_order += 1
 
@@ -247,9 +248,9 @@ class PdvmViewDatenManager:
         columns.append({
             'name': 'dummy',
             'type': 'dummy',
-            'show': attr.get('show', False),
-            'expertOrder': attr.get('expertOrder', expert_order),
-            'displayOrder': attr.get('displayOrder', display_order),
+            'show': attr.get('show', False) if 'show' in attr else False,
+            'expertOrder': attr.get('expertOrder', expert_order) if 'expertOrder' in attr else expert_order,
+            'displayOrder': attr.get('displayOrder', display_order) if 'displayOrder' in attr else display_order,
             'field_config': {},
             'spaltenueberschrift': ''
         })
@@ -460,7 +461,7 @@ class PdvmViewDatenManager:
                 if not col_type.startswith("date_"):
                     if feld and gruppe:
                         try:
-                            wert = working_db.get_value(gruppe, feld, ab_zeit=self.stichtag)
+                            wert = working_db.get_value(gruppe, feld, ab_zeit=gcs.global_stichtag)
                             ab_zeit = None
                             if isinstance(wert, dict):
                                 ab_zeit = wert.get('ab_zeit', None)
@@ -501,7 +502,7 @@ class PdvmViewDatenManager:
                     else:
                         if feld and gruppe:
                             try:
-                                basis_wert_raw = working_db.get_value(gruppe, feld, ab_zeit=self.stichtag)
+                                basis_wert_raw = working_db.get_value(gruppe, feld, ab_zeit=gcs.global_stichtag)
                                 ab_zeit = basis_wert_raw.get('ab_zeit', None) if isinstance(basis_wert_raw, dict) else None
                                 basis_wert = basis_wert_raw['wert'] if isinstance(basis_wert_raw, dict) else basis_wert_raw
                                 if isinstance(basis_wert, (int, float)) and basis_wert > 0:
@@ -534,7 +535,7 @@ class PdvmViewDatenManager:
             
             if zusatz_typ == "alter":
                 # PRÄZISE TAGESEXAKTE ALTERSBERECHNUNG
-                return self._berechne_alter(self.stichtag, original_datum)
+                return self._berechne_alter(gcs.global_stichtag, original_datum)
             elif zusatz_typ == "jahr":
                 return dt_formatter.Year
             elif zusatz_typ == "monat":
@@ -614,45 +615,45 @@ class PdvmViewDatenManager:
         - ExpertMode: alle basis_columns
         - NormalMode: nur show==True, sortiert nach displayOrder
         """
-        try:
-            if not self.column_control:
-                return [], []
-
-            if self.gcs.global_expert_mode:
-                columns = list(self.basis_columns)
-            else:
-                columns = sorted([col for col in self.basis_columns if col.get('show', False)], key=lambda c: c.get('displayOrder', 999))
-            display_columns = [col['name'] for col in columns]
-
-            display_data = []
-            guids_to_remove = []
-            for guid in list(self.column_control.row_guids):
-                row_data = self.column_control.get_row_data(guid)
-                # Prüfe, ob alle Felder leer sind (außer uid_original und uid_show)
-                all_empty = True
-                for col in display_columns:
-                    if col in ('uid_original', 'uid_show'):
-                        continue
-                    if str(row_data.get(col, "")).strip() != "":
-                        all_empty = False
-                        break
-                if all_empty:
-                    guids_to_remove.append(guid)
-                    continue
-                display_row = tuple(row_data.get(col, "") for col in display_columns)
-                display_data.append(display_row)
-
-            # Entferne leere Zeilen aus Controls
-            for guid in guids_to_remove:
-                if guid in self.column_control.row_guids:
-                    self.column_control.row_guids.remove(guid)
-                for col_data in self.column_control.column_data.values():
-                    if guid in col_data:
-                        del col_data[guid]
-
-            return display_data, display_columns
-
-        except Exception as e:
-            logger.error(f"❌ Fehler bei get_table_data_for_display: {e}")
+#        try:
+        if not self.column_control:
             return [], []
+
+        if gcs.global_expert_mode:
+            columns = list(self.basis_columns)
+        else:
+            columns = sorted([col for col in self.basis_columns if col.get('show', False)], key=lambda c: c.get('displayOrder', 999))
+        display_columns = [col['name'] for col in columns]
+
+        display_data = []
+        guids_to_remove = []
+        for guid in list(self.column_control.row_guids):
+            row_data = self.column_control.get_row_data(guid)
+            # Prüfe, ob alle Felder leer sind (außer uid_original und uid_show)
+            all_empty = True
+            for col in display_columns:
+                if col in ('uid_original', 'uid_show'):
+                    continue
+                if str(row_data.get(col, "")).strip() != "":
+                    all_empty = False
+                    break
+            if all_empty:
+                guids_to_remove.append(guid)
+                continue
+            display_row = tuple(row_data.get(col, "") for col in display_columns)
+            display_data.append(display_row)
+
+        # Entferne leere Zeilen aus Controls
+        for guid in guids_to_remove:
+            if guid in self.column_control.row_guids:
+                self.column_control.row_guids.remove(guid)
+            for col_data in self.column_control.column_data.values():
+                if guid in col_data:
+                    del col_data[guid]
+
+        return display_data, display_columns
+
+#        except Exception as e:
+#            logger.error(f"❌ Fehler bei get_table_data_for_display: {e}")
+#            return [], []
     

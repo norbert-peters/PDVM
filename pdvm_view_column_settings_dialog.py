@@ -9,13 +9,18 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QChe
 from PyQt5.QtCore import Qt
 import copy
 
+import logging
+logger = logging.getLogger(__name__)
+
+import pdvm_central_systemsteuerung_global
+gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+
 class ColumnSettingsDialog(QDialog):
-    def __init__(self, column_controls, mode, parent=None):
+    def __init__(self, column_controls, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Spalteneinstellungen")
         self._original_column_controls = column_controls
         self.column_controls = copy.deepcopy(column_controls)  # Nur Kopie bearbeiten!
-        self.mode = mode  # 'all' oder 'show'
         self.result_controls = None
         self.init_ui()
 
@@ -56,39 +61,36 @@ class ColumnSettingsDialog(QDialog):
 
 
     def accept(self):
-        # Nach OK: displayOrder und expertOrder eindeutig und fortlaufend neu vergeben
-        show_controls = [c for c in self.column_controls if c.get('show', False)]
-        show_controls_sorted = sorted(show_controls, key=lambda c: c.get('displayOrder', 999))
-        for i, c in enumerate(show_controls_sorted):
-            c['displayOrder'] = i
-        all_controls_sorted = sorted(self.column_controls, key=lambda c: c.get('expertOrder', 999))
-        for i, c in enumerate(all_controls_sorted):
-            c['expertOrder'] = i
+        # Nur die Order für den aktuellen Modus anpassen
+        logger.info(f"🔄 accept column_controls: {self.column_controls}")
+        if gcs.global_expert_mode:
+            all_controls_sorted = sorted(self.column_controls, key=lambda c: c.get('expertOrder', 999))
+            for i, c in enumerate(all_controls_sorted):
+                c['expertOrder'] = i
+        else:
+            show_controls = [c for c in self.column_controls if c.get('show', False)]
+            show_controls_sorted = sorted(show_controls, key=lambda c: c.get('displayOrder', 999))
+            for i, c in enumerate(show_controls_sorted):
+                c['displayOrder'] = i
         self.result_controls = self.column_controls
         super().accept()
 
     def refresh_list(self):
         self.list_widget.clear()
         # Sortierung je nach Modus, aber immer Referenz auf column_controls
-        if self.mode == 'all':
+        logger.info(f"🔄 Spaltenliste wird aktualisiert... {gcs.global_expert_mode}")
+        logger.info(f"🔄 column_controls: {self.column_controls}")
+        if gcs.global_expert_mode:
             indices = sorted(range(len(self.column_controls)), key=lambda i: self.column_controls[i].get('expertOrder', 999))
         else:
-            # Initialisiere fehlende displayOrder für show=True-Spalten
             show_indices = [i for i, c in enumerate(self.column_controls) if c.get('show', False)]
-            # Vergib fortlaufende displayOrder, falls nicht vorhanden
-            next_order = 0
-            for i in sorted(show_indices, key=lambda i: self.column_controls[i].get('displayOrder', 999)):
-                c = self.column_controls[i]
-                if c.get('displayOrder') is None:
-                    c['displayOrder'] = next_order
-                next_order += 1
             indices = sorted(show_indices, key=lambda i: self.column_controls[i].get('displayOrder', 999))
         self._indices = indices
         for idx in self._indices:
             col = self.column_controls[idx]
             item = QListWidgetItem()
             # 2. Trenne Checkbox und Text, Checkbox nur im 'all'-Modus
-            if self.mode == 'all':
+            if gcs.global_expert_mode:
                 widget = QWidget()
                 layout = QHBoxLayout()
                 cb = QCheckBox()
@@ -130,10 +132,21 @@ class ColumnSettingsDialog(QDialog):
         # idx1, idx2 sind Indizes in self._indices (Sortierung im Dialog)
         i1 = self._indices[idx1]
         i2 = self._indices[idx2]
-        if self.mode == 'all':
+        if gcs.global_expert_mode:
             key = 'expertOrder'
         else:
             key = 'displayOrder'
+        # Robust: Falls Key fehlt, setze fortlaufend
+        for i, idx in enumerate([i1, i2]):
+            if key not in self.column_controls[idx] or self.column_controls[idx][key] is None:
+                # Setze fortlaufend für alle Controls
+                sorted_controls = sorted(
+                    [(ix, c) for ix, c in enumerate(self.column_controls)],
+                    key=lambda t: t[1].get(key, 999)
+                )
+                for j, (ix, c) in enumerate(sorted_controls):
+                    c[key] = j
+        # Jetzt kann sicher getauscht werden
         self.column_controls[i1][key], self.column_controls[i2][key] = self.column_controls[i2][key], self.column_controls[i1][key]
         self.refresh_list()
 
@@ -150,7 +163,7 @@ class ColumnSettingsDialog(QDialog):
 
     def move_up(self, idx):
         # Sortiere nach aktuellem Modus
-        if self.mode == 'all':
+        if gcs.global_expert_mode:
             key = 'expertOrder'
         else:
             key = 'displayOrder'
@@ -160,7 +173,7 @@ class ColumnSettingsDialog(QDialog):
         self.refresh_list()
 
     def move_down(self, idx):
-        if self.mode == 'all':
+        if gcs.global_expert_mode:
             key = 'expertOrder'
         else:
             key = 'displayOrder'

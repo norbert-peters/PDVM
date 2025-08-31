@@ -59,6 +59,17 @@ class PdvmCentralSystemsteuerung:
             logger.info("🔒 ExpertMode in Systemsteuerung auf False gesetzt (Init), da mode != 'admin'")
 
     # =================================================================
+    # MODE PROPERTY - Aktueller Modus des Benutzers
+    # =================================================================
+
+    @property
+    def global_mode(self):
+        """
+        Gibt den aktuellen Modus des Benutzers zurück.
+        """
+        return self._db.get_value(gruppe=self.user_guid, feld="mode", ab_zeit=None)['wert']
+
+    # =================================================================
     # STICHTAG PROPERTY - Globaler Stichtag für die gesamte Anwendung
     # =================================================================
     def _init_stichtag_inst(self):

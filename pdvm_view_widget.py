@@ -29,74 +29,13 @@ class PdvmViewWidget(QWidget):
 
         # ExpertMode-Status: 🎯 SUPER EINFACH mit neuer CentralSystemsteuerung
 
-        try:
-            # Wenn mode != 'admin', setze global_expert_mode immer auf False (auch in DB!)
-            if self.mode != 'admin':
-                if gcs.global_expert_mode:
-                    gcs.global_expert_mode = False
-                    logger.info("🔒 ExpertMode wurde deaktiviert und in Systemsteuerung auf False gesetzt, da mode != 'admin'")
-                self.expert_mode = False
-            else:
-                # Nur wenn admin, Wert aus Systemsteuerung übernehmen
-                self.expert_mode = gcs.global_expert_mode
-            # Sicherstellen, dass Wert in DB immer konsistent ist
-            if self.mode != 'admin':
-                # Schreibe False in die Systemsteuerung, falls noch True
-                try:
-                    gcs.set_value(gruppe=gcs.user_guid, feld="ExpertMode", wert=False, ab_zeit=1001.0)
-                    gcs.save_values()
-                except Exception as e2:
-                    logger.warning(f"⚠️ Fehler beim Erzwingen von ExpertMode=False in Systemsteuerung: {e2}")
-            logger.info(f"✅ ExpertMode aus zentraler Systemsteuerung geladen: {self.expert_mode}")
-        except Exception as e:
-            logger.warning(f"⚠️ Zentrale Systemsteuerung noch nicht verfügbar: {e}")
-            self.expert_mode = False  # Lokaler Fallback
-
-        # Lese 'mode' aus zentraler Systemsteuerung
-        try:
-            mode_data = gcs.get_value(gruppe=gcs.user_guid, feld="mode", ab_zeit=None)
-            self.mode = mode_data.get("wert", "user") if mode_data else "user"
-            logger.info(f"✅ Mode aus zentraler Systemsteuerung geladen: {self.mode}")
-        except Exception as e:
-            logger.warning(f"⚠️ Mode aus Systemsteuerung nicht verfügbar: {e}")
-            self.mode = "user"
-
         self.header_label = None  # Referenz auf Header-Label für Updates
-
-        # Versuche ExpertMode aus globaler Systemsteuerung zu laden
-        self._initialize_expert_mode()
 
         # UI Setup
         self.setup_ui()
 
         # Daten laden
         self.load_data()
-
-    def _initialize_expert_mode(self):
-        # Set expert_mode from global system control
-        try:
-            self.expert_mode = gcs.global_expert_mode
-        except Exception as e:
-            logger.warning(f"⚠️ Zentrale Systemsteuerung noch nicht verfügbar: {e}")
-            self.expert_mode = False
-        # Falls beim ersten Init die zentrale Systemsteuerung noch nicht verfügbar war,
-        # versuche nach 1 Sekunde erneut zu synchronisieren.
-        if not hasattr(self, '_expert_mode_loaded') or not self._expert_mode_loaded:
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(1000, self._delayed_expert_mode_sync)
-
-    def _delayed_expert_mode_sync(self):
-        # Verzögerte ExpertMode-Synchronisation
-        try:
-            current_mode = gcs.global_expert_mode
-            if current_mode != self.expert_mode:
-                self.expert_mode = current_mode
-                self.update_header_text()  # Header aktualisieren
-                logger.info(f"🔄 ExpertMode durch verzögerte Synchronisation aktualisiert: {current_mode}")
-            self._expert_mode_loaded = True  # Erfolgreich geladen
-        except Exception as e:
-            logger.debug(f"⚠️ Verzögerte ExpertMode-Synchronisation noch nicht möglich: {e}")
-            # Nicht weiter versuchen - lokaler Wert bleibt
 
     def setup_ui(self):
         """UI Komponenten erstellen"""
@@ -106,24 +45,11 @@ class PdvmViewWidget(QWidget):
         from PyQt5.QtWidgets import QLabel
         
     # Stichtag aus zentraler Systemsteuerung holen
-        try:
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            if gcs:
-                current_stichtag = gcs.global_stichtag
-                logger.info(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
-            else:
-                current_stichtag = "Login erforderlich"
-                logger.warning(f"⚠️ Systemsteuerung nicht verfügbar")
-        except Exception as e:
-            logger.warning(f"⚠️ Stichtag aus Systemsteuerung nicht verfügbar: {e}")
-            current_stichtag = "N/A"
-        
         # Header-Zeile mit Titel und Einstellungs-Menü
         header_layout = QHBoxLayout()
         
         # Titel-Label (links) - mit view_header aus call_daten
-        header_text = self.get_header_text(current_stichtag)
+        header_text = self.get_header_text()
         self.header_label = QLabel(header_text, self)
         self.header_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
         header_layout.addWidget(self.header_label)
@@ -162,43 +88,21 @@ class PdvmViewWidget(QWidget):
         
         logger.info("✅ UI Setup mit Header und Debug-Info abgeschlossen")
     
-    def _get_global_systemsteuerung(self):
-        """
-        🎯 ELEGANTE LÖSUNG: Direkte globale Systemsteuerung abrufen
-        
-        Verwendet den bereits importierten gcs-Alias für konsistente Imports.
-        
-        Returns:
-            CentralSystemsteuerung: Die globale zentrale Systemsteuerung
-            
-        Raises:
-            RuntimeError: Falls nicht verfügbar
-        """
-        try:
-            systemsteuerung = gcs  # Verwende globalen Alias
-            if not systemsteuerung:
-                raise RuntimeError("Globale zentrale Systemsteuerung ist nicht initialisiert")
-            
-            return systemsteuerung
-            
-        except Exception as e:
-            raise RuntimeError(f"Globale Systemsteuerung nicht verfügbar: {e}")
-
-    def get_header_text(self, current_stichtag):
+    def get_header_text(self):
         """
         Erstellt den Header-Text basierend auf view_header und ExpertMode
         """
         # Basis: view_header aus call_daten
         view_header = self.call_daten.get('view_header', 'PDVM View')
         
-        if self.expert_mode:
+        if gcs.global_expert_mode:
             # ExpertMode: view_header + zentraler Stichtag
-            header_text = f"{view_header} - Stichtag: {current_stichtag}"
+            header_text = f"{view_header} - Stichtag: {gcs.global_stichtag}"
         else:
             # NormalMode: nur view_header
             header_text = view_header
             
-        logger.debug(f"🔤 Header-Text erstellt: '{header_text}' (ExpertMode: {self.expert_mode})")
+        logger.debug(f"🔤 Header-Text erstellt: '{header_text}' (ExpertMode: {gcs.global_expert_mode})")
         return header_text
     
     def update_header_text(self):
@@ -207,25 +111,9 @@ class PdvmViewWidget(QWidget):
         """
         # BEREINIGT: ExpertMode ist bereits verfügbar - kein Lazy Loading nötig!
         
-        # Aktuellen Stichtag holen - MEHRERE QUELLEN probieren
-        current_stichtag = "N/A"
-        
-        try:
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            if gcs:
-                current_stichtag = gcs.global_stichtag
-                logger.debug(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
-            else:
-                current_stichtag = "N/A"
-                logger.warning("⚠️ Kein Stichtag verfügbar - verwende N/A")
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Stichtag-Abruf: {e}")
-            current_stichtag = "N/A"
-        
         # Header-Text neu erstellen und setzen
         if self.header_label:
-            new_text = self.get_header_text(current_stichtag)
+            new_text = self.get_header_text()
             self.header_label.setText(new_text)
             logger.info(f"✅ Header-Text aktualisiert: '{new_text}'")
     
@@ -264,13 +152,14 @@ class PdvmViewWidget(QWidget):
             settings_menu.addAction(action_spalten)
 
             # 2. Experten Modus ein/aus (nur bei mode='admin')
-            if self.mode == 'admin':
+            logger.debug(f"🔧 Experten Modus: '{gcs.global_mode}' (aktuell: {gcs.global_expert_mode})")
+            if gcs.global_mode == 'admin':
                 # Status-abhängiger Menütext - AKTUELLER Status
-                expert_status = "ausschalten" if self.expert_mode else "einschalten"
+                expert_status = "ausschalten" if gcs.global_expert_mode else "einschalten"
                 action_expert = QAction(f"🔧 Experten Modus {expert_status}", self)
                 action_expert.triggered.connect(self.on_expert_modus_toggle)
                 settings_menu.addAction(action_expert)
-                logger.debug(f"🔧 Experten Modus: '{expert_status}' (aktuell: {self.expert_mode})")
+                logger.debug(f"🔧 Experten Modus: '{expert_status}' (aktuell: {gcs.global_expert_mode})")
 
             # 3. Filter ein/aus
             action_filter = QAction("🔍 Filter ein/aus", self)
@@ -288,39 +177,34 @@ class PdvmViewWidget(QWidget):
     
     def on_spalten_verwalten(self):
         """Spalten verwalten: Öffnet den Matrix-Spaltendialog und übernimmt Änderungen."""
-        try:
-            from pdvm_view_column_settings_dialog import ColumnSettingsDialog
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            # Hole die aktuelle Spaltenprojektion und den Modus direkt aus dem Datenmanager
-            _, display_columns = self.view_manager.get_table_data_for_display()
-            columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
-            # Modus: 'all' = ExpertMode, 'show' = NormalMode
-            mode = 'all' if gcs.global_expert_mode else 'show'
-            dlg = ColumnSettingsDialog(columns, mode, self)
-            if dlg.exec_() and dlg.result_controls is not None:
-                # Schreibe die neuen Controls in die Systemsteuerung
-                persist_map = {col['name']: {
-                    'show': col['show'],
-                    'expertOrder': col['expertOrder'],
-                    'displayOrder': col['displayOrder']
-                } for col in dlg.result_controls}
-                gcs.set_value(gruppe=self.view_manager.view_guid, feld="ColumnControls", wert=persist_map, ab_zeit=1001.0)
-                gcs.save_values()
-                # Datenmanager komplett neu initialisieren (wie bei Mode-Wechsel)
-                call_daten = dict(self.view_manager.call_daten)
-                call_daten['first_call'] = False
-                from pdvm_view_daten_manager import PdvmViewDatenManager
-                self.view_manager = PdvmViewDatenManager(call_daten)
-                logger.info("✅ Spalteneinstellungen übernommen und Datenmanager neu initialisiert")
-                self.reload()
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Öffnen des Spaltendialogs: {e}")
+#        try:
+        from pdvm_view_column_settings_dialog import ColumnSettingsDialog
+        # Hole die aktuelle Spaltenprojektion und den Modus direkt aus dem Datenmanager
+        display_columns = self.view_manager.get_table_data_for_display()
+        columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
+        # Dialog bestimmt Modus selbst aus Systemsteuerung
+        dlg = ColumnSettingsDialog(columns, self)
+        logger.info(f"🔧 Öffne Spaltendialog mit {len(columns)} Spalten (ExpertMode: {gcs.global_expert_mode})")
+        if dlg.exec_() and dlg.result_controls is not None:
+            # Schreibe die neuen Controls in die Systemsteuerung
+            persist_map = {col['name']: {
+                'show': col['show'],
+                'expertOrder': col['expertOrder'],
+                'displayOrder': col['displayOrder']
+            } for col in dlg.result_controls}
+            gcs.set_value(gruppe=self.view_manager.view_guid, feld="ColumnControls", wert=persist_map, ab_zeit=1001.0)
+            gcs.save_values()
+            # Nur Controls und Projektion neu laden, Datenbasis bleibt erhalten
+            self.view_manager.refresh_controls_and_projection()
+            logger.info("✅ Spalteneinstellungen übernommen und Projektion neu geladen (ohne Datenbasis-Neuladen)")
+            self.reload()
+#        except Exception as e:
+#            logger.error(f"❌ Fehler beim Öffnen des Spaltendialogs: {e}")
         
     def on_expert_modus_toggle(self):
         """Moduswechsel zwischen ExpertMode (all) und NormalMode (show) mit Persistenz in Systemsteuerung"""
         try:
-            new_mode = not self.expert_mode
+            new_mode = not gcs.global_expert_mode
             # Wert persistent in Systemsteuerung speichern
             try:
                 gcs.set_value(gruppe=gcs.user_guid, feld="ExpertMode", wert=new_mode, ab_zeit=1001.0)
@@ -329,12 +213,6 @@ class PdvmViewWidget(QWidget):
             except Exception as e2:
                 logger.warning(f"⚠️ Fehler beim Speichern von ExpertMode in Systemsteuerung: {e2}")
             # Wert aus Systemsteuerung holen (immer synchronisieren)
-            try:
-                self.expert_mode = gcs.global_expert_mode
-                logger.info(f"🔧 ExpertMode aus Systemsteuerung übernommen: {self.expert_mode}")
-            except Exception as e3:
-                logger.warning(f"⚠️ Fehler beim Lesen von ExpertMode aus Systemsteuerung: {e3}")
-                self.expert_mode = new_mode
             self.reload()
         except Exception as e:
             logger.error(f"❌ Fehler beim Moduswechsel: {e}")
@@ -350,22 +228,6 @@ class PdvmViewWidget(QWidget):
         - ViewManager vorhanden UND first_call=False → Bestehenden verwenden
         """
         # BEREINIGT: ExpertMode ist bereits beim Widget-Init geladen - kein Lazy Loading nötig!
-        
-        # Stichtag aus zentraler Systemsteuerung holen
-        try:
-            import pdvm_central_systemsteuerung_global
-            gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            if gcs:
-                current_stichtag = gcs.global_stichtag
-                logger.info(f"✅ Stichtag aus zentraler Systemsteuerung: {current_stichtag}")
-            else:
-                current_stichtag = 2025216.0
-                logger.warning(f"⚠️ Systemsteuerung nicht verfügbar, Fallback: {current_stichtag}")
-        except Exception as e:
-            logger.warning(f"⚠️ Stichtag aus Systemsteuerung nicht verfügbar: {e}")
-            current_stichtag = 2025216.0
-
-        logger.info(f"📊 Load data mit zentralem Stichtag: {current_stichtag}")
         
         try:
             first_call = self.call_daten.get('first_call', True)
@@ -419,7 +281,7 @@ class PdvmViewWidget(QWidget):
                 col_names = [col['name'] for col in columns]
                 abdatum_matrix = None
                 if hasattr(self.view_manager, 'get_abdatum_matrix'):
-                    abdatum_matrix = self.view_manager.get_abdatum_matrix(show_only=(not self.expert_mode))
+                    abdatum_matrix = self.view_manager.get_abdatum_matrix(show_only=(not gcs.global_expert_mode))
                 if data and len(data) > 0 and headers:
                     self.table.setRowCount(len(data))
                     self.table.setColumnCount(len(col_names))
