@@ -45,7 +45,7 @@ class PdvmDateTimePicker(QWidget):
 
         # prüfen, ob pdvm_datetime gerade ein Sentinel ist
         try:
-            raw_val = float(self.pdvm_datetime.pdvmdatetime)
+            raw_val = float(self.pdvm_datetime.PdvmDateTime)
         except Exception:
             raw_val = None
         is_sentinel = (raw_val in (1001.0, 9999365.0))
@@ -138,7 +138,7 @@ class PdvmDateTimePicker(QWidget):
         """
         # Prüfe, ob das zugrundeliegende pdvm_datetime immer noch ein Sentinel ist
         try:
-            raw_val = float(self.pdvm_datetime.pdvmdatetime)
+            raw_val = float(self.pdvm_datetime.PdvmDateTime)
         except Exception:
             raw_val = None
         is_sentinel = (raw_val in (1001.0, 9999365.0))
@@ -195,7 +195,7 @@ class PdvmDateTimePicker(QWidget):
         
         # Initial-Werte aus der neuen Instanz setzen
         try:
-            raw_val = float(self.pdvm_datetime.pdvmdatetime)
+            raw_val = float(self.pdvm_datetime.PdvmDateTime)
         except Exception:
             raw_val = 1001.0  # Fallback auf Sentinel
             

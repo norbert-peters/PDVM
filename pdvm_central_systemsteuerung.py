@@ -1,358 +1,463 @@
-# pdvm_central_systemsteuerung.py
 """
-PDVM Zentrale Systemsteuerung - Wrapper für PdvmCentralDatenbank
-================================================================
-
-Bietet benutzerfreundliche Properties und Methoden für häufig verwendete
-Systemeinstellungen ohne die PdvmCentralDatenbank mit speziellen Features zu überladen.
-
-Architektur:
-- Nutzt PdvmCentralDatenbank für Persistierung
-- Bietet elegante Properties für häufige Settings
-- Hält die Datenbankschicht sauber und generisch
+PdvmCentralSystemsteuerung - Zentrale Einstellungsverwaltung mit Properties Pattern
+Vereinfachte lineare Architektur für automatische Initialisierung und persistente Speicherung
 """
 
 import logging
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
+from pdvm_datetime import Pdvm_DateTime
 
 logger = logging.getLogger(__name__)
 
+# GLOBALE INSTANZEN für zentrale Verwendung
+global_stichtag_inst = None  # Zentrale Pdvm_DateTime Instanz für Stichtag
+
+
 class PdvmCentralSystemsteuerung:
     """
-    Zentrale Systemsteuerung mit eleganten Properties
-    
-    Wrapper um PdvmCentralDatenbank für benutzerfreundliche Settings-Verwaltung.
+    Zentrale Systemsteuerung mit Properties-Pattern für automatische Wertverwaltung
+    Vereinfachte Architektur mit linearer Ausführung und persistenter Speicherung
     """
     
-    def __init__(self, user_guid, db_name="PdvmManager.db"):
-        """
-        Initialisiert die zentrale Systemsteuerung für einen Benutzer.
-        - Legt immer die Stichtag-Instanz für user_guid an (wird immer benötigt)
-        - ExpertMode wird nicht mehr im Init initialisiert, sondern on-demand
-        """
-        self.user_guid = user_guid
-        self._db = PdvmCentralDatenbank(
-            db_name=db_name,
+    def __init__(self, user_guid=None):
+        """Initialisierung mit automatischem Setup aller Properties"""
+        global global_stichtag_inst
+        
+        self._user_guid = user_guid or "default_user"
+        self._database = PdvmCentralDatenbank(
+            db_name="PdvmManager.db",
             table_name="systemsteuerung",
-            guid=user_guid
+            guid=self._user_guid
         )
-        logger.info(f"🎛️ CentralSystemsteuerung initialisiert für User: {user_guid}")
-        # Stichtag-Instanz immer initialisieren (wird überall benötigt)
-        self._init_stichtag_inst()
-
-        # ExpertMode-Konsistenz: Wenn mode != 'admin', setze ExpertMode immer auf False
-        mode_data = self._db.get_value(
-            gruppe=self.user_guid,
-            feld="mode",
-            ab_zeit=None
-        )
-        mode_value = mode_data.get("wert", "user") if mode_data else "user"
-        if mode_value != 'admin':
-            self._db.set_value(
-                gruppe=self.user_guid,
-                feld="ExpertMode",
-                wert=False,
-                ab_zeit=1001.0
-            )
-            self._db.save_values()
-            logger.info("🔒 ExpertMode in Systemsteuerung auf False gesetzt (Init), da mode != 'admin'")
-
-    # =================================================================
-    # MODE PROPERTY - Aktueller Modus des Benutzers
-    # =================================================================
-
+        self._datetime = Pdvm_DateTime()
+        
+        # Globale Stichtag-Instanz initialisieren (wenn noch nicht vorhanden)
+        if global_stichtag_inst is None:
+            global_stichtag_inst = Pdvm_DateTime()
+        
+        # Properties Werte (werden automatisch geladen)
+        self._country = None
+        self._stichtag = None
+        self._expert_mode = None
+        self._mode = None
+        self._language = None
+        
+        # 🎯 NEUE REFRESH-ARCHITEKTUR: Command und first_call Tracking
+        self._current_command = None    # Aktueller Menübefehl für Refresh
+        self._first_call = True         # Flag für initialen vs. Refresh-Aufruf
+        
+        # Automatische Initialisierung
+        self._initialize_defaults()
+    
+    def _initialize_defaults(self):
+        """Lädt gespeicherte Werte oder setzt Standard-Defaults"""
+        global global_stichtag_inst
+        
+        # Standard-Werte falls nichts gespeichert ist
+        current_pdvm_datetime = self._datetime.PdvmDateTimeNow()
+        
+        defaults = {
+            'country': 'AT',
+            'stichtag': current_pdvm_datetime,  # Float direkt verwenden
+            'expert_mode': False,
+            'mode': 'standard',
+            'language': 'DE'
+        }
+        
+        # Lade gespeicherte Werte oder verwende Defaults
+        for key, default_value in defaults.items():
+            try:
+                # Lade direkt aus der User-GUID-Gruppe (nicht aus "systemsteuerung")
+                result = self._database.get_value(self._user_guid, key)
+                saved_value = result.get("wert") if result else None
+                setattr(self, f"_{key}", saved_value if saved_value is not None else default_value)
+            except Exception:
+                # Fallback auf Default falls Fehler beim Laden
+                setattr(self, f"_{key}", default_value)
+        
+        # Globale Stichtag-Instanz auf den geladenen/default Stichtag setzen (über Property)
+        if global_stichtag_inst is not None and self._stichtag is not None:
+            global_stichtag_inst.PdvmDateTime = self._stichtag
+    
+    def save_values(self):
+        """Speichert alle aktuellen Property-Werte persistent"""
+        properties_to_save = ['country', 'stichtag', 'expert_mode', 'mode', 'language']
+        
+        try:
+            for prop in properties_to_save:
+                value = getattr(self, f"_{prop}")
+                # Speichere in User-GUID-Gruppe (nicht "systemsteuerung")
+                self._database.set_value(self._user_guid, prop, value)
+            
+            # Datenbank-interne Speicherung ausführen
+            self._database.save_values()
+        except Exception as e:
+            print(f"Fehler beim Speichern der Werte: {e}")
+    
+    def save_stichtag(self):
+        """Speichert nur den Stichtag-Wert - für Kompatibilität mit pdvm_systemstart.py"""
+        global global_stichtag_inst
+        
+        try:
+            # 🔧 FIX: Hole aktuellen Wert aus globaler Instanz vor dem Speichern
+            if global_stichtag_inst is not None:
+                current_stichtag_value = global_stichtag_inst.PdvmDateTime
+                self._stichtag = current_stichtag_value
+                logger.info(f"🔄 Stichtag-Wert aus globaler Instanz synchronisiert: {current_stichtag_value}")
+            
+            # Speichere aktuellen Stichtag-Wert
+            self._database.set_value(self._user_guid, 'stichtag', self._stichtag)
+            self._database.save_values()
+            logger.info("✅ Stichtag in Datenbank gespeichert")
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern des Stichtags: {e}")
+            print(f"Fehler beim Speichern des Stichtags: {e}")
+    
+    # GLOBAL_COUNTRY Property
     @property
-    def global_mode(self):
-        """
-        Gibt den aktuellen Modus des Benutzers zurück.
-        """
-        return self._db.get_value(gruppe=self.user_guid, feld="mode", ab_zeit=None)['wert']
-
-    # =================================================================
-    # STICHTAG PROPERTY - Globaler Stichtag für die gesamte Anwendung
-    # =================================================================
-    def _init_stichtag_inst(self):
-        """
-        Initialisiert die Stichtag-Instanz für user_guid und legt sie immer an.
-        Schützt vor property-Objekten als Wert.
-        """
-        stichtag_data = self._db.get_value(
-            gruppe=self.user_guid,
-            feld="stichtag",
-            ab_zeit=1001.0
-        )
-        if stichtag_data is None or stichtag_data.get("wert") is None:
-            aktueller_stichtag = PdvmDateTimeUtils.PdvmDateTimeNow
-            stichtag_wert = aktueller_stichtag
-            self._db.set_value(
-                gruppe=self.user_guid,
-                feld="stichtag",
-                wert=stichtag_wert,
-                ab_zeit=1001.0
-            )
-            self._db.save_values()
-            logger.info(f"🔧 Initialisiere Stichtag für neuen User auf {aktueller_stichtag}")
+    def global_country(self):
+        """Land/Country Code (AT, DE, etc.)"""
+        return self._country
+    
+    @global_country.setter
+    def global_country(self, value):
+        """Setzt Country und speichert automatisch"""
+        if value in ['AT', 'DE', 'CH', 'US', 'UK']:
+            self._country = value
+            # Bei Country-Änderung auch Pdvm_DateTime neu initialisieren
+            self._datetime = Pdvm_DateTime(country=value)
+            self.save_values()
         else:
-            stichtag_wert = stichtag_data.get("wert")
-        # Schutz: property-Objekte abfangen
-        if isinstance(stichtag_wert, property):
-            logger.error("Stichtag-Wert ist ein property-Objekt! Setze Default 1001.0.")
-            stichtag_wert = 1001.0
-        self._global_stichtag_inst = Pdvm_DateTime('DEU')
-        self._global_stichtag_inst.PdvmDateTime = stichtag_wert
-
+            raise ValueError(f"Ungültiger Country-Code: {value}")
+    
+    # GLOBAL_STICHTAG Property mit globaler Pdvm_DateTime Instanz
     @property
     def global_stichtag(self):
-        """
-        Gibt den aktuellen Stichtag im PdvmFormat (float) zurück.
-        Instanz ist garantiert vorhanden (durch __init__).
-        """
-        return self._global_stichtag_inst.PdvmDateTime
-
+        """Aktueller Stichtag für Datenabfragen - verwendet globale Pdvm_DateTime Instanz"""
+        return self._stichtag
+    
+    @global_stichtag.setter
+    def global_stichtag(self, value):
+        """Setzt Stichtag und speichert automatisch - synchronisiert globale Instanz"""
+        global global_stichtag_inst
+        
+        self._stichtag = value
+        
+        # Globale Stichtag-Instanz auf den neuen Wert setzen (über Property)
+        if global_stichtag_inst is not None:
+            global_stichtag_inst.PdvmDateTime = value
+        
+        self.save_values()
+    
+    def get_global_stichtag_inst(self):
+        """Gibt die globale Pdvm_DateTime Instanz für Stichtag zurück"""
+        return global_stichtag_inst
+    
     @property
     def global_stichtag_inst(self):
-        """
-        Gibt die globale Pdvm_DateTime Instanz zurück (immer vorhanden).
-        """
-        return self._global_stichtag_inst
-
-    def save_stichtag(self):
-        """
-        Persistiert den aktuellen Wert der globalen Stichtag-Instanz in der Datenbank.
-        Instanz ist garantiert vorhanden. Schützt vor property-Objekten.
-        """
-        wert = self._global_stichtag_inst.PdvmDateTime
-        if isinstance(wert, property):
-            logger.error("Stichtag-Wert ist ein property-Objekt beim Speichern! Setze Default 1001.0.")
-            wert = 1001.0
-        self._db.set_value(
-            gruppe=self.user_guid,
-            feld="stichtag",
-            wert=wert,
-            ab_zeit=1001.0
-        )
-        self._db.save_values()
-        logger.info(f"✅ Stichtag gespeichert: {wert}")
-
-    # =================================================================
-    # EXPERT MODE PROPERTY - Elegant und linear
-    # =================================================================
+        """Property für Zugriff auf die globale Pdvm_DateTime Instanz"""
+        return global_stichtag_inst
     
     @property
     def global_expert_mode(self):
-        """
-        ExpertMode aus Systemsteuerung lesen. Falls nicht vorhanden, wird automatisch auf False gesetzt und zurückgegeben.
-        """
-        try:
-            expert_mode_data = self._db.get_value(
-                gruppe=self.user_guid,
-                feld="ExpertMode",
-                ab_zeit=None
-            )
-            if expert_mode_data is None or "wert" not in expert_mode_data:
-                # Wert anlegen, falls nicht vorhanden
-                self._db.set_value(
-                    gruppe=self.user_guid,
-                    feld="ExpertMode",
-                    wert=False,
-                    ab_zeit=1001.0
-                )
-                self._db.save_values()
-                logger.debug("🔧 ExpertMode nicht gesetzt - lege False an und gebe False zurück")
-                return False
-            wert = expert_mode_data.get("wert", False)
-            if isinstance(wert, str):
-                result = wert.upper() == "TRUE"
-            else:
-                result = bool(wert)
-            logger.debug(f"✅ ExpertMode geladen: {result}")
-            return result
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Laden von ExpertMode: {e}")
-            return False
-
+        """Expert Mode für erweiterte Funktionen"""
+        return self._expert_mode
+    
     @global_expert_mode.setter
     def global_expert_mode(self, value):
-        """
-        ExpertMode in Systemsteuerung speichern. Legt Wert immer an, falls nicht vorhanden.
-        """
-        try:
-            bool_value = bool(value)
-            self._db.set_value(
-                gruppe=self.user_guid,
-                feld="ExpertMode",
-                wert=bool_value,
-                ab_zeit=1001.0
-            )
-            self._db.save_values()
-            logger.info(f"✅ ExpertMode gespeichert: {bool_value}")
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern von ExpertMode: {e}")
-
-    # =================================================================
-    # LANGUAGE PROPERTY - Für Vollständigkeit
-    # =================================================================
+        """Setzt Expert Mode und speichert automatisch"""
+        self._expert_mode = bool(value)
+        self.save_values()
+    
+    # GLOBAL_MODE Property
+    @property
+    def global_mode(self):
+        """Aktueller Anwendungsmodus"""
+        return self._mode
+    
+    @global_mode.setter
+    def global_mode(self, value):
+        """Setzt Mode und speichert automatisch"""
+        self._mode = value
+        self.save_values()
+    
+    # GLOBAL_LANGUAGE Property
+    @property
+    def global_language(self):
+        """Aktuelle Sprache/Language"""
+        return self._language
+    
+    @global_language.setter
+    def global_language(self, value):
+        """Setzt Language und speichert automatisch"""
+        self._language = value
+        self.save_values()
+    
+    # Utility Methoden
+    def is_expert_mode_available(self):
+        """Prüft, ob der ExpertMode-Umschalter verfügbar ist (nur bei admin mode)"""
+        return self.global_mode == 'admin'
+    
+    # KURZE PROPERTY-ALIASES für einfachen Zugriff (wie im alten System)
+    @property
+    def stichtag(self):
+        """Kurzer Zugriff auf global_stichtag"""
+        return self.global_stichtag
+    
+    @stichtag.setter
+    def stichtag(self, value):
+        """Kurzer Zugriff auf global_stichtag"""
+        self.global_stichtag = value
+    
+    @property
+    def expert_mode(self):
+        """Kurzer Zugriff auf global_expert_mode"""
+        return self.global_expert_mode
+    
+    @expert_mode.setter
+    def expert_mode(self, value):
+        """Kurzer Zugriff auf global_expert_mode"""
+        self.global_expert_mode = value
+    
+    @property
+    def mode(self):
+        """Kurzer Zugriff auf global_mode"""
+        return self.global_mode
+    
+    @mode.setter
+    def mode(self, value):
+        """Kurzer Zugriff auf global_mode"""
+        self.global_mode = value
+    
+    @property
+    def country(self):
+        """Kurzer Zugriff auf global_country"""
+        return self.global_country
+    
+    @country.setter
+    def country(self, value):
+        """Kurzer Zugriff auf global_country"""
+        self.global_country = value
     
     @property
     def language(self):
-        """Aktuelle Sprache des Benutzers"""
-        try:
-            language_data = self._db.get_value(
-                gruppe=self.user_guid,
-                feld="language",
-                ab_zeit=None
-            )
-            return language_data.get("wert", "DE") if language_data else "DE"
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Laden der Sprache: {e}")
-            return "DE"
-
+        """Kurzer Zugriff auf global_language"""
+        return self.global_language
+    
     @language.setter
     def language(self, value):
-        """Sprache setzen"""
-        try:
-            self._db.set_value(
-                gruppe=self.user_guid,
-                feld="language",
-                wert=str(value),
-                ab_zeit=1001.0
-            )
-            self._db.save_values()
-            logger.info(f"✅ Sprache gespeichert: {value}")
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern der Sprache: {e}")
-
-    # =================================================================
-    # GENERISCHE METHODEN - Für spezielle Fälle
-    # =================================================================
+        """Kurzer Zugriff auf global_language"""
+        self.global_language = value
     
-    def get_setting(self, key, default=None):
+    # 🎯 NEUE REFRESH-ARCHITEKTUR Properties
+    @property
+    def current_command(self):
+        """Aktueller Menübefehl für Refresh-Mechanismus"""
+        return self._current_command
+    
+    @current_command.setter  
+    def current_command(self, value):
+        """Setzt den aktuellen Menübefehl"""
+        self._current_command = value
+    
+    @property
+    def first_call(self):
+        """Flag ob initialer Aufruf (True) oder Refresh (False)"""
+        return self._first_call
+    
+    @first_call.setter
+    def first_call(self, value):
+        """Setzt das first_call Flag"""
+        self._first_call = value
+
+    def get_current_settings(self):
+        """Gibt alle aktuellen Einstellungen als Dictionary zurück"""
+        return {
+            'global_country': self.global_country,
+            'global_stichtag': self.global_stichtag,
+            'global_expert_mode': self.global_expert_mode,
+            'global_mode': self.global_mode,
+            'global_language': self.global_language,
+            'expert_mode_available': self.is_expert_mode_available(),
+            'user_guid': self._user_guid
+        }
+    
+    def debug_values(self):
+        """Debug-Ausgabe aller aktuellen Werte - für Kompatibilität mit pdvm_systemstart.py"""
+        settings = self.get_current_settings()
+        print("=== PdvmCentralSystemsteuerung Debug Values ===")
+        for key, value in settings.items():
+            print(f"{key}: {value}")
+        print("=== Debug Values Ende ===")
+    
+    def reset_to_defaults(self):
+        """Setzt alle Werte auf Standard-Defaults zurück"""
+        global global_stichtag_inst
+        
+        current_pdvm_datetime = self._datetime.PdvmDateTimeNow()
+        
+        self.global_country = 'AT'
+        self.global_stichtag = current_pdvm_datetime  # Float direkt verwenden - automatisch in globale Instanz synchronisiert
+        self.global_expert_mode = False
+        self.global_mode = 'standard' 
+        self.global_language = 'DE'
+        print("Alle Einstellungen auf Standard-Defaults zurückgesetzt")
+    
+    # 🎯 NEUE REFRESH-ARCHITEKTUR: Zentrale Methoden für Menü-Refresh
+    def set_menu_command(self, command_dict, from_menu=True):
         """
-        Generische Methode zum Lesen eines Settings
+        Setzt den aktuellen Menübefehl für Refresh-Mechanismus.
         
         Args:
-            key (str): Setting-Name
-            default: Default-Wert falls Setting nicht existiert
+            command_dict (dict): Das Command-Dictionary aus dem Menü
+            from_menu (bool): True wenn aus Menü, False wenn Refresh
+        """
+        self._current_command = command_dict
+        self._first_call = from_menu
+    
+    def prepare_call_daten(self, base_call_daten=None):
+        """
+        Bereitet call_daten für Menüaufruf vor - setzt first_call automatisch.
+        
+        Args:
+            base_call_daten (dict): Basis call_daten, falls vorhanden
             
         Returns:
-            Setting-Wert oder default
+            dict: Vollständige call_daten mit first_call gesetzt
         """
-        try:
-            data = self._db.get_value(
-                gruppe=self.user_guid,
-                feld=key,
-                ab_zeit=None
-            )
-            return data.get("wert", default) if data else default
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Laden von Setting '{key}': {e}")
-            return default
-
-    def set_setting(self, key, value):
+        if base_call_daten is None:
+            base_call_daten = {}
+        
+        # first_call automatisch setzen
+        call_daten = base_call_daten.copy()
+        call_daten['first_call'] = self._first_call
+        
+        return call_daten
+    
+    def refresh_current_menu(self):
         """
-        Generische Methode zum Setzen eines Settings
+        Führt Refresh des aktuellen Menüpunkts durch - wiederholt Aufruf mit first_call=False.
         
-        Args:
-            key (str): Setting-Name  
-            value: Setting-Wert
+        Returns:
+            dict: call_daten für Refresh-Aufruf oder None wenn kein Command gesetzt
         """
-        try:
-            self._db.set_value(
-                gruppe=self.user_guid,
-                feld=key,
-                wert=value,
-                ab_zeit=1001.0
-            )
-            self._db.save_values()
-            logger.debug(f"✅ Setting '{key}' gespeichert: {value}")
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern von Setting '{key}': {e}")
-
-    # =================================================================
-    # DELEGATION AN PdvmCentralDatenbank - Für Kompatibilität
-    # =================================================================
-    
-    def get_value(self, gruppe, feld, ab_zeit=None):
-        """Delegiert an PdvmCentralDatenbank"""
-        return self._db.get_value(gruppe, feld, ab_zeit)
-    
-    def set_value(self, gruppe, feld, wert, ab_zeit):
-        """Delegiert an PdvmCentralDatenbank"""
-        return self._db.set_value(gruppe, feld, wert, ab_zeit)
-    
-    def save_values(self):
-        """Delegiert an PdvmCentralDatenbank"""
-        return self._db.save_values()
-    
-    def lesen(self):
-        """Delegiert an PdvmCentralDatenbank"""
-        return self._db.lesen()
-
-    # =================================================================
-    # DEBUG UND INFO
-    # =================================================================
-    
-    def debug_info(self):
-        """Debug-Informationen über die Systemsteuerung"""
-        try:
-            all_data = self._db.lesen()
-            user_data = all_data.get(self.user_guid, {})
-            
-            info = {
-                "user_guid": self.user_guid,
-                "expert_mode": self.global_expert_mode,
-                "language": self.language,
-                "total_settings": len(user_data),
-                "available_settings": list(user_data.keys()) if user_data else []
-            }
-            
-            logger.info(f"🔍 DEBUG CentralSystemsteuerung: {info}")
-            return info
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Debug: {e}")
-            return {"error": str(e)}
-
-
-# =============================================================================
-# GLOBALER INSTANCE MANAGER  
-# =============================================================================
-
-# Globale Variable für die PdvmCentralSystemsteuerung Instanz
-_global_central_systemsteuerung = None
-
-def get_global_central_systemsteuerung():
-    """
-    Liefert die globale PdvmCentralSystemsteuerung Instanz
-    
-    Returns:
-        PdvmCentralSystemsteuerung: Die globale Instanz
+        if self._current_command is None:
+            return None
         
-    Raises:
-        RuntimeError: Wenn noch nicht initialisiert (Login erforderlich)
-    """
-    global _global_central_systemsteuerung
-    
-    if _global_central_systemsteuerung is None:
-        raise RuntimeError(
-            "❌ Globale Central-Systemsteuerung noch nicht initialisiert! Login erforderlich."
-        )
-    
-    return _global_central_systemsteuerung
+        # Setze first_call = False für Refresh
+        self._first_call = False
+        
+        # Bereite call_daten vor (mit current_command als Basis)
+        refresh_call_daten = self.prepare_call_daten(self._current_command)
+        
+        return refresh_call_daten
 
-def gcs():
+    # Delegate-Methoden für Kompatibilität mit bestehender API
+    def set_value(self, gruppe, feld, wert, ab_zeit=None):
+        """Delegate zu PdvmCentralDatenbank.set_value"""
+        return self._database.set_value(gruppe, feld, wert, ab_zeit)
+    
+    def get_value(self, gruppe, feld, stichtag=None):
+        """Delegate zu PdvmCentralDatenbank.get_value"""
+        return self._database.get_value(gruppe, feld, stichtag)
+
+
+# Globale Instanz für einfache Verwendung
+_global_instance = None
+
+def get_central_systemsteuerung(user_guid=None):
     """
-    Get Central Systemsteuerung - Eleganter Zugriff auf globale PdvmCentralSystemsteuerung
-            # Sofort persistieren (save statt save_values, damit Dirty-Flag korrekt behandelt wird)
-            self._db.save()
-        PdvmCentralSystemsteuerung: Die globale Instanz
-        
-    Raises:
-        RuntimeError: Wenn noch nicht initialisiert (Login erforderlich)
-        
-    Usage:
-        gcs().global_expert_mode = True
-        mode = gcs().global_expert_mode
+    Gibt die globale Instanz zurück oder erstellt sie
+    Vereinfachter Zugriff für lineare Architektur
     """
-    return get_global_central_systemsteuerung()
+    global _global_instance
+    if _global_instance is None:
+        _global_instance = PdvmCentralSystemsteuerung(user_guid)
+    return _global_instance
+
+
+def set_global_central_systemsteuerung(instance):
+    """
+    Setzt die globale Instanz explizit
+    Für Kompatibilität mit pdvm_systemstart.py
+    """
+    global _global_instance
+    _global_instance = instance
+    return _global_instance
+
+
+def initialize_central_systemsteuerung(user_guid):
+    """
+    Explizite Initialisierung für bekannte user_guid
+    Für Verwendung in pdvm_systemstart.py
+    """
+    global _global_instance
+    _global_instance = PdvmCentralSystemsteuerung(user_guid)
+    return _global_instance
+
+
+# Alias für gcs (get_central_systemsteuerung) - Kompatibilität
+gcs = get_central_systemsteuerung
+
+
+# Convenience Functions für direkte Verwendung
+def get_country():
+    """Direkter Zugriff auf Country"""
+    return get_central_systemsteuerung().global_country
+
+def set_country(value):
+    """Direkter Zugriff zum Setzen von Country"""
+    get_central_systemsteuerung().global_country = value
+
+def get_stichtag():
+    """Direkter Zugriff auf Stichtag"""
+    return get_central_systemsteuerung().global_stichtag
+
+def set_stichtag(value):
+    """Direkter Zugriff zum Setzen von Stichtag"""
+    get_central_systemsteuerung().global_stichtag = value
+
+def get_global_stichtag_inst():
+    """Direkter Zugriff auf die globale Pdvm_DateTime Stichtag-Instanz"""
+    return global_stichtag_inst
+
+def is_expert_mode():
+    """Direkter Zugriff auf Expert Mode"""
+    return get_central_systemsteuerung().global_expert_mode
+
+def set_expert_mode(value):
+    """Direkter Zugriff zum Setzen von Expert Mode"""
+    get_central_systemsteuerung().global_expert_mode = value
+
+def is_expert_mode_available():
+    """Prüft, ob der ExpertMode-Umschalter verfügbar ist (nur bei admin mode)"""
+    return get_central_systemsteuerung().is_expert_mode_available()
+
+
+if __name__ == "__main__":
+    # Test der Properties-basierten Architektur
+    print("=== Test PdvmCentralSystemsteuerung Properties ===")
+    
+    # Initialisierung testen
+    central = PdvmCentralSystemsteuerung("test_user")
+    print(f"Initiale Settings: {central.get_current_settings()}")
+    
+    # Properties testen
+    print(f"\nVor Änderungen:")
+    print(f"Country: {central.global_country}")
+    print(f"Expert Mode: {central.global_expert_mode}")
+    
+    # Änderungen mit automatischer Speicherung
+    central.global_country = 'DE'
+    central.global_expert_mode = True
+    
+    print(f"\nNach Änderungen:")
+    print(f"Country: {central.global_country}")
+    print(f"Expert Mode: {central.global_expert_mode}")
+    
+    # Globale Instanz testen
+    print(f"\nGlobale Instanz Test:")
+    global_central = get_central_systemsteuerung("global_user")
+    print(f"Global Settings: {global_central.get_current_settings()}")
+    
+    print("\n=== Test erfolgreich abgeschlossen ===")

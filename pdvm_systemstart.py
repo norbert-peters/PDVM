@@ -29,7 +29,7 @@ from PyQt5.QtGui import QFont
 
 # 🔒 SICHERE IMPORTS: Nur grundlegende Komponenten - Handler werden lazy geladen
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung
+from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung, set_global_central_systemsteuerung, gcs
 import pdvm_central_systemsteuerung_global
 
 # 🔒 LAZY IMPORTS: Werden erst nach Login geladen
@@ -138,11 +138,12 @@ class MainApp(QMainWindow):
         from PyQt5.QtGui import QFont
         from pdvm_date_time_picker import PdvmDateTimePicker
         
-        # Prüfe zentrale Systemsteuerung
-        if not hasattr(self, 'central_systemsteuerung') or not self.central_systemsteuerung:
-            logger.error("❌ Zentrale Systemsteuerung nicht verfügbar - kann Balken nicht erstellen")
+        # Prüfe globale Systemsteuerung (gcs)
+        gcs_instance = gcs()
+        if not gcs_instance:
+            logger.error("❌ Globale Systemsteuerung nicht verfügbar - kann Balken nicht erstellen")
             return QLabel("❌ Systemsteuerung nicht verfügbar")
-        logger.info("✅ Systemsteuerung verfügbar")
+        logger.info("✅ Globale Systemsteuerung verfügbar")
         
         # Hauptcontainer für Stichtag-Balken
         stichtag_widget = QFrame()
@@ -168,9 +169,9 @@ class MainApp(QMainWindow):
         layout.addWidget(stichtag_label)
         logger.info("✅ Stichtag-Label hinzugefügt")
         
-        # Stichtag-Instanz aus Systemsteuerung holen (neue Architektur)
+        # Stichtag-Instanz aus globaler Systemsteuerung holen
         try:
-            stichtag_inst = self.central_systemsteuerung.global_stichtag_inst
+            stichtag_inst = gcs_instance.global_stichtag_inst
             # PdvmDateTimePicker arbeitet direkt auf der Instanz
             self.stichtag_picker = PdvmDateTimePicker(
                 parent=self,
@@ -244,156 +245,126 @@ class MainApp(QMainWindow):
     def _update_stichtag_display(self):
         """
         Aktualisiert die Anzeige des verwendeten Stichtags.
-        Verwendet PdvmTimeStamp aus der zentralen Stichtag-Instanz.
+        Verwendet PdvmTimeStamp aus der globalen Stichtag-Instanz.
         """
         try:
-            if hasattr(self, 'central_systemsteuerung') and self.central_systemsteuerung:
-                stichtag_inst = self.central_systemsteuerung.global_stichtag_inst
+            gcs_instance = gcs()
+            if gcs_instance:
+                stichtag_inst = gcs_instance.global_stichtag_inst
                 # Anzeige als PdvmTimeStamp (schönes Format)
                 self.stichtag_display.setText(str(getattr(stichtag_inst, 'FormTimeStamp', stichtag_inst.PdvmDateTime)))
                 logger.debug(f"🔄 Stichtag-Anzeige aktualisiert: {getattr(stichtag_inst, 'FormTimeStamp', stichtag_inst.PdvmDateTime)}")
             else:
                 self.stichtag_display.setText("Stichtag lädt...")
-                logger.warning("⚠️ Systemsteuerung nicht verfügbar für Display-Update")
+                logger.warning("⚠️ Globale Systemsteuerung nicht verfügbar für Display-Update")
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren der Stichtag-Anzeige: {e}")
             self.stichtag_display.setText("Fehler beim Laden")
 
     def _on_stichtag_refresh(self):
         """
-        Behandelt den Refresh-Button Click.
+        🎯 NEUE LINEARE REFRESH-ARCHITEKTUR:
         
-        Supersimpler Ablauf mit zentraler Instanz:
-        1. save() auf Picker → Änderungen landen direkt in zentraler Instanz
+        Behandelt den Refresh-Button Click mit linearer Technik:
+        1. save() auf Picker → Änderungen landen direkt in zentraler Instanz  
         2. Manager informieren zur Persistierung
         3. Anzeige aktualisieren
-        4. Aktuellen Menüpunkt neu laden (zukünftig)
+        4. Aktuellen Menüpunkt neu laden (allgemein gültig für alle Menüpunkte)
+        
+        Ein Refresh ist ein wiederholter Aufruf des Menüpunktes mit first_call=False.
         """
         try:
-            logger.info("🔄 Stichtag-Refresh ausgelöst (neue Instanz-Architektur)")
-            if hasattr(self, 'central_systemsteuerung') and self.central_systemsteuerung:
+            logger.info("🎯 Stichtag-Refresh: Lineare Architektur gestartet")
+            gcs_instance = gcs()
+            
+            if gcs_instance:
                 # 1. Picker speichert direkt in die Instanz
                 if hasattr(self.stichtag_picker, 'save'):
                     self.stichtag_picker.save()
                     logger.info("✅ Picker.save() ausgeführt → Wert in Instanz geschrieben")
-                # 2. Persistiere über zentrale Systemsteuerung
-                self.central_systemsteuerung.save_stichtag()
+                
+                # 2. Persistiere über globale Systemsteuerung  
+                gcs_instance.save_stichtag()
                 logger.info("✅ Stichtag in DB gespeichert (save_stichtag)")
-            # 3. Anzeige aktualisieren
-            self._update_stichtag_display()
-            # 4. Aktuellen Menüpunkt neu laden (wie gehabt)
-            self._reload_current_menu_content()
+                
+                # 3. Anzeige aktualisieren
+                self._update_stichtag_display()
+                
+                # 4. 🎯 NEUE LINEARE TECHNIK: Menüpunkt refresh über current_command
+                refresh_call_daten = gcs_instance.refresh_current_menu()
+                
+                if refresh_call_daten:
+                    logger.info("🎯 Führe linearen Menü-Refresh aus (first_call=False)")
+                    self._execute_menu_refresh(refresh_call_daten)
+                else:
+                    logger.info("ℹ️ Kein aktueller Menüpunkt für Refresh verfügbar")
+            
         except Exception as e:
             logger.error(f"❌ Fehler beim Stichtag-Refresh: {e}")
             self._update_stichtag_display()
-
-    def _reload_current_menu_content(self):
+    
+    def _execute_menu_refresh(self, refresh_call_daten):
         """
-        Lädt den aktuellen Menüpunkt mit dem neuen Stichtag neu.
+        🎯 NEUE LINEARE REFRESH-ARCHITEKTUR:
         
-        🎯 ZENTRALE STICHTAG-ARCHITEKTUR: Nutzt die neue reload() Methode
-        des aktuellen ViewWidgets ohne Parameter-Passing (zentrale Stichtag-Abfrage).
-        """
-        try:
-            # Stichtag wird jetzt zentral abgerufen - kein Parameter-Passing mehr!
-            logger.info(f"🎯 Reloade aktuellen Content mit zentraler Stichtag-Architektur")
-            
-            # Prüfe ob aktuelles ViewWidget existiert
-            if hasattr(self, 'current_view_widget') and self.current_view_widget:
-                logger.info("🎯 Führe zentralen Stichtag-Reload auf aktuellem ViewWidget aus...")
-                
-                # 🎯 NEUE ZENTRALE ARCHITEKTUR: reload() ohne Parameter!
-                if hasattr(self.current_view_widget, 'reload'):
-                    self.current_view_widget.reload()
-                    logger.info("✅ ViewWidget erfolgreich mit zentralem Stichtag refresht")
-                elif hasattr(self.current_view_widget, 'reload_with_stichtag'):
-                    # Kompatibilität: Alte Methode (deprecated)
-                    logger.warning("⚠️ ViewWidget verwendet noch deprecated reload_with_stichtag()")
-                    new_stichtag = self.stichtag_manager.get_stichtag_float()
-                    self.current_view_widget.reload_with_stichtag(new_stichtag)
-                    logger.info("✅ ViewWidget mit deprecated Methode refresht")
-                else:
-                    # Fallback für ältere Widget-Versionen
-                    logger.info("🔄 Fallback: Vollständige Widget-Neuladung...")
-                    if hasattr(self.current_view_widget, 'reload_data'):
-                        self.current_view_widget.reload_data()
-                    elif hasattr(self.current_view_widget, 'load_data'):
-                        self.current_view_widget.load_data()
-                    else:
-                        logger.warning("⚠️ Widget hat keine Reload-Methode")
-                        
-            else:
-                logger.info("ℹ️ Kein aktuelles ViewWidget für Reload verfügbar")
-                # Hier könnte zukünftig andere Content-Reload-Logik stehen
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Reload des aktuellen Menüpunkts: {e}")
-            import traceback
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-
-    def _widget_reload_callback(self, reload_call_daten):
-        """
-        PARENT-CALLBACK für echten Widget-Reload:
-        
-        Das aktuelle Widget kann sich nicht selbst komplett neu aufbauen.
-        Diese Callback-Methode wird vom Widget aufgerufen und:
-        1. Entfernt das alte Widget aus dem Layout
-        2. Erstellt ein komplett neues Widget mit reload_call_daten
-        3. Fügt das neue Widget in das Layout ein
+        Führt den Menü-Refresh durch - allgemein gültig für alle Menüpunkte.
+        Ein Refresh ist ein wiederholter Aufruf des Menüpunktes mit first_call=False.
         
         Args:
-            reload_call_daten (dict): Call-Daten für Widget-Initialisierung (mit first_call=False)
+            refresh_call_daten (dict): Call-Daten mit first_call=False für Refresh
         """
-        logger.info("🔄 === PARENT-CALLBACK: Widget-Neuinitialisierung ===")
-        
         try:
-            # SCHRITT 1: Altes Widget entfernen
-            if hasattr(self, 'current_view_widget') and self.current_view_widget:
-                logger.info("🗑️ Entferne altes Widget aus Layout...")
-                self.content_layout.removeWidget(self.current_view_widget)
-                self.current_view_widget.deleteLater()  # Qt-korrekte Entfernung
+            logger.info("🎯 Starte linearen Menü-Refresh...")
+            
+            # Schließe aktuelles Display-Widget falls vorhanden
+            if hasattr(self, 'current_display_widget') and self.current_display_widget:
+                logger.info("🔄 Entferne aktuelles Display-Widget für Refresh")
+                self.content_layout.removeWidget(self.current_display_widget)
+                self.current_display_widget.deleteLater()
+                self.current_display_widget = None
+                
+            # Setze Dialog-Referenz zurück
+            if hasattr(self, 'current_view_widget'):
                 self.current_view_widget = None
-                logger.info("✅ Altes Widget entfernt")
             
-            # SCHRITT 2: Neues Widget erstellen
-            logger.info("🔧 Erstelle neues Widget mit reload_call_daten...")
-            from pdvm_view_widget import PdvmViewWidget
+            # 🎯 LINEARE TECHNIK: Wiederholter Menüaufruf mit first_call=False
+            logger.info(f"🎯 Führe Menü-Refresh aus: {refresh_call_daten.get('title', 'Unknown')}")
             
-            new_widget = PdvmViewWidget(
-                call_daten=reload_call_daten,
-                parent=self,
-                reload_callback=self._widget_reload_callback  # Callback für nächste Reloads
-            )
+            # Lade den Handler für den Refresh-Aufruf
+            from pdvm_view_dialog import PdvmViewDialog
             
-            # SCHRITT 3: Neues Widget in Layout einbinden
-            logger.info("📦 Binde neues Widget in Layout ein...")
-            self.content_layout.addWidget(new_widget, 1)
-            self.current_view_widget = new_widget
+            # Erstelle neuen Dialog mit Refresh-call_daten
+            view_dialog = PdvmViewDialog(refresh_call_daten, parent=self)
+            view_widget = view_dialog.get_display_widget()
             
-            # SCHRITT 4: UI-Updates
-            self.content_frame.updateGeometry()
-            from PyQt5.QtWidgets import QApplication
-            QApplication.processEvents()
+            # Zeige refreshten Content
+            self.content_layout.addWidget(view_widget)
+            view_widget.show()
             
-            logger.info("✅ Parent-Callback: Widget-Neuinitialisierung erfolgreich abgeschlossen")
+            # Speichere Referenzen für weiteren Refresh
+            self.current_view_widget = view_dialog  # PdvmViewDialog-Instanz
+            self.current_display_widget = view_widget  # Das tatsächliche QWidget
+            
+            logger.info("✅ Linearer Menü-Refresh erfolgreich abgeschlossen")
             
         except Exception as e:
-            logger.error(f"❌ Parent-Callback: Widget-Reload fehlgeschlagen: {e}")
+            logger.error(f"❌ Fehler beim Menü-Refresh: {e}")
             import traceback
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
     def _refresh_stichtag_bar_after_init(self):
         """
-        Aktualisiert den Stichtag-Balken nach vollständiger Initialisierung des Stichtag-Managers.
-        Da wir die zentrale Instanz verwenden, ist normalerweise kein Update nötig.
+        Aktualisiert den Stichtag-Balken nach vollständiger Initialisierung.
+        Da wir die globale Instanz verwenden, ist normalerweise kein Update nötig.
         """
         try:
-            if (hasattr(self, 'stichtag_manager') and hasattr(self, 'stichtag_picker')):
+            if hasattr(self, 'stichtag_picker') and self.stichtag_picker:
                 logger.info("🔄 Aktualisiere Stichtag-Balken nach Initialisierung")
                 
-                # Picker sollte bereits die zentrale Instanz verwenden,
+                # Picker sollte bereits die globale Instanz verwenden,
                 # aber wir können das Display trotzdem aktualisieren
-                self.stichtag_picker.update_display()
+                if hasattr(self.stichtag_picker, 'update_display'):
+                    self.stichtag_picker.update_display()
                 self._update_stichtag_display()
                 
                 logger.info("✅ Stichtag-Balken erfolgreich aktualisiert")
@@ -406,37 +377,61 @@ class MainApp(QMainWindow):
         """
         Initialisiert die zentrale Systemsteuerung-Instanz für die gesamte Anwendung.
         
-        NEUE ARCHITEKTUR (Post-Login):
-        - PdvmCentralSystemsteuerung wird bereits im Login initialisiert
-        - MainApp verwendet die bereits vorhandene globale Instanz
-        - Nur StichtagManager wird hier neu erstellt (benötigt MainApp-Kontext)
+        VEREINFACHTE ARCHITEKTUR:
+        - PdvmCentralSystemsteuerung wird hier erstellt mit user_guid
+        - Alle Werte werden automatisch mit Defaults initialisiert
+        - Globale Instanz wird gesetzt für anderen Code
         """
         try:
-            # 🎯 GLOBALE SYSTEMSTEUERUNG BEREITS VERFÜGBAR: Vom Login initialisiert
-            # Zugriff auf globale Instanz aus dem zentralen Modul
-            self.central_systemsteuerung = pdvm_central_systemsteuerung_global.central_systemsteuerung
-            if self.central_systemsteuerung is None:
-                raise RuntimeError("❌ Globale Central-Systemsteuerung nicht initialisiert! Login erforderlich.")
+            # ✅ NEUE EINFACHE IMPLEMENTATION: Erstelle CentralSystemsteuerung
+            logger.info(f"🎛️ Erstelle CentralSystemsteuerung für User: {self.user_guid}")
+            self.central_systemsteuerung = PdvmCentralSystemsteuerung(self.user_guid)
             
-            # Sprache laden - jetzt über elegante Property
-            self.language = self.central_systemsteuerung.language
-            logger.info(f"🎛️ Zentrale Architektur bereit: Stichtag={self.central_systemsteuerung.global_stichtag}, Sprache={self.language}")
-            logger.info(f"🎯 ExpertMode verfügbar über: central_systemsteuerung.global_expert_mode")
+            # ✅ GLOBALE INSTANZ setzen für Legacy Code
+            set_global_central_systemsteuerung(self.central_systemsteuerung)
+            pdvm_central_systemsteuerung_global.central_systemsteuerung = self.central_systemsteuerung
+            
+            # Debug-Ausgabe aller initialisierten Werte
+            self.central_systemsteuerung.debug_values()
+            
+            # Sprache für App-Kontext übernehmen
+            self.language = self.central_systemsteuerung.global_language
+            
+            logger.info(f"✅ Zentrale Systemsteuerung vollständig initialisiert")
+            logger.info(f"🎯 Alle Werte verfügbar über Properties: global_stichtag, global_expert_mode, global_mode, global_language, global_country")
+            
             # Stichtag-Balken nach vollständiger Initialisierung aktualisieren
             self._refresh_stichtag_bar_after_init()
             
         except Exception as e:
             logger.error(f"❌ Fehler bei der Initialisierung der zentralen Systemsteuerung: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback-Werte
             self.central_systemsteuerung = None
-            self.stichtag_manager = None
-            self.stichtag = "2025216"
+            self.language = "de-de"
             self.language = "DE"
 
     def _refresh_stichtag_bar_after_init(self):
-        """Aktualisiert die Stichtag-Balken nach der vollständigen Initialisierung"""
-        if hasattr(self, 'stichtag_bar') and self.stichtag_bar:
-            self._update_stichtag_display()
+        """
+        Aktualisiert den Stichtag-Balken nach vollständiger Initialisierung.
+        Da wir die globale Instanz verwenden, ist normalerweise kein Update nötig.
+        """
+        try:
+            if hasattr(self, 'stichtag_picker') and self.stichtag_picker:
+                logger.info("🔄 Aktualisiere Stichtag-Balken nach Initialisierung")
+                
+                # Picker sollte bereits die globale Instanz verwenden,
+                # aber wir können das Display trotzdem aktualisieren
+                if hasattr(self.stichtag_picker, 'update_display'):
+                    self.stichtag_picker.update_display()
+                self._update_stichtag_display()
+                
+                logger.info("✅ Stichtag-Balken erfolgreich aktualisiert")
+            else:
+                logger.warning("⚠️ Stichtag-Balken-Komponenten nicht verfügbar für Update")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren des Stichtag-Balkens: {e}")
 
     def _show_label(self, texts, small=False, clear_content=True):
         """
@@ -613,96 +608,95 @@ class MainApp(QMainWindow):
             logger.error(f"❌ Fehler beim Starten der Anwendung '{application_name}': {e}")
             self.show_text(f"❌ Fehler beim Starten der Anwendung '{application_name}'\n{str(e)}")
 
-    def open_app_menu(self, application_name):
+    def pdvm_modern_view(self, frame_guid, title=None):
         """
-        DEPRECATED: Kompatibilitätsmethode für alte Menü-Referenzen
-        Leitet zu pdvm_start weiter
-        """
-        logger.warning(f"⚠️ open_app_menu() ist deprecated, verwende pdvm_start('{application_name}')")
-        self.pdvm_start(application_name)
-
-    def pdvm_modern_view(self, frame_guid):
-        """
-        Zentrale PDVM View - der einzige View mit dem weiter gearbeitet wird
+        🔧 TITEL-FIX: Moderne View-Dialog Integration mit korrekter Titel-Übergabe
         
-        Einfacher Aufruf mit frame_guid
-        Erstellt call_daten und startet Widget
+        Vereinfachte Dialog-basierte View-Architektur:
+        - Dialog = autonome Anwendung + Datenmanager
+        - Display = nur UI-Verantwortung
+        - Lineare Ausführung statt komplexe Widget/Manager-Struktur
         """
         if not frame_guid:
             logger.error("❌ Es wurde keine frame_guid übergeben!")
-            self.clear_content_layout()
-            self._show_label("❌ Es wurde keine frame_guid übergeben!", small=False, clear_content=False)
+            self.show_text("❌ Fehler: Keine Frame-GUID übergeben")
             return
 
-        self.clear_content_layout()
-        
         try:
-            logger.info(f"🎯 PDVM Modern View gestartet für Frame: {frame_guid}")
+            logger.info(f"🚀 Starte moderne View für Frame: {frame_guid}")
             
-            # Frame-Daten laden
+            # Frame-Daten laden (bestehende Logik)
             framedaten_db = PdvmCentralDatenbank(
                 db_name="PdvmManager.db",
                 table_name="framedaten", 
                 guid=frame_guid
             )
-            # View-GUID aus Frame-Daten
+            
+            # View-GUID aus Frame-Daten ermitteln (bestehende Logik)
             view_guid = framedaten_db.get_static_value("ROOT", "VIEW_GUID")
             if not view_guid:
-                logger.error(f"❌ Keine view_guid in Frame-Daten gefunden")
+                logger.error(f"❌ Keine view_guid in Frame-Daten gefunden für Frame: {frame_guid}")
+                self.show_text(f"❌ Fehler: Keine View-GUID für Frame {frame_guid} gefunden")
                 return
 
-            # Prüfe und ergänze 'mode' in zentraler Systemsteuerung, falls nicht vorhanden
-            mode_data = self.central_systemsteuerung.get_value(
-                gruppe=self.user_guid,
-                feld="mode",
-                ab_zeit=None
-            )
-            if not mode_data or "wert" not in mode_data:
-                self.central_systemsteuerung.set_value(
-                    gruppe=self.user_guid,
-                    feld="mode",
-                    wert="user",
-                    ab_zeit=1001.0
-                )
-                self.central_systemsteuerung.save_values()
-                logger.info("✅ 'mode' in Systemsteuerung initialisiert auf 'user'")
+            logger.info(f"📋 View-GUID ermittelt: {view_guid}")
+            
+            # 🔧 TITEL-ERSTELLUNG aus Frame-Daten oder Parameter
+            view_title = title
+            if not view_title:
+                # Versuche Titel aus Frame-Daten zu holen
+                try:
+                    view_header = framedaten_db.get_static_value("ROOT", "VIEW_HEADER")
+                    if view_header:
+                        view_title = view_header
+                    else:
+                        view_title = f"Personalstamm Verwaltung"
+                        logger.info(f"📝 Titel aus Frame-Header erstellt: {view_title}")
+                except Exception as title_error:
+                    logger.warning(f"⚠️ Fehler beim Titel-Laden: {title_error}")
+                    view_title = f"View: {view_guid}"
 
-
-            # BEREINIGT: call_daten ohne 'mode' und 'stichtag' - Widget holt zentral
+            # call_daten für neuen Dialog vorbereiten - ALLE ERFORDERLICHEN Daten
             call_daten = {
                 "view_guid": view_guid,
                 "user_guid": self.user_guid,
-                "view_header": "Übersicht Personaldaten",
-                "first_call": True
+                "title": view_title,  # Immer einen Titel setzen!
+                "first_call": True,  # Initialer Aufruf
             }
+            
+            logger.info(f"📋 Call-Daten vorbereitet: view_guid={view_guid}, user_guid={self.user_guid}, title='{view_title}'")
 
-            logger.info(f"📋 call_daten: {call_daten}")
+            # 🎯 NEUE REFRESH-ARCHITEKTUR: Command in Systemsteuerung speichern
+            gcs_instance = gcs()
+            if gcs_instance:
+                gcs_instance.set_menu_command(call_daten, from_menu=True)
+                call_daten = gcs_instance.prepare_call_daten(call_daten)  # first_call automatisch setzen
+                logger.info("🎯 Menübefehl in Systemsteuerung gespeichert für Refresh-Mechanismus")
 
-            # PDVM View Widget erstellen
-            from pdvm_view_widget import PdvmViewWidget
-
-            view_widget = PdvmViewWidget(
-                call_daten=call_daten,
-                parent=self,
-                reload_callback=self._widget_reload_callback  # Parent-Callback für echten Reload
-            )
+            # Neue Dialog-Architektur starten
+            from pdvm_view_dialog import PdvmViewDialog
             
-            # Widget in Layout einbinden
-            self.content_layout.addWidget(view_widget, 1)
+            view_dialog = PdvmViewDialog(call_daten, parent=self)
             
-            # Widget persistent halten
-            self.current_view_widget = view_widget
+            # Widget für Arbeitsbereich holen und integrieren
+            view_widget = view_dialog.get_display_widget()
             
-            # Layout-Updates
-            self.content_frame.updateGeometry()
-            QApplication.processEvents()
+            # Altes Content löschen und neues Widget hinzufügen
+            self.clear_content_layout()
+            self.content_layout.addWidget(view_widget)
             
-            logger.info(f"✅ PDVM Modern View erfolgreich geladen")
+            # ViewDialog für Stichtag-Refresh speichern (nicht nur das Display-Widget!)
+            self.current_view_widget = view_dialog  # Das Dialog hat die reload() Methode
+            self.current_display_widget = view_widget  # Für spätere Verwendung
+            
+            logger.info(f"✅ Moderne View-Dialog gestartet: {view_guid} mit Titel '{view_title}'")
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Laden des PDVM Modern View: {e}")
+            logger.error(f"❌ Fehler beim Starten der modernen View: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            # Benutzerfreundliche Fehlermeldung anzeigen
+            self.show_text(f"❌ Fehler beim Laden der View:\n\n{str(e)}")
 
     def toggle_menu_visibility(self):
         """
@@ -760,15 +754,16 @@ class MainApp(QMainWindow):
     def _save_menu_visibility_status(self):
         """Speichert den Menü-Sichtbarkeits-Status für das aktuelle Menü in der systemsteuerung-Tabelle."""
         try:
-            if not self.central_systemsteuerung:
-                logger.warning("⚠️ Zentrale Systemsteuerung nicht verfügbar - Menü-Status wird nicht gespeichert")
+            gcs_instance = gcs()
+            if not gcs_instance:
+                logger.warning("⚠️ Globale Systemsteuerung nicht verfügbar - Menü-Status wird nicht gespeichert")
                 return
             
             current_menu_id = self._get_current_menu_id()
             menu_visible = getattr(self, '_menu_visible', True)
             
             # MenuStatus unter user_guid-Gruppe speichern
-            self.central_systemsteuerung.set_value(
+            gcs_instance.set_value(
                 gruppe=self.user_guid,  # user_guid ist die Gruppe
                 feld=f"menu_{current_menu_id}",  # Feld: menu_<menu_id>
                 wert=menu_visible,
@@ -776,9 +771,9 @@ class MainApp(QMainWindow):
             )
             
             # Änderungen persistieren
-            self.central_systemsteuerung.save_values()
+            gcs_instance.save_values()
             
-            logger.debug(f"💾 Menü-Status in zentrale Systemsteuerung gespeichert: Gruppe={self.user_guid}, Feld=menu_{current_menu_id}, Wert={menu_visible}")
+            logger.debug(f"💾 Menü-Status in globale Systemsteuerung gespeichert: Gruppe={self.user_guid}, Feld=menu_{current_menu_id}, Wert={menu_visible}")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern des Menü-Status: {e}")
@@ -791,13 +786,14 @@ class MainApp(QMainWindow):
                 self._ensure_menu_visible()
                 return
             
-            if not self.central_systemsteuerung:
-                logger.warning("⚠️ Zentrale Systemsteuerung nicht verfügbar - Menü wird eingeblendet")
+            gcs_instance = gcs()
+            if not gcs_instance:
+                logger.warning("⚠️ Globale Systemsteuerung nicht verfügbar - Menü wird eingeblendet")
                 self._ensure_menu_visible()
                 return
             
             # MenuStatus aus user_guid-Gruppe laden
-            menu_value = self.central_systemsteuerung.get_value(
+            menu_value = gcs_instance.get_value(
                 gruppe=self.user_guid,  # user_guid ist die Gruppe
                 feld=f"menu_{menu_id}",  # Feld: menu_<menu_id>
                 ab_zeit=None  # Aktueller Zeitstempel

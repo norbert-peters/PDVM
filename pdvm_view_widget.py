@@ -9,13 +9,14 @@ Alle Widgets verwenden jetzt reload() ohne Parameter.
 
 import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, 
-                           QHeaderView, QPushButton, QMenuBar, QLabel, QMenu, QAction)
+                           QHeaderView, QPushButton, QMenuBar, QLabel, QMenu, QAction, QMessageBox)
 from PyQt5.QtCore import Qt
 
 # GLOBALE IMPORTS: Einfacher Zugriff auf zentrale Funktionen
 
 # Globale Instanz direkt importieren
 import pdvm_central_systemsteuerung_global
+from pdvm_central_systemsteuerung import is_expert_mode_available
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 logger = logging.getLogger(__name__)
@@ -151,9 +152,9 @@ class PdvmViewWidget(QWidget):
             action_spalten.triggered.connect(self.on_spalten_verwalten)
             settings_menu.addAction(action_spalten)
 
-            # 2. Experten Modus ein/aus (nur bei mode='admin')
+            # 2. Experten Modus ein/aus (nur bei Admin-Mode verfügbar)
             logger.debug(f"🔧 Experten Modus: '{gcs.global_mode}' (aktuell: {gcs.global_expert_mode})")
-            if gcs.global_mode == 'admin':
+            if is_expert_mode_available():
                 # Status-abhängiger Menütext - AKTUELLER Status
                 expert_status = "ausschalten" if gcs.global_expert_mode else "einschalten"
                 action_expert = QAction(f"🔧 Experten Modus {expert_status}", self)
@@ -177,29 +178,47 @@ class PdvmViewWidget(QWidget):
     
     def on_spalten_verwalten(self):
         """Spalten verwalten: Öffnet den Matrix-Spaltendialog und übernimmt Änderungen."""
-#        try:
-        from pdvm_view_column_settings_dialog import ColumnSettingsDialog
-        # Hole die aktuelle Spaltenprojektion und den Modus direkt aus dem Datenmanager
-        display_columns = self.view_manager.get_table_data_for_display()
-        columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
-        # Dialog bestimmt Modus selbst aus Systemsteuerung
-        dlg = ColumnSettingsDialog(columns, self)
-        logger.info(f"🔧 Öffne Spaltendialog mit {len(columns)} Spalten (ExpertMode: {gcs.global_expert_mode})")
-        if dlg.exec_() and dlg.result_controls is not None:
-            # Schreibe die neuen Controls in die Systemsteuerung
-            persist_map = {col['name']: {
-                'show': col['show'],
-                'expertOrder': col['expertOrder'],
-                'displayOrder': col['displayOrder']
-            } for col in dlg.result_controls}
-            gcs.set_value(gruppe=self.view_manager.view_guid, feld="ColumnControls", wert=persist_map, ab_zeit=1001.0)
-            gcs.save_values()
-            # Nur Controls und Projektion neu laden, Datenbasis bleibt erhalten
-            self.view_manager.refresh_controls_and_projection()
-            logger.info("✅ Spalteneinstellungen übernommen und Projektion neu geladen (ohne Datenbasis-Neuladen)")
-            self.reload()
-#        except Exception as e:
-#            logger.error(f"❌ Fehler beim Öffnen des Spaltendialogs: {e}")
+        try:
+            from pdvm_view_column_settings_dialog import ColumnSettingsDialog
+            
+            # KORREKTUR: Alle basis_columns verwenden, nicht nur die in display_columns
+            # und sicherstellen, dass alle notwendigen Felder vorhanden sind
+            columns = []
+            for col in self.view_manager.basis_columns:
+                # Kopiere Spalte und stelle sicher, dass alle Order-Felder vorhanden sind
+                col_copy = col.copy()
+                col_copy['show'] = col_copy.get('show', False)
+                col_copy['expertOrder'] = col_copy.get('expertOrder', 999)
+                col_copy['displayOrder'] = col_copy.get('displayOrder', 999)
+                columns.append(col_copy)
+                
+            # Dialog bestimmt Modus selbst aus Systemsteuerung
+            dlg = ColumnSettingsDialog(columns, self)
+            logger.info(f"🔧 Öffne Spaltendialog mit {len(columns)} Spalten (ExpertMode: {gcs.global_expert_mode})")
+            
+            if dlg.exec_() and dlg.result_controls is not None:
+                logger.info(f"✅ Dialog akzeptiert, übertrage {len(dlg.result_controls)} Spalteneinstellungen")
+                
+                # Änderungen über DatenManager speichern (persistiert automatisch)
+                logger.info("🔄 Speichere Änderungen über view_manager.save_column_configuration")
+                success = self.view_manager.save_column_configuration(dlg.result_controls)
+                
+                if success:
+                    logger.info("💾 Neue Controls erfolgreich in Systemsteuerung gespeichert")
+                    
+                    # basis_columns aus DatenManager neu laden (aktualisiert mit Persistent-Daten) 
+                    self.view_manager.refresh_controls_and_projection()
+                    logger.info("� Controls und Projection aus Systemsteuerung neu geladen")
+                    
+                    # Tabelle neu laden
+                    self._load_table_data()
+                    logger.info("✅ Tabelle mit neuen Controls aktualisiert")
+                else:
+                    logger.error("❌ Fehler beim Speichern der Spalten-Konfiguration")
+                    QMessageBox.warning(self, "Fehler", "Die Spalten-Konfiguration konnte nicht gespeichert werden.")
+                    
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Öffnen des Spaltendialogs: {e}")
         
     def on_expert_modus_toggle(self):
         """Moduswechsel zwischen ExpertMode (all) und NormalMode (show) mit Persistenz in Systemsteuerung"""
@@ -212,8 +231,12 @@ class PdvmViewWidget(QWidget):
                 logger.info(f"� ExpertMode in Systemsteuerung gespeichert: {new_mode}")
             except Exception as e2:
                 logger.warning(f"⚠️ Fehler beim Speichern von ExpertMode in Systemsteuerung: {e2}")
-            # Wert aus Systemsteuerung holen (immer synchronisieren)
-            self.reload()
+            
+            # EINFACH: Nur Tabelle neu laden, keine komplette Widget-Neuinitialisierung
+            logger.info(f"🔄 Moduswechsel: ExpertMode={new_mode}")
+            self._load_table_data()
+            logger.info("✅ Tabelle nach Moduswechsel aktualisiert")
+            
         except Exception as e:
             logger.error(f"❌ Fehler beim Moduswechsel: {e}")
 
@@ -234,13 +257,14 @@ class PdvmViewWidget(QWidget):
             logger.info(f"🔧 first_call={first_call}")
             
             # EINFACHE ENTSCHEIDUNG:
-            if not hasattr(self, 'view_manager') or self.view_manager is None or first_call:
-                # Fall 1: Neuen ViewManager erstellen (erstes Laden oder Tabellenwechsel)
-                logger.info("🔧 Erstelle neuen ViewManager (kein Manager vorhanden oder first_call=True)")
+            if not hasattr(self, 'view_manager') or self.view_manager is None:
+                # Fall 1: Neuen ViewManager erstellen (erstes Laden oder kein Manager vorhanden)
+                logger.info("🔧 Erstelle neuen ViewManager (kein Manager vorhanden)")
                 
                 # BEREINIGT: Call-Daten ohne 'stichtag' - ViewManager holt zentral
                 initial_call_data = dict(self.call_daten)
-                initial_call_data['first_call'] = True
+                # Nur beim wirklich ersten Laden first_call=True, sonst False um gespeicherte Settings zu erhalten
+                initial_call_data['first_call'] = first_call if first_call else False
                 # BEREINIGT: 'stichtag' aus call_daten entfernen
                 initial_call_data.pop('stichtag', None)
                 
@@ -276,7 +300,11 @@ class PdvmViewWidget(QWidget):
             if self.view_manager:
                 # Hole Daten und Spaltenprojektion ausschließlich aus get_table_data_for_display
                 data, display_columns = self.view_manager.get_table_data_for_display()
-                columns = [col for col in self.view_manager.basis_columns if col['name'] in display_columns]
+                
+                # ZENTRALE PROJEKTION: Verwende dieselbe Logik wie Dialog  
+                from column_projection_helper import get_projected_columns
+                columns = get_projected_columns(self.view_manager.basis_columns)
+                
                 headers = [col.get('spaltenueberschrift', col.get('name', '')) for col in columns]
                 col_names = [col['name'] for col in columns]
                 abdatum_matrix = None
@@ -285,7 +313,10 @@ class PdvmViewWidget(QWidget):
                 if data and len(data) > 0 and headers:
                     self.table.setRowCount(len(data))
                     self.table.setColumnCount(len(col_names))
-                    self.table.setHorizontalHeaderLabels([str(h) for h in headers])
+                    
+                    # Spalten-Header mit spezieller Formatierung setzen
+                    self.set_enhanced_headers(headers, col_names)
+                    
                     for row_idx, row_data in enumerate(data):
                         for col_idx, cell_value in enumerate(row_data):
                             item = QTableWidgetItem(str(cell_value))
@@ -318,8 +349,11 @@ class PdvmViewWidget(QWidget):
         
         # Grundlegende Tabelle mit Standard-Spalten
         headers = ["GUID", "Vorname", "Nachname", "Geburtsdatum", "Status"]
+        col_names = ["guid", "vorname", "nachname", "geburtsdatum", "status"]
         self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
+        
+        # Enhanced Headers auch für Fallback verwenden
+        self.set_enhanced_headers(headers, col_names)
         
         # Test-Daten einfügen
         test_data = [
@@ -337,6 +371,66 @@ class PdvmViewWidget(QWidget):
         self.table.resizeColumnsToContents()
         
         logger.info(f"✅ Fallback-Tabelle erstellt mit {len(test_data)} Test-Zeilen")
+        
+    def set_enhanced_headers(self, headers, col_names):
+        """Setzt verbesserte Spalten-Headers mit ExpertMode Unterstützung"""
+        
+        # Header-Styling verbessern
+        header = self.table.horizontalHeader()
+        
+        if gcs.global_expert_mode:
+            # OPTION 1: Zweizeilige Header mit \n (Ihre bevorzugte Lösung)
+            # Erstelle zweizeilige Header-Labels
+            enhanced_headers = []
+            for header_text, col_name in zip(headers, col_names):
+                # Zweizeilig mit \n
+                two_line_header = f"{header_text}\n({col_name})"
+                enhanced_headers.append(two_line_header)
+            
+            # Setze zweizeilige Header
+            self.table.setHorizontalHeaderLabels(enhanced_headers)
+            
+            # ExpertMode Styling mit mehr Höhe für zwei Zeilen
+            header.setMinimumHeight(55)  # Mehr Platz für \n
+            header.setStyleSheet("""
+                QHeaderView::section {
+                    font-weight: bold;
+                    font-size: 10pt;
+                    padding: 6px 4px;
+                    border: 1px solid #ddd;
+                    background-color: #e8f4fd;
+                    color: #2c3e50;
+                    text-align: center;
+                }
+                QHeaderView::section:hover {
+                    background-color: #d4edda;
+                }
+            """)
+            
+            # GETRENNTE STEUERUNG: Abdatum-Tooltips bleiben in Datenzellen
+            # (keine Header-Tooltips nötig, da Control-Key bereits sichtbar ist)
+            
+        else:
+            # NormalMode: Standard einzeilige Header
+            self.table.setHorizontalHeaderLabels([str(h) for h in headers])
+            
+            # NormalMode Styling
+            header.setMinimumHeight(35)
+            header.setStyleSheet("""
+                QHeaderView::section {
+                    font-weight: bold;
+                    font-size: 11pt;
+                    padding: 6px;
+                    border: 1px solid #ddd;
+                    background-color: #f5f5f5;
+                    color: #2c3e50;
+                }
+            """)
+            # WICHTIG: Keine Header-Tooltips, damit Abdatum-Tooltips in Zellen funktionieren
+        
+        # Headers resizable machen
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.Interactive)
         
     def reload(self):
         """

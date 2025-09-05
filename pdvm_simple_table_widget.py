@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
+from pdvm_central_systemsteuerung import is_expert_mode_available
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class PdvmSimpleTableWidget(QWidget):
         spalten_action.triggered.connect(self.settings_requested.emit)
         self.menu.addAction(spalten_action)
         
-        # Expert-Mode Toggle (wenn Admin-Mode)
-        if self.mode == 'admin':
+        # Expert-Mode Toggle (nur bei Admin-Mode verfügbar)
+        if is_expert_mode_available():
             self.menu.addSeparator()
             self.expert_action = QAction("👥 Expert-Mode umschalten", self)
             self.expert_action.triggered.connect(self._toggle_expert_mode)

@@ -125,8 +125,7 @@ class LoginApp(QWidget):
             import pdvm_central_systemsteuerung_global
 
             pdvm_central_systemsteuerung_global.central_systemsteuerung = PdvmCentralSystemsteuerung(
-                user_guid=user_guid,
-                db_name="PdvmManager.db"
+                user_guid=user_guid
             )
             logger.info("🎛️ PdvmCentralSystemsteuerung initialisiert (global)")
             logger.info("🎯 ExpertMode verfügbar über: central_systemsteuerung_global.central_systemsteuerung.global_expert_mode")
