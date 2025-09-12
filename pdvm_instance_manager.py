@@ -53,7 +53,7 @@ class PdvmInstanceManager:
                 # GUID bestimmen: Für Root-Tabelle root_guid, sonst Dummy oder None
                 guid = self.root_guid if table == self.root_table.lower() else None
                 try:
-                    inst = PdvmCentralDatenbank(db_name=self.db_name, table_name=table, guid=guid, path=self.root_path, source_path=sp)
+                    inst = PdvmCentralDatenbank(table_name=table, guid=guid, path=self.root_path, source_path=sp)
                     inst.guid_source = "ROOT" if table == self.root_table.lower() else f"AUTO_{table}_{sp}"
                     self.instances[(table, sp)] = inst
                     logger.info(f"[InstanceManager] Instanz für ({table}, {sp}) erzeugt.")
@@ -74,7 +74,7 @@ class PdvmInstanceManager:
                 key = (dropdown_table, dropdown_source_path)
                 if key not in self.instances:
                     try:
-                        dropdown_inst = PdvmCentralDatenbank(db_name=self.db_name, table_name=dropdown_table, guid=dropdown_guid, source_path=dropdown_source_path)
+                        dropdown_inst = PdvmCentralDatenbank(table_name=dropdown_table, guid=dropdown_guid, source_path=dropdown_source_path)
                         dropdown_inst.guid_source = f"DROPDOWN_{field_key}"
                         self.instances[key] = dropdown_inst
                         logger.info(f"[InstanceManager] Dropdown-Instanz für {field_key}: {key} erzeugt.")
@@ -89,7 +89,7 @@ class PdvmInstanceManager:
                 key = (help_table, help_source_path)
                 if key not in self.instances:
                     try:
-                        help_inst = PdvmCentralDatenbank(db_name=self.db_name, table_name=help_table, guid=help_guid, source_path=help_source_path)
+                        help_inst = PdvmCentralDatenbank(table_name=help_table, guid=help_guid, source_path=help_source_path)
                         help_inst.guid_source = f"HELP_{field_key}"
                         self.instances[key] = help_inst
                         logger.info(f"[InstanceManager] Hilfe-Instanz für {field_key}: {key} erzeugt.")
@@ -156,7 +156,7 @@ class PdvmInstanceManager:
                     key = (sub_table, source_path)
                     if key not in self.instances:
                         logger.info(f"[InstanceManager] Baue Sub-Instanz: {key} mit GUID={sub_guid} (abdatum={abdatum}) aus Feld {grp}.{fld}")
-                        sub_inst = PdvmCentralDatenbank(db_name=self.db_name, table_name=sub_table, guid=sub_guid, path=path, source_path=source_path)
+                        sub_inst = PdvmCentralDatenbank(table_name=sub_table, guid=sub_guid, path=path, source_path=source_path)
                         sub_inst.guid_source = f"{table}_{guid}_{fld}"  # Herkunft merken
                         self.instances[key] = sub_inst
                         logger.info(f"[InstanceManager] Instanz aufgebaut: {key} via {sub_inst.guid_source} (GUID={sub_guid}, abdatum={abdatum})")
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     import sys
     frame_guid = "4078079f-4028-45ed-879c-3c779ecf3d0d"  # Setze hier deine Frame-GUID
     from pdvm_central_datenbank import PdvmCentralDatenbank
-    frm_db = PdvmCentralDatenbank(db_name="PdvmManager.db", table_name="framedaten", guid=frame_guid)
+    frm_db = PdvmCentralDatenbank(table_name="framedaten", guid=frame_guid)
     raw_frame = frm_db.lesen()
     if not raw_frame:
         print(f"Keine Framedaten für GUID {frame_guid} gefunden!")

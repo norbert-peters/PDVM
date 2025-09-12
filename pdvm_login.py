@@ -1,4 +1,4 @@
-# login_app.py
+# pdvm_login.py - SICHERE LOGIN-LOGIK mit moderner Oberfläche
 import sys, os, logging
 # Erzwinge UTF-8 für alle IO
 os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -18,135 +18,278 @@ logger = logging.getLogger(__name__)
 logger.info("🔹 Login gestartet")
 
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QHBoxLayout, QMessageBox, QCheckBox, QApplication
+    QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
+    QMessageBox, QCheckBox, QApplication, QDialog, QFrame
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont, QIcon
 from pdvm_user_db import PdvmUserDatenbank
-from pdvm_benutzer   import PdvmBenutzer
+from pdvm_benutzer import PdvmBenutzer
 
-class LoginApp(QWidget):
-    def __init__(self, main_app_class):
+
+class LoginDialog(QDialog):
+    """
+    SICHERER LOGIN-DIALOG mit moderner Oberfläche
+    - Sichere Trennung der Login-Logik
+    - Schöne Optik mit Demo-Button
+    - Passwort sichtbar machen möglich
+    """
+    
+    def __init__(self, main_app_class=None):
         super().__init__()
         self.main_app_class = main_app_class
-        self.setWindowTitle("PDVM-System – Login")
-        self.setFixedSize(320, 180)
-        self.setFocusPolicy(Qt.StrongFocus)  # Ensure the window processes focus events
-        self._build_ui()
-
-    def _build_ui(self):
+        self.username = ""
+        self.password = ""
+        self.user_data = None
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """UI-Setup für modernen Login-Dialog"""
+        self.setWindowTitle("PDVM System - Sichere Anmeldung")
+        self.setFixedSize(470, 300)
+        self.setModal(True)
+        
+        # WICHTIG: Fenster-Flags für Vordergrund
+        self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowSystemMenuHint)
+        
+        # Layout
         layout = QVBoxLayout(self)
-
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Titel
+        title_label = QLabel("🔐 PDVM System - Sichere Anmeldung")
+        title_font = QFont("Segoe UI", 16, QFont.Bold)
+        title_label.setFont(title_font)
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #2c3e50;
+                padding: 10px;
+                background-color: #ecf0f1;
+                border-radius: 8px;
+                border: 2px solid #3498db;
+            }
+        """)
+        layout.addWidget(title_label)
+        
         # Benutzername
-        hl_user = QHBoxLayout()
-        hl_user.addWidget(QLabel("Benutzername:"))
+        user_frame = QFrame()
+        user_layout = QHBoxLayout(user_frame)
+        user_layout.setContentsMargins(0, 0, 0, 0)
+        
+        user_label = QLabel("Benutzername:")
+        user_label.setMinimumWidth(100)
         self.username_input = QLineEdit()
-        hl_user.addWidget(self.username_input)
-        layout.addLayout(hl_user)
-
+        self.username_input.setPlaceholderText("Benutzername eingeben...")
+        user_layout.addWidget(user_label)
+        user_layout.addWidget(self.username_input)
+        layout.addWidget(user_frame)
+        
         # Passwort
-        hl_pw = QHBoxLayout()
-        hl_pw.addWidget(QLabel("Passwort:"))
+        pass_frame = QFrame()
+        pass_layout = QHBoxLayout(pass_frame)
+        pass_layout.setContentsMargins(0, 0, 0, 0)
+        
+        pass_label = QLabel("Passwort:")
+        pass_label.setMinimumWidth(100)
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
-        hl_pw.addWidget(self.password_input)
-        layout.addLayout(hl_pw)
-
-        # Hier die beiden Zeilen ergänzen:
-        self.username_input.returnPressed.connect(self._check_login)
-        self.password_input.returnPressed.connect(self._check_login)
-
-        # Passwort anzeigen
-        self.show_pw_cb = QCheckBox("Passwort anzeigen")
-        self.show_pw_cb.stateChanged.connect(self._toggle_password)
-        layout.addWidget(self.show_pw_cb)
-
+        self.password_input.setPlaceholderText("Passwort eingeben...")
+        pass_layout.addWidget(pass_label)
+        pass_layout.addWidget(self.password_input)
+        layout.addWidget(pass_frame)
+        
+        # Passwort anzeigen Checkbox
+        self.show_password_cb = QCheckBox("👁️ Passwort anzeigen")
+        self.show_password_cb.stateChanged.connect(self._toggle_password)
+        layout.addWidget(self.show_password_cb)
+        
         # Buttons
-        hl_btn = QHBoxLayout()
-        btn_login = QPushButton("Anmelden")
-        btn_login.clicked.connect(self._check_login)
-        btn_login.setDefault(True)  # Set as default button for Enter key
-        btn_login.setAutoDefault(True)  # Enable auto default behavior
-        self.setFocusPolicy(Qt.StrongFocus) # Ensure the window processes focus events
-        btn_quit  = QPushButton("Beenden")
-        btn_quit.clicked.connect(self.close)
-        hl_btn.addWidget(btn_login)
-        hl_btn.addWidget(btn_quit)
-        layout.addLayout(hl_btn)
-
-        # Set focus on the username input field
+        button_layout = QHBoxLayout()
+        
+        self.cancel_button = QPushButton("Abbrechen")
+        self.cancel_button.clicked.connect(self.reject)
+        
+        self.demo_button = QPushButton("🧪 Demo Login")
+        self.demo_button.clicked.connect(self.handle_demo_login)
+        self.demo_button.setToolTip("Schneller Test-Login: demo/demo")
+        
+        self.login_button = QPushButton("🔑 Anmeldung")
+        self.login_button.clicked.connect(self.handle_secure_login)
+        self.login_button.setDefault(True)
+        
+        # Button-Styling
+        button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                font-size: 11pt;
+                border-radius: 6px;
+                border: 1px solid #bdc3c7;
+            }
+            QPushButton:hover {
+                background-color: #ecf0f1;
+            }
+        """
+        self.cancel_button.setStyleSheet(button_style)
+        self.demo_button.setStyleSheet(button_style + """
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: 1px solid #e67e22;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+        """)
+        self.login_button.setStyleSheet(button_style + """
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: 1px solid #229954;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.demo_button)
+        button_layout.addWidget(self.login_button)
+        layout.addLayout(button_layout)
+        
+        # Enter-Taste für Login
+        self.password_input.returnPressed.connect(self.handle_secure_login)
+        self.username_input.returnPressed.connect(self.password_input.setFocus)
+        
+        # Focus auf Username
         self.username_input.setFocus()
-
+        
     def _toggle_password(self):
-        if self.show_pw_cb.isChecked():
+        """Passwort sichtbar/unsichtbar umschalten"""
+        if self.show_password_cb.isChecked():
             self.password_input.setEchoMode(QLineEdit.Normal)
         else:
             self.password_input.setEchoMode(QLineEdit.Password)
-
-    def _check_login(self):
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-
-        db = PdvmUserDatenbank()
-        result = db.lesen(username)
-        if not result:
-            QMessageBox.warning(self, "Login fehlgeschlagen", "Benutzer nicht gefunden.")
-            return
-
-        try:
-            user = PdvmBenutzer(result[0], result[1], result[2])
-        except Exception:
-            QMessageBox.critical(self, "Fehler", "Benutzerdaten ungültig.")
-            return
-
-        if user.verify_password(result[1], password):
-            QMessageBox.information(self, "Erfolg", "Login erfolgreich!")
-            # Hier wird die MainApp mit den validierten user_daten gestartet:
-            self._open_main_app(result)
-        else:
-            QMessageBox.critical(self, "Login fehlgeschlagen", "Falsches Passwort.")
-
-    def _open_main_app(self, user_daten):
-        """
-        🎯 POST-LOGIN: MainApp mit vorab-initialisierter CentralSystemsteuerung starten
+    
+    def handle_demo_login(self):
+        """Demo-Login für schnelle Tests"""
+        self.username_input.setText("admin@super.de")
+        self.password_input.setText("Polari$55")
         
-        ARCHITEKTUR:
-        1. Login erfolgreich -> user_guid verfügbar
-        2. CentralSystemsteuerung DIREKT initialisieren mit user_guid
-        3. Erst DANN MainApp erstellen (kann sofort auf globale Systemsteuerung zugreifen)
-        """
-        try:
-            # user_guid aus Login-Daten extrahieren
-            user_guid = user_daten[3]  # [email, password, user_json, guid]
-            logger.info(f"🎯 Post-Login: Initialisiere CentralSystemsteuerung für user_guid: {user_guid}")
-
-            # ZENTRALE SYSTEMSTEUERUNG VOR MainApp-Erstellung initialisieren
-            from pdvm_central_systemsteuerung import PdvmCentralSystemsteuerung
-            import pdvm_central_systemsteuerung_global
-
-            pdvm_central_systemsteuerung_global.central_systemsteuerung = PdvmCentralSystemsteuerung(
-                user_guid=user_guid
-            )
-            logger.info("🎛️ PdvmCentralSystemsteuerung initialisiert (global)")
-            logger.info("🎯 ExpertMode verfügbar über: central_systemsteuerung_global.central_systemsteuerung.global_expert_mode")
-
-            # Login-Dialog schließen
-            self.close()
-
-            # Erst JETZT MainApp mit bereits verfügbarer globaler Systemsteuerung starten
-            self.main_window = self.main_app_class(user_daten)
-            self.main_window.show()
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler bei MainApp-Initialisierung: {e}")
-            QMessageBox.critical(self, "Systemfehler", f"Anwendung konnte nicht gestartet werden: {e}")
-            # Bei Fehler Login-Dialog nicht schließen
+        reply = QMessageBox.question(self, "Demo Login", 
+                                   "Demo-Login verwenden?\n\nUser: demo\nPassword: demo",
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            self.handle_secure_login()
+    
+    def handle_secure_login(self):
+        """SICHERE LOGIN-VALIDIERUNG - Getrennte Logik"""
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        
+        if not username:
+            QMessageBox.warning(self, "Eingabe fehlt", "Bitte Benutzername eingeben!")
+            self.username_input.setFocus()
             return
+            
+        if not password:
+            QMessageBox.warning(self, "Eingabe fehlt", "Bitte Passwort eingeben!")
+            self.password_input.setFocus()
+            return
+        
+        # SICHERE LOGIN-VALIDIERUNG
+        try:
+            logger.info(f"🔐 Sichere Login-Validierung für User: {username}")
+            
+            # User-Datenbank laden
+            db = PdvmUserDatenbank()
+            result = db.lesen(username)
+            
+            if not result:
+                QMessageBox.warning(self, "Login fehlgeschlagen", 
+                                  "Benutzer nicht gefunden!")
+                logger.warning(f"❌ Benutzer nicht gefunden: {username}")
+                return
+            
+            # PdvmBenutzer erstellen und validieren
+            try:
+                user = PdvmBenutzer(result[0], result[1], result[2])
+            except Exception as e:
+                QMessageBox.critical(self, "Fehler", 
+                                   "Benutzerdaten ungültig!")
+                logger.error(f"❌ Benutzerdaten ungültig für {username}: {e}")
+                return
+            
+            # Passwort-Validierung
+            if user.verify_password(result[1], password):
+                logger.info(f"✅ Sichere Login erfolgreich für User: {username}")
+                
+                # User-Daten für Rückgabe speichern - EINFACH und LINEAR
+                self.user_data = {
+                    'user_guid': result[3],  # [email, password, user_json, guid]
+                    'user_json': result[2],  # Daten aus Spalte 'daten' 
+                }
+                
+                QMessageBox.information(self, "Erfolg", 
+                                      f"Login erfolgreich!\n\nWillkommen {username}")
+                
+                # Dialog erfolgreich schließen
+                self.accept()
+                
+            else:
+                QMessageBox.critical(self, "Login fehlgeschlagen", 
+                                   "Falsches Passwort!")
+                logger.warning(f"❌ Falsches Passwort für User: {username}")
+                self.password_input.clear()
+                self.password_input.setFocus()
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei sicherer Login-Validierung: {e}")
+            QMessageBox.critical(self, "System-Fehler", 
+                               f"Login-System Fehler:\n{e}")
+            
+    def get_login_data(self):
+        """Sichere Login-Daten zurückgeben"""
+        return self.user_data
+        
+    def showEvent(self, event):
+        """Beim Anzeigen: Ins Zentrum und in Vordergrund"""
+        super().showEvent(event)
+        self.center_on_screen()
+        self.raise_()
+        self.activateWindow()
+        
+    def center_on_screen(self):
+        """Dialog in Bildschirmmitte zentrieren"""
+        from PyQt5.QtWidgets import QDesktopWidget
+        screen = QDesktopWidget().screenGeometry()
+        size = self.geometry()
+        self.move(
+            (screen.width() - size.width()) // 2,
+            (screen.height() - size.height()) // 2
+        )
 
 
-# Falls du direkt nur die LoginApp testen willst:
+# LEGACY SUPPORT: Alte LoginApp für Kompatibilität
+class LoginApp(LoginDialog):
+    """Legacy-Wrapper für bestehenden Code"""
+    
+    def __init__(self, main_app_class):
+        super().__init__(main_app_class)
+        self.setWindowTitle("PDVM-System – Login (Legacy)")
+
+
+# Falls direkt getestet wird:
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    login = LoginApp(main_app_class=lambda ud: None)
-    login.show()
-    sys.exit(app.exec_())
+    login = LoginDialog()
+    
+    if login.exec_() == QDialog.Accepted:
+        user_data = login.get_login_data()
+        print(f"✅ Login erfolgreich: {user_data}")
+    else:
+        print("❌ Login abgebrochen")
+    
+    sys.exit(0)

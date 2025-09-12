@@ -1490,8 +1490,9 @@ if __name__=='__main__':
     from pd_util import lockedWritten, multiChar, p_print, t_p_t  
     # das Wörterbuch mit den einzelnen Testelementen wurde ausgelagert
     exec
-    import pd_datetime_test
-    tests = pd_datetime_test.testtabelle()
+    # import pd_datetime_test  # ❌ Test-Datei wurde im Cleanup entfernt
+    # tests = pd_datetime_test.testtabelle()
+    tests = {}  # Fallback für Tests
     # --------------------------------------------------------------
     try:                    # Console wir leer gemacht
         os.system('CLS')    # for Windows

@@ -205,6 +205,32 @@ class CentralSystemsteuerung:
     def lesen(self):
         """Delegiert an PdvmCentralDatenbank"""
         return self._db.lesen()
+    
+    def get_value_no_json(self, gruppe, feld, ab_zeit=None):
+        """
+        Delegiert an PdvmCentralDatenbank - No-JSON Version
+        
+        Args:
+            gruppe (str): Gruppe
+            feld (str): Feld
+            ab_zeit (float, optional): Zeitstempel
+            
+        Returns:
+            str or None: Roher String-Wert ohne JSON-Parsing
+        """
+        return self._db.get_value_no_json(gruppe, feld, ab_zeit)
+    
+    def set_value_no_json(self, gruppe, feld, wert, ab_zeit=1001.0):
+        """
+        Delegiert an PdvmCentralDatenbank - No-JSON Version
+        
+        Args:
+            gruppe (str): Gruppe
+            feld (str): Feld
+            wert (str): Roher String-Wert ohne JSON-Konvertierung
+            ab_zeit (float): Zeitstempel
+        """
+        return self._db.set_value_no_json(gruppe, feld, wert, ab_zeit)
 
     # =================================================================
     # DEBUG UND INFO

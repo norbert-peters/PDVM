@@ -1,4 +1,4 @@
-# pd_datetime.py
+# pdvm_datetime.py
 """ Klasse für das Zeitformat pdvmdatetime. Das Datum und die Zeit werden hier
     verwaltet. Das Datum ist eine 7-stelliger Integer (YYYYDDD), die Zeit ist
     der Prozentfaktor eines Tages hinter dem Komma. Zum Beispiel 0,5 sind

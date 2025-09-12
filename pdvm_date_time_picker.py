@@ -8,12 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 class PdvmDateTimePicker(QWidget):
-    def refresh_from_instance(self):
-        """
-        Synchronisiert self.initial mit dem aktuellen Wert der Instanz und aktualisiert die Anzeige.
-        """
-        self.initial.PdvmDateTime = self.pdvm_datetime.PdvmDateTime
-        self.update_display()
     """
     PyQt5-Widget zum Editieren eines Pdvm_DateTime:
       - display == "all": Datum + Zeit
@@ -94,6 +88,13 @@ class PdvmDateTimePicker(QWidget):
             time_edit.timeChanged.connect(self._on_time_changed)
             lo.addWidget(time_edit)
             self._time_edit = time_edit
+
+    def refresh_from_instance(self):
+        """
+        Synchronisiert self.initial mit dem aktuellen Wert der Instanz und aktualisiert die Anzeige.
+        """
+        self.initial.PdvmDateTime = self.pdvm_datetime.PdvmDateTime
+        self.update_display()
 
     def _on_date_changed(self, qdate: QDate):
         """

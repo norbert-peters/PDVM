@@ -1,290 +1,394 @@
 # -*- coding: utf-8 -*-
-# pdvm_datenbank.py
+# pdvm_datenbank.py - BEREINIGTE LINEARE VERSION
+"""
+Saubere, lineare Datenbankschicht ohne Redundanzen und Reparatur-Mechanismen.
+
+ARCHITEKTUR:
+- Einfache CRUD-Operationen: speichern, lesen, loeschen, alle_lesen
+- Automatic last_modified mit pdvm_datetime 
+- Linear: Dict → JSON → DB und DB → JSON → Dict
+- Keine Reparatur-Mechanismen, keine redundanten Methoden
+- Basis-Layer für pdvm_central_datenbank.py
+"""
 
 import sqlite3
 import json
 import allgemeines as all  # Enthält all.neue_guid(), all.convert_from_time() 
 import pdvm_datetime as dt  # Enthält PdvmDateTimeNow()
-
-# looging setup
 import logging
+
 logger = logging.getLogger(__name__)
 
 
 class PdvmDatenbank:
+    """
+    Basis-Datenbankschicht mit linearen CRUD-Operationen.
+    Verwaltet JSON-Daten mit automatischem last_modified Zeitstempel.
+    """
     SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000"
 
-    def __init__(self, db_name="PdvmManager.db", table_name="menudaten", historisch=False):
-        """Initialisiert die Klasse mit einer spezifischen Datenbank und Tabelle"""
-        self.db_name    = db_name
+    def __init__(self, table_name="menudaten"):
+        """
+        Initialisiert die Datenbankverbindung.
+        
+        Args:
+            table_name: Name der Tabelle (MUSS angegeben werden - kein Fallback)
+        """
+        if not table_name:
+            raise ValueError("❌ Tabellenname muss angegeben werden - keine Fallback-Tabellen!")
+            
+        # Datenbankname aus PdvmInit.json laden
+        self.db_name = self._load_database_from_init()
         self.table_name = table_name
-        self.hist       = historisch
+        
+        # Tabelle erstellen falls nicht vorhanden
+        self._ensure_table_exists()
+        
+        # Historisch-Status aus Datenbank ermitteln
+        self.historisch = self._ermittle_historisch_status()
+        
+        logger.info(f"PdvmDatenbank initialisiert: {self.db_name}.{table_name} (historisch: {self.historisch})")
 
-    def _erzeuge_tabelle(self):
-        """Erstellt die Tabelle, falls sie nicht existiert"""
+    def _load_database_from_init(self):
+        """
+        Lädt den Datenbanknamen aus PdvmInit.json.
+        
+        Erstellt die Datei falls sie nicht existiert und wirft einen Fehler.
+        
+        Returns:
+            str: Name der Datenbankdatei
+            
+        Raises:
+            ValueError: Wenn PdvmInit.json nicht existiert oder fehlerhaft ist
+        """
+        import os
+        
+        init_file_path = "PdvmInit.json"
+        
+        # Prüfe ob Datei existiert
+        if not os.path.exists(init_file_path):
+            # Erstelle Standard-PdvmInit.json
+            init_data = {
+                "ROOT": {
+                    "datenbank": "XXX",
+                    "lizenz": "00000000-0000-0000-0000-000000000000"
+                }
+            }
+            
+            try:
+                with open(init_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(init_data, f, ensure_ascii=False, indent=4)
+                logger.info(f"PdvmInit.json erstellt: {init_file_path}")
+            except Exception as e:
+                logger.error(f"Fehler beim Erstellen von PdvmInit.json: {e}")
+            
+            raise ValueError("❌ Grunddaten, wie Datenbank etc. in PdvmInit.json eintragen.")
+        
+        # Lade und parse PdvmInit.json
+        try:
+            with open(init_file_path, 'r', encoding='utf-8') as f:
+                init_data = json.load(f)
+            
+            # Validiere Struktur
+            if 'ROOT' not in init_data:
+                raise ValueError("❌ PdvmInit.json: 'ROOT' Sektion fehlt")
+            
+            if 'datenbank' not in init_data['ROOT']:
+                raise ValueError("❌ PdvmInit.json: 'datenbank' in ROOT Sektion fehlt")
+            
+            db_name = init_data['ROOT']['datenbank']
+            
+            # Prüfe ob Datenbank-Wert gesetzt ist
+            if db_name == "XXX" or not db_name.strip():
+                raise ValueError("❌ Grunddaten, wie Datenbank etc. in PdvmInit.json eintragen.")
+            
+            logger.debug(f"Datenbank aus PdvmInit.json geladen: {db_name}")
+            return db_name
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON-Parsing-Fehler in PdvmInit.json: {e}")
+            raise ValueError("❌ PdvmInit.json ist fehlerhaft formatiert")
+        except Exception as e:
+            logger.error(f"Fehler beim Laden von PdvmInit.json: {e}")
+            raise ValueError(f"❌ Fehler beim Laden von PdvmInit.json: {e}")
+
+    def _ensure_table_exists(self):
+        """Erstellt die Tabelle falls sie nicht existiert."""
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
+        
         create_table_query = f'''
         CREATE TABLE IF NOT EXISTS {self.table_name} (
             uid TEXT PRIMARY KEY,
-            daten TEXT NOT NULL
+            daten TEXT NOT NULL,
+            last_modified TEXT NOT NULL DEFAULT ''
         )'''
+        
         cursor.execute(create_table_query)
         conn.commit()
         conn.close()
-
-    def _update_last_change(self):
-        """
-        Aktualisiert in der Systemsteuerung unter SYSTEM_USER_ID
-        das Feld 'last_change', 'row_count' und 'size_bytes' für diese Tabelle.
-        """
-        # Berechne aktuelle Metriken für diese Tabelle
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        # Zeilenanzahl
-        cursor.execute(f"SELECT COUNT(*) FROM {self.table_name}")
-        row_count = cursor.fetchone()[0]
-        logging.log(logging.INFO,f"Anzahl der Zeilen in {self.table_name}: {row_count}")
-        # Gesamtgröße der JSON-Daten in Bytes
-        cursor.execute(f"SELECT SUM(LENGTH(daten)) FROM {self.table_name}")
-        size_bytes = cursor.fetchone()[0] or 0
-        logging.log(logging.INFO,f"Gesamtgröße der Daten in {self.table_name}: {size_bytes} Bytes")
-        # Aktuelles Datum und Uhrzeit
-        dt_instance = dt.Pdvm_DateTime("DEU")
-        dt_instance.PdvmDateTime = 2025106.0    # fiktives Datum, damit intern Struktiur erzeugt wird
-        current_time = dt_instance.PdvmDateTimeNow()
-        logging.log(logging.INFO,f"Aktuelle Zeit: {current_time}")
-        conn.close()
-
-        # Lade aktuellen Systemsteuerungs-Datensatz
-        sys_db = PdvmDatenbank(self.db_name, table_name="systemsteuerung", historisch=False)
-        sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
-        logging.log(logging.INFO,f"Systemsteuerung-Datensatz: {sys_record}")
-
-        # WICHTIG: Null-Prüfung für sys_record
-        if sys_record is None:
-            logging.log(logging.WARNING, f"Systemsteuerung-Datensatz für {self.SYSTEM_USER_ID} ist None, erstelle neuen Datensatz")
-            sys_record = {}
         
-        # Stelle sicher, dass der Eintrag für diese Tabelle existiert
-        sys_record[self.table_name] = sys_record.get(self.table_name, {})
-        # Setze Metriken
-        logging.log(logging.INFO,f"Setze Metriken für {self.table_name} in der Systemsteuerung")
-        sys_record[self.table_name].update({
-            "last_change":    current_time, # Aktuelles Datum und Uhrzeit
-            "row_count":      row_count,
-            "size_bytes":     size_bytes
-        })
+        logger.debug(f"Tabelle {self.table_name} sichergestellt")
 
-        # Schreibe zurück in die Systemsteuerung - hier ohne die Methode schreiben . sonst loop
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        json_daten = json.dumps(sys_record)
+    def _ermittle_historisch_status(self):
+        """
+        Ermittelt historisch-Status aus der Datenbank.
+        
+        Versucht zuerst mit aktueller GUID, dann mit SYSTEM_USER_ID.
+        Falls kein Datensatz gefunden wird, ist historisch=False.
+        
+        Returns:
+            bool: True wenn historische Tabelle, False sonst
+        """
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            
+            # Versuche Datensatz zu finden (zuerst aktueller, dann SYSTEM_USER_ID)
+            for uid in [getattr(self, 'guid', None), self.SYSTEM_USER_ID]:
+                if uid:
+                    cursor.execute(f"SELECT historisch FROM {self.table_name} WHERE uid = ?", (uid,))
+                    result = cursor.fetchone()
+                    if result:
+                        conn.close()
+                        return bool(result[0])
+            
+            # Kein Datensatz gefunden = nicht historisch
+            conn.close()
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Konnte historisch-Status nicht ermitteln: {e}")
+            return False
 
-        # Prüfen, ob Datensatz existiert
-        select_query = f'SELECT COUNT(*) FROM {"systemsteuerung"} WHERE uid = ?'
-        cursor.execute(select_query, (self.SYSTEM_USER_ID,))
-        result = cursor.fetchone()
+    def get_historisch_status(self):
+        """
+        Öffentliche Methode um historisch-Status abzufragen.
+        
+        Returns:
+            bool: True wenn historische Tabelle, False sonst
+        """
+        return self.historisch
 
-        if result[0] > 0:
-            update_query = f'UPDATE {"systemsteuerung"} SET daten = ? WHERE uid = ?'
-            cursor.execute(update_query, (json_daten, self.SYSTEM_USER_ID))
-        else:
-            insert_query = f'INSERT INTO {"systemsteuerung"} (uid, daten) VALUES (?, ?)'
-            cursor.execute(insert_query, (self.SYSTEM_USER_ID, json_daten))
-
-        conn.commit()
-        conn.close()
-
+    def _get_current_timestamp(self):
+        """
+        Erstellt aktuellen Zeitstempel im PDVM-Format.
+        
+        Returns:
+            str: Zeitstempel im PDVM-Format
+        """
+        try:
+            # Erstelle DateTime-Instanz und hole aktuellen Zeitstempel
+            dt_instance = dt.Pdvm_DateTime("DEU")  # Default auf DEU, kann später erweitert werden
+            current_time = dt_instance.PdvmDateTimeNow()
+            return str(current_time)
+        except Exception as e:
+            logger.warning(f"Fehler beim Erstellen des Zeitstempels: {e}")
+            return ""
 
     def anlegen(self, daten):
-        """Erstellt einen neuen Datensatz mit einer GUID"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        uid = all.neue_guid()  # Neue GUID generieren
-        json_daten = json.dumps(daten)
-
-        insert_query = f'INSERT INTO {self.table_name} (uid, daten) VALUES (?, ?)'
-        cursor.execute(insert_query, (uid, json_daten))
-        conn.commit()
-        conn.close()
-
-        # Systemsteuerung aktualisieren
-        self._update_last_change()
+        """
+        Erstellt einen neuen Datensatz mit automatisch generierter GUID.
+        
+        Args:
+            daten (dict): Daten-Dictionary das gespeichert werden soll
+            
+        Returns:
+            str: Die neu generierte GUID
+        """
+        if not isinstance(daten, dict):
+            raise ValueError("Daten müssen ein Dictionary sein")
+            
+        # Neue GUID generieren
+        uid = all.neue_guid()
+        
+        # Datensatz speichern
+        self.speichern(uid, daten)
+        
+        logger.info(f"Neuer Datensatz angelegt: {uid}")
         return uid
 
     def speichern(self, guid, daten):
-        """Speichert oder aktualisiert einen Datensatz"""
+        """
+        Speichert oder aktualisiert einen Datensatz.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            daten (dict): Daten-Dictionary das gespeichert werden soll
+        """
+        if not isinstance(daten, dict):
+            raise ValueError("Daten müssen ein Dictionary sein")
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
+        # Dict → JSON konvertieren
+        json_daten = json.dumps(daten, ensure_ascii=False, indent=None)
+        
+        # Aktueller Zeitstempel
+        timestamp = self._get_current_timestamp()
+        
+        # In Datenbank speichern
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
-        json_daten = json.dumps(daten)
-
-        # Prüfen, ob Datensatz existiert
-        select_query = f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?'
-        cursor.execute(select_query, (guid,))
-        result = cursor.fetchone()
-
-        if result[0] > 0:
-            update_query = f'UPDATE {self.table_name} SET daten = ? WHERE uid = ?'
-            cursor.execute(update_query, (json_daten, guid))
+        
+        # Prüfen ob Datensatz existiert
+        cursor.execute(f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?', (guid,))
+        exists = cursor.fetchone()[0] > 0
+        
+        if exists:
+            # Update
+            cursor.execute(
+                f'UPDATE {self.table_name} SET daten = ?, last_modified = ? WHERE uid = ?',
+                (json_daten, timestamp, guid)
+            )
+            logger.debug(f"Datensatz aktualisiert: {guid}")
         else:
-            insert_query = f'INSERT INTO {self.table_name} (uid, daten) VALUES (?, ?)'
-            cursor.execute(insert_query, (guid, json_daten))
-
+            # Insert
+            cursor.execute(
+                f'INSERT INTO {self.table_name} (uid, daten, last_modified) VALUES (?, ?, ?)',
+                (guid, json_daten, timestamp)
+            )
+            logger.debug(f"Datensatz eingefügt: {guid}")
+        
         conn.commit()
         conn.close()
-
-        # Systemsteuerung aktualisieren
-        logging.log(logging.INFO,f"Systemsteuerung aktualisieren für {self.table_name}")
-        self._update_last_change()
-
-    def set_historisch_kennzeichen(self, historisch=False):
-        """
-        Setzt das historische Kennzeichen für diese Tabelle in der Systemsteuerung.
-        Wird von PdvmCentralDatenbank verwendet um zu ermitteln, ob Daten historisch sind.
-        """
-        try:
-            # Lade aktuellen Systemsteuerungs-Datensatz
-            sys_db = PdvmDatenbank(self.db_name, table_name="systemsteuerung", historisch=False)
-            sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
-            
-            # WICHTIG: Null-Prüfung für sys_record
-            if sys_record is None:
-                logging.log(logging.INFO, f"Erstelle neuen Systemsteuerung-Datensatz für {self.SYSTEM_USER_ID}")
-                sys_record = {}
-            
-            # Stelle sicher, dass der Eintrag für diese Tabelle existiert
-            sys_record[self.table_name] = sys_record.get(self.table_name, {})
-            
-            # Setze historisch-Kennzeichen
-            sys_record[self.table_name]["historisch"] = bool(historisch)
-            
-            logging.log(logging.INFO, f"Setze historisch-Kennzeichen für {self.table_name}: {historisch}")
-            
-            # Schreibe zurück in die Systemsteuerung
-            sys_db.speichern(self.SYSTEM_USER_ID, sys_record)
-            
-        except Exception as e:
-            logging.log(logging.ERROR, f"Fehler beim Setzen des historisch-Kennzeichens für {self.table_name}: {e}")
-
-    def get_historisch_kennzeichen(self):
-        """
-        Liest das historische Kennzeichen für diese Tabelle aus der Systemsteuerung.
-        """
-        try:
-            # Lade aktuellen Systemsteuerungs-Datensatz
-            sys_db = PdvmDatenbank(self.db_name, table_name="systemsteuerung", historisch=False)
-            sys_record = sys_db.lesen(self.SYSTEM_USER_ID) 
-            
-            if sys_record and isinstance(sys_record, dict):
-                table_settings = sys_record.get(self.table_name, {})
-                if isinstance(table_settings, dict):
-                    return bool(table_settings.get('historisch', False))
-            
-            return False
-            
-        except Exception as e:
-            logging.log(logging.ERROR, f"Fehler beim Lesen des historisch-Kennzeichens für {self.table_name}: {e}")
-            return False
-
-    def loeschen(self, guid):
-        """Löscht einen Datensatz anhand der GUID"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        delete_query = f'DELETE FROM {self.table_name} WHERE uid = ?'
-        cursor.execute(delete_query, (guid,))
-        conn.commit()
-        conn.close()
-
-        # Systemsteuerung aktualisieren
-        self._update_last_change()
+        
+        logger.info(f"Datensatz gespeichert: {guid} ({len(json_daten)} Zeichen)")
 
     def lesen(self, guid):
-        """Liest einen Datensatz aus der Datenbank"""
+        """
+        Liest einen Datensatz aus der Datenbank.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            
+        Returns:
+            dict|None: Daten-Dictionary oder None wenn nicht gefunden
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
-
-        select_query = f'SELECT daten FROM {self.table_name} WHERE uid = ?'
-        cursor.execute(select_query, (guid,))
+        
+        cursor.execute(f'SELECT daten FROM {self.table_name} WHERE uid = ?', (guid,))
         result = cursor.fetchone()
         conn.close()
-
+        
         if result:
-            raw = result[0]
+            raw_json = result[0]
+            
             try:
-                data = json.loads(raw)
+                # JSON → Dict konvertieren
+                data = json.loads(raw_json)
+                
+                # Historische Zeitkonvertierung falls erforderlich
+                if self.historisch:
+                    data = all.convert_from_time(data)
+                
+                logger.debug(f"Datensatz gelesen: {guid}")
+                return data
+                
             except json.JSONDecodeError as e:
-                start = max(0, e.pos - 40)
-                end   = min(len(raw), e.pos + 40)
-                logging.log(logging.INFO,"JSONDecodeError:", e)
-                logging.log(logging.INFO,"…", raw[start:end], "…")
+                logger.error(f"JSON-Parsing-Fehler für GUID {guid}: {e}")
                 raise
-            # Führe time-konvertierungen bei historischen Daten durch
-            return all.convert_from_time(data) if self.hist else data
         else:
-            logging.log(logging.INFO,f"GUID {guid} nicht gefunden.")
+            logger.debug(f"Datensatz nicht gefunden: {guid}")
             return None
 
-    def lesen_alle(self):
-        """Liest alle Datensätze aus der Tabelle"""
-        logging.log(logging.INFO,f"Alle Datensätze aus {self.table_name} lesen")
+    def loeschen(self, guid):
+        """
+        Löscht einen Datensatz aus der Datenbank.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            
+        Returns:
+            bool: True wenn gelöscht, False wenn nicht gefunden
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
-        select_query = f'SELECT * FROM {self.table_name}'
-        cursor.execute(select_query)
-        rows = cursor.fetchall()
+        
+        cursor.execute(f'DELETE FROM {self.table_name} WHERE uid = ?', (guid,))
+        deleted_count = cursor.rowcount
+        
+        conn.commit()
         conn.close()
+        
+        success = deleted_count > 0
+        if success:
+            logger.info(f"Datensatz gelöscht: {guid}")
+        else:
+            logger.debug(f"Datensatz zum Löschen nicht gefunden: {guid}")
+        
+        return success
 
-        return [
-            {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
-            for row in rows
-        ]
+    def alle_lesen(self):
+        """
+        Liest alle Datensätze aus der Tabelle.
+        
+        Returns:
+            list[dict]: Liste aller Datensätze mit uid, daten, last_modified
+        """
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute(f'SELECT uid, daten, last_modified FROM {self.table_name}')
+        results = cursor.fetchall()
+        conn.close()
+        
+        datensaetze = []
+        for row in results:
+            uid, raw_json, last_modified = row
+            
+            try:
+                # JSON → Dict konvertieren
+                data = json.loads(raw_json)
+                
+                # Historische Zeitkonvertierung falls erforderlich
+                if self.historisch:
+                    data = all.convert_from_time(data)
+                
+                datensaetze.append({
+                    'uid': uid,
+                    'daten': data,
+                    'last_modified': last_modified
+                })
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON-Parsing-Fehler für GUID {uid}: {e}")
+                # Fehlerhafte Datensätze überspringen
+                continue
+        
+        logger.info(f"Alle Datensätze gelesen: {len(datensaetze)} von {len(results)} erfolgreich")
+        return datensaetze
 
-if __name__ == "__main__":
-    daten = {
-        "0d10a0d0-b1a5-4544-b284-e8a09ca979b5": {
-            "last_created_at":  "2025-04-17T11:05:00Z",
-            "stichtag":         2025006.0,
-            "last_accessed":    "2025-04-18T09:30:00Z",
-            "filters":          { "Familienname": "Müller", "Geburtsdatum": {"from":"1950-01-01","to":"1970-12-31"} },
-            "sort_order":       [ { "column": "Familienname", "dir": "asc" } ],
-            "page":             { "offset": 0, "limit": 50 },
-            "cache_expires_at": "2025-04-18T10:05:00Z",
-            "status":           "ready",
-            "row_count":        234
-        },
-        "626a2c5a-2d03-4cfd-8c24-c36badedc3b2": {
-            "last_created_at":  "2025-04-17T11:05:00Z",
-            "stichtag":         2025006.0,
-            "last_accessed":    "2025-04-18T09:30:00Z",
-            "filters":          { "Familienname": "Müller", "Geburtsdatum": {"from":"1950-01-01","to":"1970-12-31"} },
-            "sort_order":       [ { "column": "Familienname", "dir": "asc" } ],
-            "page":             { "offset": 0, "limit": 50 },
-            "cache_expires_at": "2025-04-18T10:05:00Z",
-            "status":           "ready",
-            "row_count":        234
+    def get_table_info(self):
+        """
+        Gibt Informationen über die Tabelle zurück.
+        
+        Returns:
+            dict: Statistiken über die Tabelle
+        """
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # Anzahl Datensätze
+        cursor.execute(f'SELECT COUNT(*) FROM {self.table_name}')
+        row_count = cursor.fetchone()[0]
+        
+        # Gesamtgröße der Daten
+        cursor.execute(f'SELECT SUM(LENGTH(daten)) FROM {self.table_name}')
+        total_size = cursor.fetchone()[0] or 0
+        
+        conn.close()
+        
+        return {
+            'table_name': self.table_name,
+            'row_count': row_count,
+            'total_size_bytes': total_size,
+            'historisch': self.historisch
         }
-    }
-
-
-    # Beispielhafte Nutzung der Klasse
-#    db = PdvmDatenbank("PdvmManager.db", "beschreibungen", hist=False)
-#    db._erzeuge_tabelle()  # Tabelle erstellen, falls nicht vorhanden
-#    logging.log(logging.INFO,f"Tabelle {db.table_name} erstellt oder existiert bereits.")
-
-#    uid = db.anlegen({"Test": {}})
-#    uid = "dded74a4-40d0-4861-ab9b-f6cc08e75bec"
-#    uid = "00000000-0000-0000-0000-000000000001"
-#    logging.log(logging.INFO,f"Erstellte GUID: {uid}")
-
-    # Speichern eines Datensatzes
-#    db.speichern(uid, daten)
-#    logging.log(logging.INFO,f"Datensatz mit GUID {uid} gespeichert.")
-
-    # Lesen eines Datensatzes
-#    daten = db.lesen(uid)
-#    logging.log(logging.INFO,f"Gelesene Daten für GUID {uid}: {daten}")
-
-    # Löschen eines Datensatzes
-    #db.loeschen(uid)
-    #logging.log(logging.INFO,f"Datensatz mit GUID {uid} gelöscht.")

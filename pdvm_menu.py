@@ -7,9 +7,9 @@ logger = logging.getLogger(__name__)
 from pdvm_datenbank import PdvmDatenbank
 
 class PdvmMenu:
-    def __init__(self, menu_id, db_name="PdvmManager.db"):
+    def __init__(self, menu_id):
         self.menu_id = menu_id
-        self.db = PdvmDatenbank(db_name, "menudaten", historisch=False)
+        self.db = PdvmDatenbank("menudaten")
         daten = self.db.lesen(menu_id)
         self.__pd_structure = self.normalize_menu_structure(daten)
         

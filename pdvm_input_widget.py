@@ -45,7 +45,7 @@ class PdvmInputWidget(QWidget):
         
         self.st_inst = call_data['stichtag_inst']
         frame_guid = call_data.get("frame_guid")
-        frm_db = PdvmCentralDatenbank(db_name="PdvmManager.db", table_name="framedaten", guid=frame_guid)
+        frm_db = PdvmCentralDatenbank(table_name="framedaten", guid=frame_guid)
         raw_frame = frm_db.lesen() or {}
         metadaten = raw_frame.get("Metadaten", {})
         root_table = raw_frame.get("ROOT", {}).get("root_table")

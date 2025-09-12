@@ -179,14 +179,13 @@ class PdvmMenuTemplateHandler:
             return self.template_cache[template_guid]
         
         try:
-            # Template aus menudaten-Tabelle laden
+            # Template aus menudaten-Tabelle laden (KORRIGIERT: ohne db_name Parameter)
             db = PdvmCentralDatenbank(
-                db_name="PdvmManager.db",
                 table_name="menudaten",
                 guid=template_guid
             )
             
-            template_raw = db.lesen()
+            template_raw = db.get_all_values()  # Korrigiert: get_all_values() statt lesen()
             if template_raw and isinstance(template_raw, dict):
                 # Template-Daten extrahieren - verschiedene Formate unterstützen
                 full_template = None
