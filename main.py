@@ -168,7 +168,10 @@ class LinearStartManagerNew:
             from pdvm_central_systemsteuerung import initialize_gcs, is_gcs_initialized, get_gcs
             
             if not self.current_user_guid:
-                raise ValueError("Keine User-GUID für Systemsteuerung verfügbar!")
+               # Setze globale GCS-Instanz für alle Module
+               import global_gcs
+               global_gcs.gcs = gcs_instance
+               raise ValueError("Keine User-GUID für Systemsteuerung verfügbar!")
             
             if not self.current_user_data:
                 raise ValueError("Keine User-Daten für Systemsteuerung verfügbar!")
@@ -203,6 +206,11 @@ class LinearStartManagerNew:
             # Speichere GCS-Instanz für MainApp
             self.gcs_instance = gcs_instance
             
+            # Setze globale GCS-Instanz für alle Module
+            import global_gcs
+            global_gcs.gcs = gcs_instance
+            logger.info("🌐 Globale GCS-Instanz für alle Module gesetzt")
+            
             logger.info("✅ Finale Systemsteuerung erfolgreich initialisiert")
             logger.info(f"📋 GCS Status: Initialisiert={gcs_instance.is_initialized}")
             
@@ -219,13 +227,6 @@ class LinearStartManagerNew:
         logger.info("🏠 Schritt 5: Hauptanwendung starten...")
         
         try:
-            # Import der FINALEN Hauptanwendung mit finaler GCS-Integration
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("PDVM_Systemstart_finale_gcs", "PDVM-Systemstart-finale-gcs.py")
-            pdvm_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(pdvm_module)
-            MainAppFinal = pdvm_module.MainAppFinal
-            
             # Teste finale GCS-Verfügbarkeit
             from pdvm_central_systemsteuerung import get_gcs
             gcs = get_gcs()

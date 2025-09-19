@@ -1269,6 +1269,34 @@ class Pdvm_DateTime(object):
     def __transYN(self, tjn):
         return transkateone('transYN',str(tjn), self.language)    
 
+    def calc_alter(self, stichtag=None):
+        """
+        Berechnet das Alter in Jahren tagesgenau basierend auf dem Datum dieser Instanz
+        
+        Args:
+            stichtag: Der Stichtag als Pdvm_DateTime Instanz oder String (optional, default: heute)
+        
+        Returns:
+            int: Das Alter in Jahren
+        """
+        if stichtag is None:
+            stichtag = getDateTimeNow()
+        
+        # Konvertiere zu Pdvm_DateTime Instanzen falls nötig
+#        if isinstance(stichtag, str):
+#            stichtag_dt = Pdvm_DateTime(stichtag)
+#        elif isinstance(stichtag, Pdvm_DateTime):
+#            stichtag_dt = stichtag
+#        else:
+#            raise ValueError("stichtag muss Pdvm_DateTime Instanz oder String sein")
+        
+        # Formel: alter = int(((int(st)-int(date))-((int(st)-int(date))%1000))/1000)
+        st_int = int(stichtag)
+        date_int = int(self.pdvmdatetime)
+        diff = st_int - date_int
+        alter = int((diff - (diff % 1000)) / 1000)
+        
+        return alter
 
 
 #  Ende der Klasse
@@ -1296,7 +1324,6 @@ def getFormTime(tidt,fC='DIN'):
 
 def getDateTimeNow():
     ti = Pdvm_DateTime()
-    ti.PdvmDateTime = 1001.0
     return ti.PdvmDateTimeNow() 
 
 def getAYear():

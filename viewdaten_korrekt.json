@@ -1,0 +1,144 @@
+{
+  "ROOT": {
+    "STICHTAG": 3000001.0,
+    "VIEW_TABLE": "persondaten"
+  },
+  "METADATEN": {
+    "PERSONDATEN": {
+      "controls": {
+        "uid": {
+          "gruppe": "SYSTEM",
+          "feld": "UID",
+          "name": "Identifikation",
+          "type": "string",
+          "default": "",
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "contains"
+        },
+        "familienname": {
+          "gruppe": "PERSDATEN",
+          "feld": "FAMILIENNAME",
+          "name": "Familienname",
+          "type": "string",
+          "default": "",
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "contains"
+        },
+        "vorname": {
+          "gruppe": "PERSDATEN",
+          "feld": "VORNAME",
+          "name": "Vorname",
+          "type": "string",
+          "default": "",
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "contains"
+        },
+        "geburtsdatum": {
+          "gruppe": "PERSDATEN",
+          "feld": "GEBURTSDATUM",
+          "name": "Geburtsdatum",
+          "type": "date",
+          "default": null,
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "desc",
+          "sortByOriginal": true,
+          "filterType": "dateRange"
+        },
+        "anrede": {
+          "gruppe": "PERSDATEN",
+          "feld": "ANREDE",
+          "name": "Anrede",
+          "type": "dropdown",
+          "default": "",
+          "dropdown": {
+            "table": "dropdowndaten",
+            "key": "ddaa6590-6d08-461b-a061-75faec26f4ba",
+            "value": "anrede"
+          },
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "dropdown"
+        },
+        "email": {
+          "gruppe": "PERSDATEN",
+          "feld": "EMAIL",
+          "name": "Email",
+          "type": "string",
+          "default": "",
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "contains"
+        }
+      },
+      "standard_control": {
+        "dummy": {
+          "gruppe": "SYSTEM",
+          "feld": "DUMMY",
+          "name": "Dummy",
+          "type": "string",
+          "default": "keine Daten",
+          "dropdown": null,
+          "control_type": "base",
+          "expert_mode": true,
+          "show": false,
+          "display_order": 0,
+          "expert_order": 0,
+          "searchable": true,
+          "sortable": true,
+          "sortDirection": "asc",
+          "sortByOriginal": false,
+          "filterType": "contains"
+        }
+      }
+    }
+  }
+}

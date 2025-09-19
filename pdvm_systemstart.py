@@ -59,6 +59,7 @@ from PyQt5.QtCore import Qt, QDateTime, QDate, QTime
 from PyQt5.QtGui import QFont
 
 # 🔒 SICHERE IMPORTS: Nur grundlegende Komponenten - Handler werden lazy geladen
+from global_gcs import gcs
 from pdvm_central_datenbank import PdvmCentralDatenbank
 
 class MainAppComplete(QMainWindow):
@@ -87,37 +88,44 @@ class MainAppComplete(QMainWindow):
         # ALLE Daten aus der finalen GCS beziehen - KEINE Parameter mehr!
         try:
             # Hole Benutzerdaten aus der finalen GCS
-            gcs = self._get_finale_gcs_safely()
-            if gcs:
+            if gcs and gcs.is_initialized:
                 # Benutzer-E-Mail aus GCS
                 self.user_email = gcs.get_property('email', 'u') or 'test@example.com'
-                self.user_guid = gcs.get_property('guid', 'u') or 'unknown'
+                self.user_guid = gcs.user_guid
                 
                 # Startmenü-GUID aus GCS
-                self.startmenu_id = gcs.get_property('MeineApps', 'u') or "5ca6674e-b9ce-4581-9756-64e742883f80"
+                self.startmenu_id = gcs.get_menu_id('Startbereich') or "5ca6674e-b9ce-4581-9756-64e742883f80"
                 
                 # Benutzername für Titelleiste aus GCS
                 vorname = gcs.get_property('Vorname', 'u') or ''
                 name = gcs.get_property('Name', 'u') or ''
                 self.user_name = f"{vorname} {name}".strip() or self.user_email
                 
+                # Kompatibilität: user_daten für bestehende Handler
+                self.user_daten = {
+                    'email': self.user_email,
+                    'guid': self.user_guid,
+                    'Vorname': vorname,
+                    'Name': name,
+                    'MeineApps': self.startmenu_id
+                }
+                
                 logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
-                logger.info(f"� E-Mail: {self.user_email}")
+                logger.info(f"🔹 E-Mail: {self.user_email}")
                 logger.info(f"🔹 GUID: {self.user_guid}")
                 logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
                 logger.info(f"🔹 Benutzername: {self.user_name}")
             else:
                 logger.error("❌ Finale GCS nicht verfügbar - verwende Fallback-Werte")
-                # Die Kompatibilitäts-Brücke regelt den user_guid-Zugriff
-                self.user_guid = 'from_gcs_bridge'
                 self.user_email = 'test@example.com'
+                self.user_guid = 'unknown'
                 self.user_name = 'Test Benutzer'
                 self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
+                self.user_daten = {}
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden der Benutzerdaten aus GCS: {e}")
-            # Die Kompatibilitäts-Brücke regelt den user_guid-Zugriff
-            self.user_guid = 'from_gcs_bridge'
             self.user_email = 'test@example.com'
+            self.user_guid = 'unknown'
             self.user_name = 'Test Benutzer'
             self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
             self.user_daten = {}
@@ -155,11 +163,25 @@ class MainAppComplete(QMainWindow):
             self.command_handler = None
         
         # FINALE GCS-INSTANZ ist bereits vom linearen Start initialisiert
-        gcs_instance = self._get_finale_gcs_safely()
-        if gcs_instance:
+        # Verwende die globale GCS direkt
+        if gcs and gcs.is_initialized:
             logger.info("✅ Finale GCS bereits verfügbar - verwende bestehende Instanz")
+            
+            # Lade Benutzerdaten aus der globalen GCS
+            self.user_guid = gcs.user_guid
+            self.user_email = gcs.get_property('email', 'u') or 'test@example.com'
+            vorname = gcs.get_property('Vorname', 'u') or ''
+            name = gcs.get_property('Name', 'u') or ''
+            self.user_name = f"{vorname} {name}".strip() or self.user_email
+            self.startmenu_id = gcs.get_menu_id('Startbereich') or "5ca6674e-b9ce-4581-9756-64e742883f80"
+            
+            logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
+            logger.info(f"🔹 E-Mail: {self.user_email}")
+            logger.info(f"🔹 GUID: {self.user_guid}")
+            logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
+            logger.info(f"🔹 Benutzername: {self.user_name}")
         else:
-            logger.warning("⚠️ Finale GCS nicht verfügbar - initialisiere neu")
+            logger.warning("⚠️ Finale GCS noch nicht initialisiert")
             self._initialize_finale_gcs()
         
         # FINALE STICHTAG-BALKEN nach GCS-Initialisierung
@@ -181,29 +203,6 @@ class MainAppComplete(QMainWindow):
         # Startmenü laden (DRY-Prinzip: Eine zentrale Methode für Startmenü)
         self.open_start_menu()
 
-    def _get_finale_gcs_safely(self):
-        """
-        FINALE GCS-ZUGRIFF:
-        
-        Verwendet die finale pdvm_central_systemsteuerung_final.py für sicheren Zugriff.
-        
-        Returns:
-            Finale GCS-Instanz oder None falls nicht initialisiert
-        """
-        try:
-            from pdvm_central_systemsteuerung import get_gcs
-            
-            gcs = get_gcs()
-            if gcs:
-                return gcs
-            else:
-                logger.warning("⚠️ Finale GCS noch nicht initialisiert")
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Zugriff auf finale GCS: {e}")
-            return None
-
     def _create_complete_stichtag_bar(self):
         """
         Erstellt den vollständigen Stichtag-Balken für historische Datenansicht.
@@ -219,9 +218,8 @@ class MainAppComplete(QMainWindow):
         from PyQt5.QtWidgets import QHBoxLayout, QLabel, QPushButton, QFrame
         from PyQt5.QtGui import QFont
         
-        # Prüfe finale GCS
-        gcs_instance = self._get_finale_gcs_safely()
-        if not gcs_instance:
+        # Prüfe finale GCS direkt (vereinfacht)
+        if not gcs:
             logger.error("❌ Finale GCS nicht verfügbar - kann Balken nicht erstellen")
             return QLabel("❌ Finale GCS nicht verfügbar")
         logger.info("✅ Finale GCS verfügbar")
@@ -257,11 +255,11 @@ class MainAppComplete(QMainWindow):
                 from pdvm_date_time_picker import PdvmDateTimePicker
                 self.stichtag_picker = PdvmDateTimePicker(
                     parent=self,
-                    pdvm_datetime=gcs_instance.st_inst,  # Finale GCS st_inst!
+                    pdvm_datetime=gcs.st_inst,  # Finale GCS st_inst!
                     display="all",
                     display_time_short=False
                 )
-                logger.info(f"✅ Vollständige PdvmDateTimePicker Datum: {gcs_instance.st_inst}") 
+                logger.info(f"✅ Vollständige PdvmDateTimePicker Datum: {gcs.st_inst}") 
                 if hasattr(self.stichtag_picker, '_date_edit'):
                     calendar = self.stichtag_picker._date_edit.calendarWidget()
                     if calendar:
@@ -338,10 +336,9 @@ class MainAppComplete(QMainWindow):
         Aktualisiert die Anzeige des verwendeten Stichtags mit finale GCS.
         """
         try:
-            gcs_instance = self._get_finale_gcs_safely()
-            if gcs_instance:
+            if gcs:
                 # Finale GCS verwendet st_inst direkt
-                stichtag_value = gcs_instance.st_inst
+                stichtag_value = gcs.st_inst
                 # Anzeige als PdvmTimeStamp (schönes Format)
                 if hasattr(stichtag_value, 'FormTimeStamp'):
                     display_text = str(stichtag_value.FormTimeStamp)
@@ -379,9 +376,8 @@ class MainAppComplete(QMainWindow):
                     logger.warning("⚠️ Vollständige Stichtag-Picker hat keine save()-Methode")
             
             # 2. Stichtag in finale GCS persistieren
-            gcs_instance = self._get_finale_gcs_safely()
-            if gcs_instance and hasattr(gcs_instance, 'update_stichtag'):
-                gcs_instance.update_stichtag()
+            if gcs and hasattr(gcs, 'update_stichtag'):
+                gcs.update_stichtag()
                 logger.info("💾 Stichtag erfolgreich in finale GCS persistiert")
             else:
                 logger.warning("⚠️ Finale GCS nicht verfügbar oder update_stichtag() fehlt")
@@ -423,7 +419,17 @@ class MainAppComplete(QMainWindow):
             from pdvm_central_systemsteuerung import initialize_gcs
             
             # ✅ FINALE SICHERE INITIALISIERUNG
-            success = initialize_gcs(self.user_guid, self.user_daten)
+            # Verwende die Benutzerdaten aus der globalen GCS falls verfügbar
+            if gcs and gcs.is_initialized:
+                user_data_for_init = gcs.user_data
+                logger.info("✅ Verwende Benutzerdaten aus bereits initialisierter GCS")
+            else:
+                # Fallback: Verwende gespeicherte Benutzerdaten aus dem Login
+                user_data_for_init = getattr(self, 'user_daten', None)
+                if not user_data_for_init:
+                    raise ValueError("❌ Keine Benutzerdaten verfügbar für GCS-Initialisierung!")
+            
+            success = initialize_gcs(self.user_guid, user_data_for_init)
             
             if success:
                 logger.info(f"✅ Finale GCS sicher initialisiert")
@@ -695,12 +701,9 @@ class MainAppComplete(QMainWindow):
             
             # Hole Menü-GUID aus GCS-Benutzerdaten basierend auf App-Berechtigung
             try:
-                from pdvm_central_systemsteuerung import get_gcs
-                gcs = get_gcs()
-                
                 # Prüfe Menü-Berechtigung für die Anwendung
                 menu_guid = gcs.get_menu_id(application_name)
-                
+                logger.debug(f"🔹 Gefundene Menü-GUID für '{application_name}': {menu_guid}")
                 if not menu_guid:
                     logger.warning(f"⚠️ Keine Menü-Berechtigung für '{application_name}' - Zugriff verweigert")
                     self.show_text([
@@ -855,8 +858,7 @@ class MainAppComplete(QMainWindow):
             # call_daten für neuen Dialog vorbereiten - ALLE ERFORDERLICHEN Daten
             call_daten = {
                 "view_guid": view_guid,
-                "user_guid": self.user_guid,
-                "title": view_title,  # Immer einen Titel setzen!
+                "title": "Persönliche Daten",  # Immer einen Titel setzen!
                 "first_call": True,  # Initialer Aufruf
             }
             
@@ -1000,22 +1002,66 @@ class MainAppComplete(QMainWindow):
 
     def logout(self):
         """
-        Meldet den Benutzer ab.
+        Meldet den Benutzer ab und startet das System neu.
         """
         try:
             logger.info("🔐 Benutzer-Abmeldung gestartet")
+            
+            # Kurze Abmelde-Nachricht anzeigen
             self.show_text([
                 "🔐 Abmeldung...",
                 "",
-                "Sie werden abgemeldet."
+                "Sie werden abgemeldet.",
+                "Das System wird neu gestartet."
             ], small=True)
             
-            # Hier könnte die tatsächliche Abmelde-Logik stehen
-            # z.B. self.close() oder return zum Login
+            # Nach kurzer Verzögerung das Hauptfenster schließen
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(1500, self._perform_logout)  # 1.5s Verzögerung
             
         except Exception as e:
             logger.error(f"❌ Fehler bei der Abmeldung: {e}")
-            self.show_text(f"❌ Fehler beim Laden der View:\n\n{str(e)}")
+            self.show_text(f"❌ Fehler bei der Abmeldung:\n\n{str(e)}")
+    
+    def _perform_logout(self):
+        """
+        Führt die tatsächliche Abmeldung durch.
+        """
+        try:
+            logger.info("🔄 Führe Abmeldung durch - starte System neu")
+            
+            # Hauptfenster schließen
+            self.close()
+            
+            # GCS zurücksetzen für Neustart
+            try:
+                from pdvm_central_systemsteuerung import _gcs_instance
+                import pdvm_central_systemsteuerung
+                pdvm_central_systemsteuerung._gcs_instance = None
+                logger.info("🔄 GCS zurückgesetzt für Neustart")
+            except:
+                logger.warning("⚠️ GCS-Reset fehlgeschlagen - wird beim Neustart automatisch überschrieben")
+            
+            # Neuen Hauptprozess starten
+            import subprocess
+            import sys
+            import os
+            
+            # Starte main.py in neuem Prozess
+            python_exe = sys.executable
+            main_script = os.path.join(os.getcwd(), "main.py")
+            
+            logger.info(f"🚀 Starte neuen Prozess: {python_exe} {main_script}")
+            subprocess.Popen([python_exe, main_script], cwd=os.getcwd())
+            
+            # Aktuellen Prozess beenden
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(500, lambda: sys.exit(0))
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Neustart: {e}")
+            # Fallback: Einfach das Fenster schließen
+            self.close()
 
     def toggle_menu_visibility(self):
         """
@@ -1073,16 +1119,15 @@ class MainAppComplete(QMainWindow):
     def _save_menu_visibility_status(self):
         """Speichert den Menü-Sichtbarkeits-Status für das aktuelle Menü in der finale GCS."""
         try:
-            gcs_instance = self._get_finale_gcs_safely()
-            if not gcs_instance:
+            if not gcs:
                 logger.warning("⚠️ Finale GCS nicht verfügbar - Menü-Status wird nicht gespeichert")
                 return
-            
+
             current_menu_id = self._get_current_menu_id()
             menu_visible = getattr(self, '_menu_visible', True)
-            
+
             # Finale GCS Persistierung
-            gcs_instance.field_value(f"menu_visible_{current_menu_id}", menu_visible)
+            gcs.field_value(f"menu_visible_{current_menu_id}", menu_visible)
             logger.info(f"💾 Vollständige finale Menü-Sichtbarkeits-Status gespeichert: {menu_visible} für Menü {current_menu_id}")
             
         except Exception as e:

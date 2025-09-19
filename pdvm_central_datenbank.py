@@ -201,19 +201,19 @@ class PdvmCentralDatenbank:
             ab_zeit: Zeitpunkt für historische Daten (None = aktuell)
             
         Returns:
-            Any: Der Wert oder None wenn nicht gefunden
+            Tuple[Any, Optional[float]]: (wert, abdatum) oder (wert, None) wenn nicht historisch
         """
         self._ensure_data_loaded()
         
         if gruppe not in self.data:
-            return None
+            return None, None
         
         gruppe_data = self.data[gruppe]
         if not isinstance(gruppe_data, dict):
-            return None
+            return None, None
         
         if feld not in gruppe_data:
-            return None
+            return None, None
         
         feld_data = gruppe_data[feld]
         
@@ -235,12 +235,12 @@ class PdvmCentralDatenbank:
                 for timestamp in feld_data.keys():
                     try:
                         if float(timestamp) == best_time:
-                            return feld_data[timestamp]
+                            return feld_data[timestamp], best_time
                     except (ValueError, TypeError):
                         continue
-                return None
+                return None, None
             else:
-                return None
+                return None, None
         
         # Nicht-historisch oder aktueller Wert
         if self.historisch and isinstance(feld_data, dict):
@@ -259,12 +259,12 @@ class PdvmCentralDatenbank:
                 for timestamp in feld_data.keys():
                     try:
                         if float(timestamp) == latest_time:
-                            return feld_data[timestamp]
+                            return feld_data[timestamp], latest_time
                     except (ValueError, TypeError):
                         continue
         
-        # Direkter Wert
-        return feld_data
+        # Direkter Wert - für nicht-historische Daten
+        return feld_data, None
 
     def get_static_value(self, gruppe: str, feld: str) -> Any:
         """

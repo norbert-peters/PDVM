@@ -1,3 +1,4 @@
+from global_gcs import gcs
 # pdvm_command_handler.py
 import json
 import logging
@@ -9,7 +10,7 @@ class PdvmCommandHandler:
     def __init__(self, app):
         """Initialisiert den PdvmCommandHandler mit der App-Instanz und PdvmMenu."""
         self.app = app  # MainApp-Instanz
-        self.user_daten = app.user_daten
+#        self.user_daten = gcs.user_data
         self.key = ""
 
     def execute_command(self, key):
