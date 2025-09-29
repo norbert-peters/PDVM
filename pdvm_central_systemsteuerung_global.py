@@ -60,14 +60,68 @@ def is_initialized():
 # Muss ein Objekt sein, keine Funktion, damit gcs.stichtag funktioniert
 class GcsAlias:
     """Alias-Klasse für direkten Zugriff auf finale GCS Properties"""
-    
+
+    def __init__(self):
+        self._projection_matrices = {}  # Cache für ProjectionMatrix-Instanzen
+
     def __getattr__(self, name):
         finale_gcs = get_central_systemsteuerung()
         return getattr(finale_gcs, name)
-    
+
     def __setattr__(self, name, value):
-        finale_gcs = get_central_systemsteuerung()
-        return setattr(finale_gcs, name, value)
+        if name.startswith('_'):
+            # Private Attribute direkt setzen
+            super().__setattr__(name, value)
+        else:
+            finale_gcs = get_central_systemsteuerung()
+            return setattr(finale_gcs, name, value)
+
+    def get_projection_matrix(self, view_guid: str):
+        """
+        ZENTRALE PROJECTION-MATRIX VERWALTUNG
+
+        Gibt die ProjectionMatrix für eine View-GUID zurück.
+        Erstellt neue Instanz falls nicht vorhanden.
+
+        Args:
+            view_guid: GUID der View
+
+        Returns:
+            ProjectionMatrix: Matrix-Instanz für die View
+        """
+        if view_guid not in self._projection_matrices:
+            try:
+                from projection_matrix import ProjectionMatrix
+                finale_gcs = get_central_systemsteuerung()
+                self._projection_matrices[view_guid] = ProjectionMatrix(view_guid, finale_gcs)
+
+                # Versuche aus GCS zu laden
+                if not self._projection_matrices[view_guid].load_from_gcs():
+                    logger.info(f"📝 Neue ProjectionMatrix für View {view_guid} erstellt")
+
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Erstellen der ProjectionMatrix: {e}")
+                return None
+
+        return self._projection_matrices[view_guid]
+
+    def update_projection_matrix(self, view_guid: str, basis_columns: list):
+        """
+        PROJECTION-MATRIX AKTUELL HALTE
+
+        Args:
+            view_guid: GUID der View
+            basis_columns: Neue Basis-Spalten
+        """
+        try:
+            matrix = self.get_projection_matrix(view_guid)
+            if matrix:
+                matrix.update_basis_columns(basis_columns)
+                logger.info(f"✅ ProjectionMatrix für {view_guid} aktualisiert")
+            else:
+                logger.warning(f"⚠️ Konnte ProjectionMatrix für {view_guid} nicht aktualisieren")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren der ProjectionMatrix: {e}")
 
 gcs = GcsAlias()
 

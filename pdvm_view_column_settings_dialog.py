@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 import pdvm_central_systemsteuerung_global
-gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
+gcs = pdvm_central_systemsteuerung_global.gcs
 
 class ColumnSettingsDialog(QDialog):
     def __init__(self, column_controls, parent=None):
@@ -73,7 +73,7 @@ class ColumnSettingsDialog(QDialog):
         """OK Button: Aktualisiere Order für aktuellen Modus und übernimmt Änderungen"""
         logger.info(f"🔄 Dialog accept - ExpertMode: {gcs.global_expert_mode}")
         logger.info(f"🔄 accept column_controls: {len(self.column_controls)} Spalten")
-        
+
         try:
             if gcs.global_expert_mode:
                 # ExpertMode: Alle Spalten nach expertOrder sortieren und Order neu setzen
@@ -82,99 +82,147 @@ class ColumnSettingsDialog(QDialog):
                     c['expertOrder'] = i
                     logger.debug(f"  {c['name']}: expertOrder={i}")
             else:
-                # NormalMode: Nur show==True Spalten nach displayOrder sortieren und Order neu setzen  
+                # NormalMode: Nur show==True Spalten nach displayOrder sortieren und Order neu setzen
                 show_controls = [c for c in self.column_controls if c.get('show', False)]
                 show_controls_sorted = sorted(show_controls, key=lambda c: c.get('displayOrder', 999))
-                
+
                 for i, c in enumerate(show_controls_sorted):
                     c['displayOrder'] = i
                     logger.debug(f"  {c['name']}: displayOrder={i}")
-                
+
                 # Versteckte Spalten bekommen hohe displayOrder-Werte
                 hidden_controls = [c for c in self.column_controls if not c.get('show', False)]
                 for i, c in enumerate(hidden_controls):
                     c['displayOrder'] = 1000 + i
-                    
+
             self.result_controls = self.column_controls
+
+            # WICHTIG: Änderungen auch in die ProjectionMatrix zurückschreiben
+            self._update_projection_matrix()
+
             logger.info("✅ Spalten-Order erfolgreich aktualisiert")
             super().accept()
-            
+
         except Exception as e:
             logger.error(f"❌ Fehler beim Accept: {e}")
             super().reject()
 
+    def _update_projection_matrix(self):
+        """Aktualisiert die Projektionen mit den neuen Spalten-Einstellungen"""
+        try:
+            # View-GUID aus Parent bekommen
+            view_guid = None
+            if hasattr(self.parent(), 'view_guid'):
+                view_guid = self.parent().view_guid
+
+            if view_guid and gcs:
+                # LINEARER PROJECTION MANAGER: Direkte Updates
+                from linear_projection_manager import get_projection_manager
+                projection_manager = get_projection_manager(view_guid, gcs)
+                
+                # Controls als Dictionary aufbereiten
+                updated_controls = {}
+                for col in self.column_controls:
+                    updated_controls[col['name']] = {
+                        'show': col.get('show', False),
+                        'expertOrder': col.get('expertOrder', 999),
+                        'displayOrder': col.get('displayOrder', 999),
+                        'spaltenueberschrift': col.get('spaltenueberschrift', col.get('name', ''))
+                    }
+                
+                # ProjectionManager aktualisieren - berechnet alle drei Projektionen neu
+                projection_manager.update_controls(updated_controls)
+                logger.info(f"✅ LinearProjectionManager für View {view_guid} aktualisiert")
+
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren des ProjectionManagers: {e}")
+            raise  # Kein Fallback - echter Fehler!
+
     def refresh_list(self):
         """Aktualisiert die Spaltenliste entsprechend dem aktuellen Modus"""
         self.list_widget.clear()
-        
+
         logger.info(f"🔄 Spaltenliste wird aktualisiert - ExpertMode: {gcs.global_expert_mode}")
         logger.info(f"🔄 column_controls: {len(self.column_controls)} Spalten")
-        
+
         try:
-            # ZENTRALE PROJEKTION: Verwende dieselbe Logik wie die Tabelle
-            from column_projection_helper import get_projected_columns
-            projected_columns = get_projected_columns(self.column_controls)
-            
-            logger.info(f"  Modus: {len(projected_columns)} projizierte Spalten")
-            
-            # Erstelle Index-Mapping für interne Verarbeitung
-            self._indices = []
-            for projected_col in projected_columns:
-                # Finde Index in self.column_controls
-                for i, original_col in enumerate(self.column_controls):
-                    if original_col['name'] == projected_col['name']:
-                        self._indices.append(i)
-                        break
-                        
-            for idx in self._indices:
-                col = self.column_controls[idx]
-                item = QListWidgetItem()
-                
-                if gcs.global_expert_mode:
-                    # ExpertMode: Checkbox + Spaltenname
-                    widget = QWidget()
-                    layout = QHBoxLayout()
-                    cb = QCheckBox()
-                    cb.setChecked(col.get('show', False))
-                    cb.stateChanged.connect(lambda state, c=col: self.toggle_show(c, state))
-                    
-                    label = QLabel(col.get('spaltenueberschrift', col['name']))
-                    label.setAlignment(Qt.AlignLeft)  # Linksbündige Ausrichtung
-                    order_label = QLabel(f"[E:{col.get('expertOrder', '?')}]")
-                    
-                    layout.addWidget(cb)
-                    layout.addWidget(label, 1)  # Stretch-Faktor für Label
-                    layout.addWidget(order_label)
-                    layout.setContentsMargins(0,0,0,0)
-                    widget.setLayout(layout)
-                    
-                    self.list_widget.addItem(item)
-                    self.list_widget.setItemWidget(item, widget)
-                else:
-                    # NormalMode: Nur Spaltenname (alle sind bereits show==True)
-                    widget = QWidget()
-                    layout = QHBoxLayout()
-                    
-                    label = QLabel(col.get('spaltenueberschrift', col['name']))
-                    label.setAlignment(Qt.AlignLeft)  # Linksbündige Ausrichtung
-                    order_label = QLabel(f"[D:{col.get('displayOrder', '?')}]")
-                    
-                    layout.addWidget(label, 1)  # Stretch-Faktor für Label
-                    layout.addWidget(order_label)
-                    layout.setContentsMargins(0,0,0,0)
-                    widget.setLayout(layout)
-                    
-                    self.list_widget.addItem(item)
-                    self.list_widget.setItemWidget(item, widget)
-                    
-            self.update_move_buttons()
-            logger.info("✅ Spaltenliste erfolgreich aktualisiert")
-            
+            # View-GUID aus Parent versuchen zu bekommen
+            view_guid = None
+            if hasattr(self.parent(), 'view_guid'):
+                view_guid = self.parent().view_guid
+
+            if view_guid:
+                # LINEARER PROJECTION MANAGER
+                from linear_projection_manager import get_projection_manager
+                projection_manager = get_projection_manager(view_guid, gcs)
+                projection_keys = projection_manager.get_management_projection()
+
+                if not projection_keys:
+                    logger.warning(f"⚠️ Keine Management-Projektion gefunden für View {view_guid}")
+                    # Fallback: Verwende alle verfügbaren Controls
+                    projection_keys = [col['name'] for col in self.column_controls]
+
+                logger.info(f"  Management-Projektion geladen: {len(projection_keys)} Spalten")
+
+                # Erstelle Index-Mapping für interne Verarbeitung
+                self._indices = []
+                for key in projection_keys:
+                    # Finde Index in self.column_controls
+                    for i, original_col in enumerate(self.column_controls):
+                        if original_col['name'] == key:
+                            self._indices.append(i)
+                            break
+
+                for idx in self._indices:
+                    col = self.column_controls[idx]
+                    item = QListWidgetItem()
+
+                    if gcs.global_expert_mode:
+                        # ExpertMode: Checkbox + Spaltenname
+                        widget = QWidget()
+                        layout = QHBoxLayout()
+                        cb = QCheckBox()
+                        cb.setChecked(col.get('show', False))
+                        cb.stateChanged.connect(lambda state, c=col: self.toggle_show(c, state))
+
+                        label = QLabel(col.get('spaltenueberschrift', col['name']))
+                        label.setAlignment(Qt.AlignLeft)  # Linksbündige Ausrichtung
+                        order_label = QLabel(f"[E:{col.get('expertOrder', '?')}]")
+
+                        layout.addWidget(cb)
+                        layout.addWidget(label, 1)  # Stretch-Faktor für Label
+                        layout.addWidget(order_label)
+                        layout.setContentsMargins(0,0,0,0)
+                        widget.setLayout(layout)
+
+                        self.list_widget.addItem(item)
+                        self.list_widget.setItemWidget(item, widget)
+                    else:
+                        # NormalMode: Nur Spaltenname (alle sind bereits show==True)
+                        widget = QWidget()
+                        layout = QHBoxLayout()
+
+                        label = QLabel(col.get('spaltenueberschrift', col['name']))
+                        label.setAlignment(Qt.AlignLeft)  # Linksbündige Ausrichtung
+                        order_label = QLabel(f"[D:{col.get('displayOrder', '?')}]")
+
+                        layout.addWidget(label, 1)  # Stretch-Faktor für Label
+                        layout.addWidget(order_label)
+                        layout.setContentsMargins(0,0,0,0)
+                        widget.setLayout(layout)
+
+                        self.list_widget.addItem(item)
+                        self.list_widget.setItemWidget(item, widget)
+
+                self.update_move_buttons()
+                logger.info("✅ Spaltenliste erfolgreich aktualisiert")
+            else:
+                logger.error("❌ Keine View-GUID verfügbar für Spaltenverwaltung")
+                raise RuntimeError("View-GUID fehlt für Spaltenverwaltung")
+
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren der Spaltenliste: {e}")
-            # Fallback: Leere Liste
-            self.list_widget.clear()
-            self._indices = []
+            raise  # Kein Fallback - echter Fehler!
 
     def update_move_buttons(self):
         row = self.list_widget.currentRow()

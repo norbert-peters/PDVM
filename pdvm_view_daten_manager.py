@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 import pdvm_central_systemsteuerung_global
+from linear_projection_manager import get_projection_manager
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 
@@ -987,12 +988,27 @@ class PdvmViewDatenManager:
             if not self.column_control:
                 return {'headers': [], 'rows': []}
 
-            # ZENTRALE PROJEKTION: Verwende dieselbe Logik wie der Dialog
-            from column_projection_helper import get_projected_columns
-            columns = get_projected_columns(self.basis_columns)
-            display_columns = [col['name'] for col in columns]
-            # Schöne Header-Namen für die Anzeige verwenden
-            display_headers = [col.get('spaltenueberschrift', col['name']) for col in columns]
+            # LINEARER PROJECTION MANAGER: Einfache Tabellen-Projektion
+            if self.view_guid:
+                projection_manager = get_projection_manager(self.view_guid, gcs)
+                table_projection = projection_manager.get_table_projection()
+                
+                if table_projection and self.basis_columns:
+                    # Basis-Columns nach Projektion filtern und sortieren
+                    basis_dict = {col['name']: col for col in self.basis_columns}
+                    columns = []
+                    for col_name in table_projection:
+                        if col_name in basis_dict:
+                            columns.append(basis_dict[col_name])
+                    
+                    display_columns = [col['name'] for col in columns]
+                    display_headers = [col.get('spaltenueberschrift', col['name']) for col in columns]
+                else:
+                    logger.warning(f"⚠️ Keine Table-Projektion verfügbar für View {self.view_guid}")
+                    return {'headers': [], 'rows': []}
+            else:
+                logger.warning("⚠️ Keine View-GUID verfügbar für Projektion")
+                return {'headers': [], 'rows': []}
 
             display_data = []
             guids_to_remove = []

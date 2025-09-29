@@ -30,8 +30,16 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# NEUES UNIFIED LINEAR FILTER SYSTEM
-from pdvm_linear_filter_integration import create_pdvm_linear_filter
+# LINEARES FILTER-SYSTEM IMPORT
+try:
+    from linear_filter_execution_manager import get_linear_filter_manager
+    LINEAR_FILTER_AVAILABLE = True
+    logger.info("✅ Lineares Filter-System verfügbar")
+except ImportError as e:
+    LINEAR_FILTER_AVAILABLE = False
+    logger.warning(f"⚠️ Lineares Filter-System nicht verfügbar: {e}")
+
+logger = logging.getLogger(__name__)
 
 def get_gcs_linear():
     """LINEARE GCS-Hilfsfunktion - konsistente Verwendung"""
@@ -117,9 +125,6 @@ class PdvmViewDialog:
         
         # UI-Container
         self.display = None
-        
-        # NEUES LINEARES FILTER-SYSTEM
-        self.linear_filter = None  # Wird nach display-Erstellung initialisiert
         
         # Initialisierung starten
         self._initialize_dialog()
@@ -732,48 +737,85 @@ class PdvmViewDialog:
             
             if saved_filters:
                 logger.info(f"🔄 Lade {len(saved_filters)} persistente Suchparameter")
-                # TODO: Persistente Filter mit neuem linearen System wiederherstellen
-                logger.info("📋 Persistente Filter-Wiederherstellung - TODO für lineares System")
+                self.display.apply_column_filters(saved_filters)
+                logger.info("✅ Persistente Suchparameter automatisch angewendet")
             
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Laden persistenter Suchparameter: {e}")
     
-    def apply_filter_string(self, filter_string: str):
-        """🎯 NEUE UNIFIED LINEAR FILTER-METHODE - ersetzt alles alte
+    def apply_filter_string(self, filter_string):
+        """🎯 ZENTRALE FILTER-METHODE - NEUE LINEARE FILTER-EXECUTION
         
         Args:
-            filter_string (str): Filterstring für alle drei Filterarten
+            filter_string (str): Filterstring im Format "feld1:wert1||feld2:wert2||EXTENDED:feld3:bedingungen"
         """
         try:
-            logger.info("🎯 === PDVM VIEW DIALOG - UNIFIED LINEAR FILTER ===")
+            logger.info("🎯 === LINEARE FILTER-EXECUTION GESTARTET ===")
             logger.info(f"📂 View-GUID: {self.view_guid}")
             logger.info(f"🔍 Filter-String: '{filter_string}'")
             
-            # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'display') and self.display and hasattr(self.display, 'table'):
-                # VEREINFACHT: Keine Column-Mappings mehr - Control-Key Patch übernimmt das
-                self.linear_filter = create_pdvm_linear_filter(self.display.table, self.view_guid)
-                logger.info("✅ Linear Filter Integration mit Control-Key Patch erstellt")
+            # SCHRITT 1: LinearFilterExecutionManager holen
+            from linear_filter_execution_manager import get_linear_filter_manager
+            manager = get_linear_filter_manager(self.view_guid)
             
-            if not self.linear_filter:
-                logger.error("❌ Kein Linear Filter verfügbar")
+            # SCHRITT 2: Leerer Filter - alle Filter löschen
+            if not filter_string or filter_string.strip() == "":
+                logger.info("🧹 Leerer Filter - lösche alle Filter linear")
+                success = manager.clear_all_filters()
+                if success:
+                    if hasattr(self, 'display') and self.display and hasattr(self.display, '_show_all_rows'):
+                        self.display._show_all_rows()
+                    if hasattr(self, 'display') and self.display:
+                        self.display.refresh_table()
                 return
             
-            # EINHEITLICHE LINEARE FILTER-ANWENDUNG
-            success = self.linear_filter.apply_filter_unified(filter_string)
+            # SCHRITT 3: Lineare Filter-Type-Erkennung und -Ausführung
+            success = False
             
+            if 'EXTENDED:' in filter_string:
+                # EXTENDED FILTER - über LinearFilterExecutionManager
+                logger.info("🔧 EXTENDED Filter erkannt - verwende lineare Execution")
+                filter_config = {
+                    'filter_string': filter_string,
+                    'field_name': self._extract_field_from_extended_string(filter_string),
+                    'conditions': self._parse_extended_conditions_from_string(filter_string)
+                }
+                success = manager.execute_filter_linear('extended', filter_config)
+                
+            elif ':' in filter_string:
+                # STRUKTURIERTER/PARAMETRISCHER FILTER - über LinearFilterExecutionManager  
+                logger.info("🎛️ Strukturierter Filter erkannt - verwende lineare Execution")
+                filter_config = self._parse_to_parametric_config(filter_string)
+                success = manager.execute_filter_linear('parametric', filter_config)
+                
+            else:
+                # GESAMTFILTER/GLOBALE SUCHE - über LinearFilterExecutionManager
+                logger.info(f"🌐 Gesamtfilter erkannt - verwende lineare Execution")
+                filter_config = {'filter_text': filter_string}
+                success = manager.execute_filter_linear('gesamtfilter', filter_config)
+            
+            # SCHRITT 4: Ergebnis-Behandlung
             if success:
-                logger.info("✅ Unified Linear Filter-Anwendung erfolgreich")
-                # UI refresh falls erforderlich
-                if hasattr(self, 'display') and self.display and hasattr(self.display, 'refresh_table'):
+                logger.info("✅ Lineare Filter-Execution erfolgreich")
+                if hasattr(self, 'display') and self.display:
                     self.display.refresh_table()
             else:
-                logger.error("❌ Unified Linear Filter-Anwendung fehlgeschlagen")
-                
+                logger.error("❌ Lineare Filter-Execution fehlgeschlagen")
+                # Fallback: Alle Zeilen anzeigen
+                if hasattr(self, 'display') and self.display and hasattr(self.display, '_show_all_rows'):
+                    self.display._show_all_rows()
+                if hasattr(self, 'display') and self.display:
+                    self.display.refresh_table()
+                    
         except Exception as e:
-            logger.error(f"❌ Fehler in neuer unified linear Filter-Methode: {e}")
+            logger.error(f"❌ Fehler bei linearer Filter-Execution: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+            # Fallback: Alle Zeilen anzeigen
+            if hasattr(self, 'display') and self.display and hasattr(self.display, '_show_all_rows'):
+                self.display._show_all_rows()
+            if hasattr(self, 'display') and self.display:
+                self.display.refresh_table()
             
             # SCHRITT 3: Display-Update
             if hasattr(self, 'display') and self.display:
@@ -1189,9 +1231,6 @@ class PdvmViewDisplay(QWidget):
         self.view_dialog = view_dialog
         self.header_label = None
         
-        # NEUES LINEARES FILTER-SYSTEM
-        self.linear_filter = None  # Wird nach table-Erstellung initialisiert
-        
         self._setup_ui()
         self.refresh_table()
     
@@ -1382,8 +1421,8 @@ class PdvmViewDisplay(QWidget):
             
             # ToolTip für vollständigen Text erstellen
             tooltip_text = base_name
-            # WICHTIG: Control-Key IMMER im ToolTip (für Filter-Suche)
-            tooltip_text += f"\nControl-Key: {col}"
+            if gcs and gcs.expert_mode:
+                tooltip_text += f"\nControl-Key: {col}"
             if control.get('control_type'):
                 tooltip_text += f"\nTyp: {control.get('control_type')}"
             tooltips.append(tooltip_text)
@@ -1515,52 +1554,47 @@ class PdvmViewDisplay(QWidget):
             logger.info(f"🔍 Einfache Suche angewendet: '{search_text}'")
     
     def _show_all_rows(self):
-        """Reset alle Zeilen sichtbar - wird vom linearen System automatisch aufgerufen"""
-        try:
-            # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'table'):
-                view_guid = getattr(self.view_dialog, 'view_guid', None)
-                self.linear_filter = create_pdvm_linear_filter(self.table, view_guid)
-            
-            if self.linear_filter:
-                return self.linear_filter.clear_all_filters()
-            else:
-                # Fallback
-                for row in range(self.table.rowCount()):
-                    self.table.setRowHidden(row, False)
-                logger.info(f"✅ Fallback: Alle {self.table.rowCount()} Zeilen sichtbar")
-        except Exception as e:
-            logger.error(f"❌ Fehler bei show_all_rows: {e}")
+        """Zeige alle Tabellenzeilen"""
+        for row in range(self.table.rowCount()):
+            self.table.setRowHidden(row, False)
     
     def _perform_search(self, search_text):
-        """🎯 NEUE LINEARE SUCHE - verwendet Unified Linear Filter"""
-        try:
-            # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'table'):
-                view_guid = getattr(self.view_dialog, 'view_guid', None)
-                self.linear_filter = create_pdvm_linear_filter(self.table, view_guid)
-                logger.info("✅ Linear Filter Integration für Search erstellt")
+        """Führe Suche in allen angezeigten Spalten durch - unterstützt Normal- und Negativ-Suche"""
+        if not search_text:
+            self._show_all_rows()
+            return
+        
+        search_text_lower = search_text.lower()
+        visible_count = 0
+        total_count = self.table.rowCount()
+        
+        # Durchsuche alle Zeilen
+        for row in range(total_count):
+            contains_text = False
             
-            if not self.linear_filter:
-                logger.error("❌ Kein Linear Filter für Search verfügbar")
-                return
+            # Durchsuche alle Spalten in dieser Zeile
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item:
+                    cell_text = item.text().lower()
+                    if search_text_lower in cell_text:
+                        contains_text = True
+                        break
             
-            # LINEARE FILTER-ANWENDUNG
-            success = self.linear_filter.apply_filter_unified(search_text)
-            
-            if success:
-                visible_count = self.linear_filter.count_visible_rows()
-                total_count = self.table.rowCount()
-                
-                # Suchstatus aktualisieren
-                mode_text = "ausgeschlossen" if getattr(self, 'is_negative_search', False) else "gefunden"
-                status_msg = f"{visible_count}/{total_count} Einträge {mode_text}"
-                logger.info(f"✅ Lineare Suche erfolgreich: {status_msg}")
+            # Zeile basierend auf Suchmodus anzeigen/verstecken
+            if self.is_negative_search:
+                # Negativ-Suche: Zeile verstecken wenn Text gefunden
+                show_row = not contains_text
             else:
-                logger.error("❌ Lineare Suche fehlgeschlagen")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler bei linearer Suche: {e}")
+                # Normal-Suche: Zeile anzeigen wenn Text gefunden
+                show_row = contains_text
+            
+            self.table.setRowHidden(row, not show_row)
+            if show_row:
+                visible_count += 1
+        
+        # Suchstatus aktualisieren
+        mode_text = "ausgeschlossen" if self.is_negative_search else "gefunden"
         
         if visible_count == 0:
             if self.is_negative_search:
@@ -1989,6 +2023,13 @@ class PdvmViewDisplay(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler beim Löschen aller Filter: {e}")
     
+    def apply_column_filters(self, filters):
+        """
+        DEAKTIVIERT: Alte Spaltenfilter-Methode - jetzt einheitlicher Filterstring
+        """
+        logger.info("⚠️ apply_column_filters DEAKTIVIERT - verwende einheitlichen Filterstring")
+        return
+
 
 class PdvmFilterPanel(QWidget):
     """
@@ -2481,50 +2522,34 @@ class PdvmFilterPanel(QWidget):
         try:
             # Hole Filterstring vom SearchParameterDialog
             filter_string = ""
-            if hasattr(self, 'search_dialog') and hasattr(self.search_dialog, 'result_filter_string'):
+            if hasattr(self.search_dialog, 'result_filter_string'):
                 filter_string = self.search_dialog.result_filter_string
             
             logger.info(f"🎯 Anwenden einheitlicher Filterstring: '{filter_string}'")
             
-            # ✅ KORRIGIERT: Verwende das view_dialog linear filter system
-            if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                success = self.view_dialog.linear_filter.apply_filter_unified(filter_string)
-                if success:
-                    logger.info("✅ SearchParameter Filter erfolgreich über lineares System angewendet")
-                else:
-                    logger.error("❌ SearchParameter Filter über lineares System fehlgeschlagen")
-            else:
-                logger.error("❌ Kein linear_filter in view_dialog verfügbar")
+            # Wende Filterstring an
+            self.apply_filter_string(filter_string)
             
         except Exception as e:
             logger.error(f"❌ Fehler bei einheitlicher Filterung: {e}")
+            # Fallback: Alle Zeilen anzeigen
+            if hasattr(self, 'view_dialog') and self.view_dialog and hasattr(self.view_dialog, 'display') and self.view_dialog.display and hasattr(self.view_dialog.display, '_show_all_rows'):
+                self.view_dialog.display._show_all_rows()
 
-    def apply_filter_string(self, filter_string: str):
-        """🎯 NEUE UNIFIED LINEAR FILTER-METHODE für Filter-Panel
+    def apply_filter_string(self, filter_string):
+        """
+        ZENTRALE FILTERMETHODE: Wendet einen einheitlichen Filterstring auf die Tabelle an
         
         Args:
-            filter_string (str): Filterstring für alle Filter-Arten
+            filter_string (str): Filterstring im Format "feld1:wert1||feld2:wert2||EXTENDED:feld3:bedingungen"
         """
         try:
-            logger.info("🎯 === PDVM FILTER PANEL - UNIFIED LINEAR FILTER ===")
-            
-            # Filter-Integration über view_dialog holen
-            if (hasattr(self.view_dialog, 'linear_filter') and 
-                self.view_dialog.linear_filter):
-                
-                # EINHEITLICHE LINEARE FILTER-ANWENDUNG über Dialog
-                success = self.view_dialog.linear_filter.apply_filter_unified(filter_string)
-                
-                if success:
-                    logger.info("✅ Filter-Panel unified linear Filter erfolgreich")
-                else:
-                    logger.error("❌ Filter-Panel unified linear Filter fehlgeschlagen")
-            else:
-                logger.error("❌ Kein Linear Filter über view_dialog verfügbar")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler in Filter-Panel unified linear Filter: {e}")
-            return
+            if not filter_string or filter_string.strip() == "":
+                # Kein Filter - alle Zeilen anzeigen
+                logger.info("🔓 Kein Filter - alle Zeilen anzeigen")
+                if hasattr(self, 'view_dialog') and self.view_dialog and hasattr(self.view_dialog, 'display') and self.view_dialog.display and hasattr(self.view_dialog.display, '_show_all_rows'):
+                    self.view_dialog.display._show_all_rows()
+                return
             
             logger.info(f"🔍 Anwenden Filterstring: {filter_string}")
             
@@ -2555,9 +2580,7 @@ class PdvmFilterPanel(QWidget):
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Anwenden des Filterstrings: {e}")
-            # Verwende das neue lineare System über view_dialog
-            if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                self.view_dialog.linear_filter.clear_all_filters()
+            self._show_all_rows()
 
     def _row_matches_filter_string(self, row_index, filter_parts):
         """
@@ -2667,9 +2690,7 @@ class PdvmFilterPanel(QWidget):
                     }
             
             if not active_filters:
-                # Verwende das neue lineare System über view_dialog
-                if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                    self.view_dialog.linear_filter.clear_all_filters()
+                self._show_all_rows()
                 return
             
             logger.info(f"🔍 Aktive normale Filter: {list(active_filters.keys())}")
@@ -2792,6 +2813,66 @@ class PdvmFilterPanel(QWidget):
         pattern = pattern.replace(r'\%', '.*')  # % für beliebig viele Zeichen
         pattern = pattern.replace(r'\?', '.')   # ? für ein Zeichen
         return pattern
+    
+    def _extract_field_from_extended_string(self, filter_string):
+        """Extrahiert Feldname aus EXTENDED Filter-String"""
+        try:
+            # Beispiel: "EXTENDED:familienname_show:conditions"
+            if 'EXTENDED:' in filter_string:
+                parts = filter_string.split(':')
+                if len(parts) >= 2:
+                    return parts[1]
+        except:
+            pass
+        return 'unknown_field'
+    
+    def _parse_extended_conditions_from_string(self, filter_string):
+        """Parst Extended Filter Conditions aus String"""
+        try:
+            # Placeholder - erweiterte Bedingungen aus String extrahieren
+            # TODO: Implementierung basierend auf tatsächlichem Extended Filter Format
+            return []
+        except:
+            return []
+    
+    def _parse_to_parametric_config(self, filter_string):
+        """Konvertiert Filter-String zu parametrischem Filter-Config"""
+        try:
+            # Beispiel: "familienname_show:Lau" oder "vorname_show:NOT:Max"
+            if ':' in filter_string:
+                parts = filter_string.split(':')
+                if len(parts) >= 2:
+                    field_name = parts[0]
+                    
+                    if len(parts) >= 3 and parts[1] == 'NOT':
+                        # Negation
+                        return {
+                            'field_name': field_name,
+                            'search_value': parts[2],
+                            'operator': 'NOT_enthält'
+                        }
+                    else:
+                        # Normal
+                        return {
+                            'field_name': field_name,
+                            'search_value': parts[1],
+                            'operator': 'enthält'
+                        }
+            
+            # Fallback für einfachen Text
+            return {
+                'field_name': 'global',
+                'search_value': filter_string,
+                'operator': 'enthält'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Parsen parametrischer Filter-Config: {e}")
+            return {
+                'field_name': 'global',
+                'search_value': filter_string,
+                'operator': 'enthält'
+            }
 
     def _reset_search_filters(self):
         """Setzt alle Suchfilter zurück"""

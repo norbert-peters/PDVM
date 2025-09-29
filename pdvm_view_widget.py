@@ -17,6 +17,7 @@ from PyQt5.QtCore import Qt
 # Globale Instanz direkt importieren
 import pdvm_central_systemsteuerung_global
 from pdvm_central_systemsteuerung import is_expert_mode_available
+from linear_projection_manager import get_projection_manager
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 logger = logging.getLogger(__name__)
@@ -232,6 +233,13 @@ class PdvmViewWidget(QWidget):
             except Exception as e2:
                 logger.warning(f"⚠️ Fehler beim Speichern von ExpertMode in Systemsteuerung: {e2}")
             
+            # LINEARER PROJECTION MANAGER: Automatisches Update bei Mode-Wechsel
+            view_guid = self.call_daten.get('view_guid') if self.call_daten else None
+            if view_guid:
+                projection_manager = get_projection_manager(view_guid, gcs)
+                projection_manager.handle_expert_mode_change()
+                logger.info("✅ ProjectionManager nach Moduswechsel aktualisiert")
+            
             # EINFACH: Nur Tabelle neu laden, keine komplette Widget-Neuinitialisierung
             logger.info(f"🔄 Moduswechsel: ExpertMode={new_mode}")
             self._load_table_data()
@@ -299,17 +307,41 @@ class PdvmViewWidget(QWidget):
         try:
             if self.view_manager:
                 # Hole Daten und Spaltenprojektion ausschließlich aus get_table_data_for_display
-                data, display_columns = self.view_manager.get_table_data_for_display()
+                result = self.view_manager.get_table_data_for_display()
                 
-                # ZENTRALE PROJEKTION: Verwende dieselbe Logik wie Dialog  
-                from column_projection_helper import get_projected_columns
-                columns = get_projected_columns(self.view_manager.basis_columns)
+                # NEUE ARCHITEKTUR: Dict unpacking
+                data = result.get('rows', [])
+                display_headers = result.get('headers', [])
+                abdatum_matrix = result.get('abdatum_matrix', None)
                 
-                headers = [col.get('spaltenueberschrift', col.get('name', '')) for col in columns]
-                col_names = [col['name'] for col in columns]
-                abdatum_matrix = None
-                if hasattr(self.view_manager, 'get_abdatum_matrix'):
-                    abdatum_matrix = self.view_manager.get_abdatum_matrix(show_only=(not gcs.global_expert_mode))
+                # View-GUID für Matrix-Integration
+                view_guid = self.call_daten.get('view_guid') if self.call_daten else None
+                
+                # LINEARER PROJECTION MANAGER: Einfache Tabellen-Projektion
+                if view_guid:
+                    projection_manager = get_projection_manager(view_guid, gcs)
+                    table_projection = projection_manager.get_table_projection()
+                    
+                    if table_projection and self.view_manager.basis_columns:
+                        # Basis-Columns nach Projektion filtern und sortieren
+                        basis_dict = {col['name']: col for col in self.view_manager.basis_columns}
+                        columns = []
+                        for col_name in table_projection:
+                            if col_name in basis_dict:
+                                columns.append(basis_dict[col_name])
+                        
+                        headers = [col.get('spaltenueberschrift', col.get('name', '')) for col in columns]
+                        col_names = [col['name'] for col in columns]
+                    else:
+                        # Fallback: Verwende display_headers aus DatenManager
+                        headers = display_headers
+                        col_names = display_headers  # Vereinfacht - sollte eigentlich Spaltennamen sein
+                        logger.warning("⚠️ Keine Table-Projektion verfügbar - verwende Fallback")
+                else:
+                    # Fallback ohne View-GUID
+                    headers = display_headers
+                    col_names = display_headers
+                    logger.warning("⚠️ Keine View-GUID verfügbar - verwende Fallback")
                 if data and len(data) > 0 and headers:
                     self.table.setRowCount(len(data))
                     self.table.setColumnCount(len(col_names))

@@ -9,7 +9,7 @@ PDVM-Systemstart mi                # Benutzername für Titelleiste aus GCS
                 # Kompatibilität: user_daten für bestehende Handler
                 self.user_daten = {
                     'email': self.user_email,
-                    'guid': self.user_guid,
+                    'guid': gcs._user_guid,
                     'Vorname': vorname,
                     'Name': name,
                     'MeineApps': self.startmenu_id
@@ -17,13 +17,13 @@ PDVM-Systemstart mi                # Benutzername für Titelleiste aus GCS
                 
                 logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
                 logger.info(f"🔹 E-Mail: {self.user_email}")
-                logger.info(f"🔹 GUID: {self.user_guid}")
+                logger.info(f"🔹 GUID: {gcs._user_guid}")
                 logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
                 logger.info(f"🔹 Benutzername: {self.user_name}")
             else:
                 logger.error("❌ Finale GCS nicht verfügbar - verwende Fallback-Werte")
                 self.user_email = 'test@example.com'
-                self.user_guid = 'unknown'
+                # Fallback entfernt - GCS ist jetzt erforderlich
                 self.user_name = 'Test Benutzer'
                 self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
                 self.user_daten = {}ursprünglicher Funktionalität + finale GCS-Integration
@@ -82,58 +82,17 @@ class MainAppComplete(QMainWindow):
         self.setWindowTitle("PDVM System - Vollständige finale Hauptanwendung")
         self.resize(1000, 600)
         
-        # Hilfsfunktion für sicheren Zugriff auf finale GCS
-        self._gcs_instance = None
+        # Prüfe GCS-Verfügbarkeit (ohne Fallbacks)
+        if not gcs or not gcs.is_initialized:
+            raise RuntimeError("❌ GCS muss vor MainApp initialisiert sein!")
         
-        # ALLE Daten aus der finalen GCS beziehen - KEINE Parameter mehr!
-        try:
-            # Hole Benutzerdaten aus der finalen GCS
-            if gcs and gcs.is_initialized:
-                # Benutzer-E-Mail aus GCS
-                self.user_email = gcs.get_property('email', 'u') or 'test@example.com'
-                self.user_guid = gcs.user_guid
-                
-                # Startmenü-GUID aus GCS
-                self.startmenu_id = gcs.get_menu_id('Startbereich') or "5ca6674e-b9ce-4581-9756-64e742883f80"
-                
-                # Benutzername für Titelleiste aus GCS
-                vorname = gcs.get_property('Vorname', 'u') or ''
-                name = gcs.get_property('Name', 'u') or ''
-                self.user_name = f"{vorname} {name}".strip() or self.user_email
-                
-                # Kompatibilität: user_daten für bestehende Handler
-                self.user_daten = {
-                    'email': self.user_email,
-                    'guid': self.user_guid,
-                    'Vorname': vorname,
-                    'Name': name,
-                    'MeineApps': self.startmenu_id
-                }
-                
-                logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
-                logger.info(f"🔹 E-Mail: {self.user_email}")
-                logger.info(f"🔹 GUID: {self.user_guid}")
-                logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
-                logger.info(f"🔹 Benutzername: {self.user_name}")
-            else:
-                logger.error("❌ Finale GCS nicht verfügbar - verwende Fallback-Werte")
-                self.user_email = 'test@example.com'
-                self.user_guid = 'unknown'
-                self.user_name = 'Test Benutzer'
-                self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
-                self.user_daten = {}
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Laden der Benutzerdaten aus GCS: {e}")
-            self.user_email = 'test@example.com'
-            self.user_guid = 'unknown'
-            self.user_name = 'Test Benutzer'
-            self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
-            self.user_daten = {}
+        # Benutzername für Titelleiste direkt aus GCS
+        vorname = gcs.get_property('Vorname', 'u', "Benutzer") or ''
+        name = gcs.get_property('Name', 'u', "Benutzer") or ''
+        user_name = f"{vorname} {name}".strip() or gcs.get_property('email', 'u') or 'Unbekannt'
+        self.setWindowTitle(f"PDVM System - Vollständige finale Hauptanwendung - {user_name}")
 
-        # Benutzername in der Titelleiste anzeigen
-        self.setWindowTitle(f"PDVM System - Vollständige finale Hauptanwendung - {self.user_name}")
-
-        logger.info(f"✅ Startmenü-GUID aus finaler GCS: {self.startmenu_id}")
+        logger.info(f"✅ Hauptanwendung gestartet für User: {gcs.user_guid}")
         
         # Zentrales Widget und Layout
         central = QWidget()
@@ -162,29 +121,7 @@ class MainAppComplete(QMainWindow):
             logger.warning(f"⚠️ Command Handler nicht verfügbar: {e}")
             self.command_handler = None
         
-        # FINALE GCS-INSTANZ ist bereits vom linearen Start initialisiert
-        # Verwende die globale GCS direkt
-        if gcs and gcs.is_initialized:
-            logger.info("✅ Finale GCS bereits verfügbar - verwende bestehende Instanz")
-            
-            # Lade Benutzerdaten aus der globalen GCS
-            self.user_guid = gcs.user_guid
-            self.user_email = gcs.get_property('email', 'u') or 'test@example.com'
-            vorname = gcs.get_property('Vorname', 'u') or ''
-            name = gcs.get_property('Name', 'u') or ''
-            self.user_name = f"{vorname} {name}".strip() or self.user_email
-            self.startmenu_id = gcs.get_menu_id('Startbereich') or "5ca6674e-b9ce-4581-9756-64e742883f80"
-            
-            logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
-            logger.info(f"🔹 E-Mail: {self.user_email}")
-            logger.info(f"🔹 GUID: {self.user_guid}")
-            logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
-            logger.info(f"🔹 Benutzername: {self.user_name}")
-        else:
-            logger.warning("⚠️ Finale GCS noch nicht initialisiert")
-            self._initialize_finale_gcs()
-        
-        # FINALE STICHTAG-BALKEN nach GCS-Initialisierung
+        # FINALE STICHTAG-BALKEN direkt aus GCS
         logger.info("🔧 Erstelle vollständigen Stichtag-Balken...")
         self.stichtag_bar = self._create_complete_stichtag_bar()
         if self.stichtag_bar:
@@ -200,7 +137,7 @@ class MainAppComplete(QMainWindow):
         separator.setFrameShadow(QFrame.Sunken)
         self.content_layout.insertWidget(1, separator)  # Nach Stichtag-Balken
         
-        # Startmenü laden (DRY-Prinzip: Eine zentrale Methode für Startmenü)
+        # STARTMENÜ laden (klar getrennt von App-Menüs)
         self.open_start_menu()
 
     def _create_complete_stichtag_bar(self):
@@ -400,71 +337,6 @@ class MainAppComplete(QMainWindow):
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren des vollständigen Stichtag-Balkens: {e}")
 
-    def _initialize_finale_gcs(self):
-        """
-        Initialisiert die finale GCS-Instanz für die gesamte Anwendung.
-        
-        FINALE SICHERHEITS-ARCHITEKTUR:
-        - Finale GCS wird ERST nach Login mit user_guid erstellt
-        - Verwendet pdvm_central_systemsteuerung_final.py
-        - Keine Fallbacks auf "default_user" mehr!
-        """
-        try:
-            if not self.user_guid:
-                raise ValueError("❌ KRITISCH: user_guid fehlt! Login nicht erfolgreich.")
-            
-            logger.info(f"🎛️ Initialisiere finale GCS nach Login für User: {self.user_guid}")
-            
-            # FINALE GCS IMPORT
-            from pdvm_central_systemsteuerung import initialize_gcs
-            
-            # ✅ FINALE SICHERE INITIALISIERUNG
-            # Verwende die Benutzerdaten aus der globalen GCS falls verfügbar
-            if gcs and gcs.is_initialized:
-                user_data_for_init = gcs.user_data
-                logger.info("✅ Verwende Benutzerdaten aus bereits initialisierter GCS")
-            else:
-                # Fallback: Verwende gespeicherte Benutzerdaten aus dem Login
-                user_data_for_init = getattr(self, 'user_daten', None)
-                if not user_data_for_init:
-                    raise ValueError("❌ Keine Benutzerdaten verfügbar für GCS-Initialisierung!")
-            
-            success = initialize_gcs(self.user_guid, user_data_for_init)
-            
-            if success:
-                logger.info(f"✅ Finale GCS sicher initialisiert")
-                logger.info(f"🎯 Alle Werte verfügbar über finale Properties: st_inst, expert_mode, etc.")
-                
-                # Stichtag-Balken nach vollständiger Initialisierung aktualisieren
-                self._refresh_complete_stichtag_bar_after_init()
-            else:
-                raise RuntimeError("Finale GCS-Initialisierung fehlgeschlagen")
-            
-        except Exception as e:
-            logger.error(f"❌ KRITISCHER FEHLER bei finale GCS-Initialisierung: {e}")
-            import traceback
-            traceback.print_exc()
-            # Nicht abbrechen - Fallback verwenden
-            logger.warning("⚠️ Verwende Fallback-Modus ohne GCS")
-
-    def _refresh_complete_stichtag_bar_after_init(self):
-        """
-        Aktualisiert den vollständigen Stichtag-Balken nach vollständiger Initialisierung.
-        """
-        try:
-            if hasattr(self, 'stichtag_picker') and self.stichtag_picker:
-                logger.info("🔄 Aktualisiere vollständigen Stichtag-Balken nach Initialisierung")
-                
-                if hasattr(self.stichtag_picker, 'update_display'):
-                    self.stichtag_picker.update_display()
-                self._update_complete_stichtag_display()
-                
-                logger.info("✅ Vollständiger Stichtag-Balken erfolgreich aktualisiert")
-            else:
-                logger.warning("⚠️ Vollständige Stichtag-Balken-Komponenten nicht verfügbar für Update")
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Aktualisieren des vollständigen Stichtag-Balkens: {e}")
-
     def _check_and_create_demo_menu(self, menu_id):
         """
         Überprüft ob ein Demo-Startmenü existiert und erstellt es falls nötig.
@@ -482,8 +354,8 @@ class MainAppComplete(QMainWindow):
                 
             # GUID setzen wenn nicht vorhanden
             if not db.guid:
-                db.guid = self.user_guid
-                logger.info(f"✅ DB GUID gesetzt für Demo-Menü: {self.user_guid}")
+                db.guid = gcs._user_guid
+                logger.info(f"✅ DB GUID gesetzt für Demo-Menü: {gcs._user_guid}")
             
             # Prüfe ob Demo-Menü bereits existiert (verwende get_value statt load_menu_data)
             existing_menu = db.get_value(
@@ -624,36 +496,40 @@ class MainAppComplete(QMainWindow):
             self.show_text(f"⚠️ Menüeditor nicht verfügbar: {e}")
 
     def open_start_menu(self):
-        """Lädt erneut das Startmenü."""
-        logger.info("🔹 open_start_menu() gestartet...")
+        """STARTMENÜ mit Berechtigungsprüfung - klar getrennt von App-Menüs"""
+        logger.info("🏠 open_start_menu() - STARTMENÜ wird geladen...")
         
         try:
+            # Startmenü-GUID direkt aus GCS (ohne Zwischenvariable)
+            startmenu_guid = gcs.get_menu_id('Startbereich')
+            if not startmenu_guid:
+                raise ValueError("Startmenü-GUID nicht in GCS gefunden!")
+                
+            logger.info(f"🔹 Startmenü-GUID aus GCS: {startmenu_guid}")
+            
             # 🔒 LAZY IMPORT: Handler erst nach Login laden
-            logger.info("🔹 Importiere Handler-Module...")
             from pdvm_command_handler import PdvmCommandHandler
             from pdvm_menu_handler import PdvmMenuHandler
-            logger.info("✅ Handler-Module erfolgreich importiert")
             
-            # Handler nur initialisieren wenn noch nicht vorhanden (für __init__)
+            # Handler nur initialisieren wenn noch nicht vorhanden
             if not hasattr(self, 'command_handler') or not self.command_handler:
-                logger.info("🔹 Erstelle Command Handler...")
                 self.command_handler = PdvmCommandHandler(self)
-                logger.info("✅ Command Handler erstellt")
                 
-            logger.info(f"🔹 Erstelle Menu Handler mit Startmenu-ID: {self.startmenu_id}")
+            # STARTMENÜ-Handler erstellen
             self.menu_handler = PdvmMenuHandler(
                 root=self,
                 menu_widget=self.menu_frame,
-                menu_id=self.startmenu_id,
+                menu_id=startmenu_guid,
                 command_handler=self.command_handler
             )
-            logger.info("✅ Menu Handler erstellt")
             
-            logger.info("🔹 Erstelle Menüs...")
             self.menu_handler.create_menus()
-            logger.info("✅ Menüs erstellt")
             
-            self.setWindowTitle(f"PDVM System - Vollständige finale Hauptanwendung - {self.user_name}")
+            # Benutzername direkt aus GCS für Titelleiste
+            vorname = gcs.get_property('Vorname', 'u') or ''
+            name = gcs.get_property('Name', 'u') or ''
+            user_name = f"{vorname} {name}".strip() or gcs.get_property('email', 'u') or 'Unbekannt'
+            self.setWindowTitle(f"PDVM System - Vollständige finale Hauptanwendung - {user_name}")
             
             # Zentraler Startbildschirm
             self._show_label("🔹 Willkommen im vollständigen finalen PDVM-System!", small=False, clear_content=True)
@@ -664,27 +540,24 @@ class MainAppComplete(QMainWindow):
                 "⌨️ Tab-Navigation: Ctrl+←/→ oder Alt+1-9 für direkten Tab-Zugriff"
             ], small=True, clear_content=False)
             
-            # Startmenü: Menü immer anzeigen (Sicherheit)
-            self._ensure_menu_visible()
-            logger.info("🏠 Vollständiges Startmenü geladen - Menü automatisch eingeblendet")
+            # STARTMENÜ: Panel DIREKT anzeigen - KEINE GCS-Abfrage!
+            self._menu_visible = True
+            # Direkte Panel-Anzeige ohne Umwege
+            if self.menu_frame.isHidden():
+                self.main_layout.insertWidget(0, self.menu_frame, 1)
+                self.menu_frame.show()
+            self.main_layout.update()
+            QApplication.processEvents()
+            logger.info("🏠 STARTMENÜ geladen - Panel DIREKT angezeigt (keine GCS-Abfrage)")
             
-        except ImportError as e:
-            logger.error(f"❌ Import-Fehler bei Menü-Handler: {e}")
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            # Fallback: Einfache Demo-Meldung
-            self._show_label("🔹 Willkommen im vollständigen finalen PDVM-System!", small=False, clear_content=True)
-            self._show_label([
-                "⚠️ Menü-System nicht verfügbar (Import-Fehler)",
-                f"Fehler: {e}",
-                "🔧 System läuft im Basis-Modus"
-            ], small=True, clear_content=False)
         except Exception as e:
-            logger.error(f"❌ Allgemeiner Fehler beim Laden des Startmenüs: {e}")
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            logger.error(f"❌ Fehler beim Laden des STARTMENÜS: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Fallback: Einfache Demo-Meldung
             self._show_label("🔹 Willkommen im vollständigen finalen PDVM-System!", small=False, clear_content=True)
             self._show_label([
-                "⚠️ Menü-System nicht verfügbar (Fehler)",
+                "⚠️ Startmenü-System nicht verfügbar",
                 f"Fehler: {e}",
                 "🔧 System läuft im Basis-Modus"
             ], small=True, clear_content=False)
@@ -804,6 +677,10 @@ class MainAppComplete(QMainWindow):
             if hasattr(app_menu_handler, 'create_menus'):
                 app_menu_handler.create_menus()
                 logger.info(f"✅ App-Menüs erstellt und angezeigt")
+                
+                # 4) Menü-Sichtbarkeits-Status für das neue Menü laden
+                self._load_and_apply_menu_visibility()
+                
             else:
                 logger.warning(f"⚠️ App-Menü-Handler hat keine create_menus Methode")
                 
@@ -862,7 +739,7 @@ class MainAppComplete(QMainWindow):
                 "first_call": True,  # Initialer Aufruf
             }
             
-            logger.info(f"📋 Call-Daten vorbereitet: view_guid={view_guid}, user_guid={self.user_guid}, title='{view_title}'")
+            logger.info(f"📋 Call-Daten vorbereitet: view_guid={view_guid}, user_guid={gcs._user_guid}, title='{view_title}'")
 
             # Vereinfachte Architektur ohne set_menu_command - direkte View-Dialog Erstellung
             try:
@@ -1069,8 +946,18 @@ class MainAppComplete(QMainWindow):
         
         Entfernt oder fügt das vertikale Menü (menu_frame) zum Layout hinzu
         und gibt dem Content-Bereich den gesamten verfügbaren Platz.
+        
+        SICHERHEIT: STARTMENÜ darf nie umgeschaltet werden!
         """
         try:
+            # SICHERHEIT: STARTMENÜ-Panel darf NIE umgeschaltet werden!
+            current_menu_id = self._get_current_menu_id()
+            startmenu_guid = gcs.get_menu_id('Startbereich')
+            
+            if current_menu_id == startmenu_guid:
+                logger.warning(f"🚨 SICHERHEIT: STARTMENÜ-Panel darf nicht umgeschaltet werden!")
+                return
+            
             # Status-Variable für Menü-Sichtbarkeit initialisieren falls nicht vorhanden
             if not hasattr(self, '_menu_visible'):
                 self._menu_visible = True
@@ -1098,6 +985,43 @@ class MainAppComplete(QMainWindow):
         except Exception as e:
             logger.error(f"❌ Fehler beim Umschalten der vollständigen finalen Menü-Sichtbarkeit: {e}")
 
+    def _load_and_apply_menu_visibility(self):
+        """NUR FÜR APP-MENÜS - STARTMENÜ wird NIEMALS hier behandelt!"""
+        try:
+            if not hasattr(self, '_menu_visible'):
+                self._menu_visible = True
+
+            current_menu_id = self._get_current_menu_id()
+            startmenu_guid = gcs.get_menu_id('Startbereich')
+            
+            # SICHERHEIT: Falls irrtümlich für STARTMENÜ aufgerufen - FEHLER!
+            if current_menu_id == startmenu_guid:
+                logger.error(f"🚨 FEHLER: _load_and_apply_menu_visibility() für STARTMENÜ aufgerufen! Das darf nicht passieren!")
+                return
+            
+            # APP-MENÜS: Status aus GCS laden, Default = False (versteckt) beim ersten Aufruf
+            menu_visible = gcs.get_menu_panel_visible(current_menu_id)  # Default = True falls nicht gesetzt
+            self._menu_visible = menu_visible
+            
+            if self._menu_visible:
+                self.main_layout.insertWidget(0, self.menu_frame, 1)
+                self.menu_frame.show()
+            else:
+                self.main_layout.removeWidget(self.menu_frame)
+                self.menu_frame.hide()
+                
+            self.main_layout.update()
+            QApplication.processEvents()
+            
+            logger.info(f"📋 APP-MENÜ Panel-Status angewendet: {self._menu_visible} für Menü {current_menu_id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des Menü-Status: {e}")
+            # Fallback: Menü versteckt für APP-MENÜS
+            self._menu_visible = False
+            self.main_layout.removeWidget(self.menu_frame)
+            self.menu_frame.hide()
+
     def _ensure_menu_visible(self):
         """Stellt sicher, dass das Menü sichtbar ist."""
         if not hasattr(self, '_menu_visible'):
@@ -1111,27 +1035,29 @@ class MainAppComplete(QMainWindow):
             QApplication.processEvents()
 
     def _get_current_menu_id(self):
-        """Holt die aktuelle Menü-ID."""
+        """Holt die aktuelle Menü-ID direkt aus dem Handler oder GCS"""
         if hasattr(self, 'menu_handler') and self.menu_handler:
             return self.menu_handler.menu_id
-        return self.startmenu_id
+        
+        # Fallback: Startmenü-GUID direkt aus GCS
+        return gcs.get_menu_id('Startbereich')
 
     def _save_menu_visibility_status(self):
-        """Speichert den Menü-Sichtbarkeits-Status für das aktuelle Menü in der finale GCS."""
+        """Klare Trennung: NUR APP-MENÜS werden gespeichert, STARTMENÜ nie"""
         try:
-            if not gcs:
-                logger.warning("⚠️ Finale GCS nicht verfügbar - Menü-Status wird nicht gespeichert")
-                return
-
             current_menu_id = self._get_current_menu_id()
+            startmenu_guid = gcs.get_menu_id('Startbereich')
             menu_visible = getattr(self, '_menu_visible', True)
 
-            # Finale GCS Persistierung
-            gcs.field_value(f"menu_visible_{current_menu_id}", menu_visible)
-            logger.info(f"💾 Vollständige finale Menü-Sichtbarkeits-Status gespeichert: {menu_visible} für Menü {current_menu_id}")
+            # NUR APP-MENÜS speichern (STARTMENÜ wird nie gespeichert)
+            if current_menu_id != startmenu_guid:
+                gcs.set_menu_panel_visible(current_menu_id, menu_visible)
+                logger.info(f"💾 APP-MENÜ Panel-Status gespeichert: {menu_visible} für Menü {current_menu_id}")
+            else:
+                logger.debug(f"🏠 STARTMENÜ - keine Speicherung (immer sichtbar)")
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern des vollständigen finalen Menü-Status: {e}")
+            logger.error(f"❌ Fehler beim Speichern des Menü-Status: {e}")
 
 
 def main():
