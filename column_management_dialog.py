@@ -145,8 +145,9 @@ class ColumnManagementDialog(QDialog):
                 QMessageBox.warning(self, "Fehler", "Keine Controls-Konfiguration in GCS verfügbar")
                 return
             
-            # STATISCHE PROJEKTION für Column Management (immer alle nicht-dummy Spalten)
-            current_projection = gcs.get_projection_table(self.view_guid, 'change_spalten')
+            # STATISCHE PROJEKTION für Column Management - je nach Expert Mode
+            projection_key = 'change_expert' if gcs.expert_mode else 'change_standard'
+            current_projection = gcs.get_projection_table(self.view_guid, projection_key)
             
             # SORTIERUNG: Spalten nach der korrekten Order sortieren (je nach Modus)
             order_field = 'expert_order' if gcs.expert_mode else 'display_order'

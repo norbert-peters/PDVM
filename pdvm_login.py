@@ -177,9 +177,13 @@ class LoginDialog(QDialog):
         self.username_input.setText("admin@super.de")
         self.password_input.setText("Polari$55")
         
-        reply = QMessageBox.question(self, "Demo Login", 
-                                   "Demo-Login verwenden?\n\nUser: demo\nPassword: demo",
-                                   QMessageBox.Yes | QMessageBox.No)
+        # Deutsche Button-Labels setzen
+        reply_box = QMessageBox(QMessageBox.Question, "Demo Login", 
+                               "Demo-Login verwenden?\n\nUser: demo@super.de\nPassword: Demo",
+                               QMessageBox.Yes | QMessageBox.No, self)
+        reply_box.button(QMessageBox.Yes).setText("Ja")
+        reply_box.button(QMessageBox.No).setText("Nein")
+        reply = reply_box.exec_()
         
         if reply == QMessageBox.Yes:
             self.handle_secure_login()

@@ -29,7 +29,7 @@ class PdvmCentralSystemsteuerung:
         self._temp_dt_inst = None  # Temporäre Pdvm_DateTime Instanz für Formatierungen
         self._dropdown_cache = {}  # Cache für geladene Dropdowns: {dropdown_name: {language: {key: value}}}
         self._initialized = False
-        
+
         # PROJEKTIONS-TABELLEN MATRIX: Statische Tabellen für Views
         # Struktur: {view_guid: {projection_type: [spalten_liste]}}
         self._projection_tables = {}
@@ -52,32 +52,24 @@ class PdvmCentralSystemsteuerung:
         self._user_data = user_data_dict.copy() if user_data_dict else {}
 
         # 2.1 Datenbank-Instanz für Benutzerstamm (ohne erneut DB zu lesen)
-        from pdvm_central_datenbank import PdvmCentralDatenbank as RealDB
-        self._u_db = RealDB('benutzerstamm')
+        self._u_db = PdvmCentralDatenbank('benutzerstamm')
 
         # Setze die user_json Daten direkt in die Benutzerdatenbank
-        if user_data_dict:
-            # Datenstruktur für die Datenbank: {user_guid: user_data_dict}
-            db_data = {user_guid: user_data_dict}
-            self._u_db.set_data(db_data, user_guid)
-            logger.info(f"✅ Benutzerdatenbank geladen mit GUID: {user_guid} und {len(user_data_dict)} Properties")
-        else:
-            logger.warning(f"⚠️ Keine Benutzerdaten für GUID: {user_guid}")
+        # Datenstruktur für die Datenbank: {user_guid: user_data_dict}
+        db_data = {user_guid: user_data_dict}
+        self._u_db.set_data(self._user_data, user_guid)
+        logger.info(f"✅ Benutzerdatenbank geladen mit GUID: {user_guid} und {len(self._user_data)} Properties")
 
         # 2.2 Datenbank-Instanz für Systemsteuerung
-        self._db = RealDB('systemsteuerung', user_guid)
+        self._db = PdvmCentralDatenbank('systemsteuerung', user_guid)
         logger.info(f"✅ Systemsteuerungsdatenbank geladen mit GUID: {user_guid}")
         
         # 2.3 Datenbank-Instanz für Anwendungsdaten (gespeicherte Filter, etc.)
-        self._app_db = RealDB('anwendungsdaten', user_guid)
+        self._app_db = PdvmCentralDatenbank('anwendungsdaten', user_guid)
         logger.info(f"✅ Anwendungsdatenbank geladen mit GUID: {user_guid}")
 
         # Stichtag-Instanz erstellen und initialisieren
-        try:
-            country = self._u_db.get_static_value(user_guid, 'country') if user_guid in self._u_db.data else 'DEU'
-        except KeyError:
-            country = 'DEU'
-            logger.info(f"⚠️ Country nicht in Benutzerdaten gefunden, verwende Default: {country}")
+        country = self._u_db.get_static_value(self.user_guid, 'country') if user_guid in self._u_db.data else 'DEU'
         self._st_inst = Pdvm_DateTime(country)
         
         # Temporäre Pdvm_DateTime Instanz für Formatierungen erstellen
@@ -85,22 +77,18 @@ class PdvmCentralSystemsteuerung:
         logger.info(f"✅ Temporäre Pdvm_DateTime Instanz erstellt für Country: {country}")
 
         # Stichtag aus Systemsteuerung laden
-        try:
-            stored_stichtag = self._db.get_static_value(user_guid, 'stichtag') if user_guid in self._db.data and 'stichtag' in self._db.data[user_guid] else None
-        except KeyError:
-            stored_stichtag = None
-            logger.info(f"⚠️ Stichtag nicht in Systemsteuerung gefunden, verwende Default")
+        stored_stichtag = self._db.get_static_value(self.user_guid, 'stichtag') if user_guid in self._db.data and 'stichtag' in self._db.data[user_guid] else None
         if stored_stichtag is not None:
             try:
                 self._st_inst.PdvmDateTime = float(stored_stichtag)
             except (ValueError, TypeError):
                 logger.warning(f"⚠️ Ungültiger Stichtag aus DB: {stored_stichtag}, verwende Default")
         else:
-            # Kein Stichtag in DB: Setze bekannten Default-Wert
-            default_stichtag = 1001.0
-            self._st_inst.PdvmDateTime = default_stichtag
-            self._db.set_value(user_guid, 'stichtag', default_stichtag)
-            logger.info(f"💾 Default-Stichtag gesetzt und gespeichert: {default_stichtag}")
+            # Kein Stichtag in DB: Setze den aktuellen DateTime
+            stored_stichtag = self._temp_dt_inst.PdvmDateTimeNow()
+            self._st_inst.PdvmDateTime = stored_stichtag
+            self._db.set_value(user_guid, 'stichtag', stored_stichtag)
+            logger.info(f"💾 Default-Stichtag gesetzt und gespeichert: {stored_stichtag}")
 
         self._initialized = True
         logger.info(f"✅ Systemsteuerung initialisiert für {user_guid}")
@@ -120,12 +108,6 @@ class PdvmCentralSystemsteuerung:
     
     # ENTFERNT: u_db Property - kein öffentlicher Zugriff auf Benutzer-DB
     
-#    @property
-#    def u_db(self):
-#        """Öffentlicher Zugriff auf die Benutzer-Datenbank-Instanz"""
-#        self._ensure_initialized()
-#        return self._u_db
-
     def _ensure_initialized(self):
         """Prüfe ob initialisiert"""
         if not self._initialized:
@@ -174,36 +156,6 @@ class PdvmCentralSystemsteuerung:
             
         # Nur in Systemsteuerung schreiben - Benutzer-DB ist read-only
         self._db.set_value(gruppe, property_name, value)
-
-    def get_menu_id(self, app_name):
-        """
-        Hole die Menü-GUID für eine spezifische Anwendung aus den Benutzerdaten
-        
-        Args:
-            app_name: Name der Anwendung (z.B. "Testbereich", "Administration")
-            
-        Returns:
-            Menü-GUID als String oder None falls nicht gefunden
-        """
-        self._ensure_initialized()
-        
-        try:
-            # Navigiere zu Anwendungen -> Application -> [app_name] -> Menu
-            anwendungen = self._u_db.data.get('Anwendungen', {})
-            applications = anwendungen.get('Application', {})
-            app_config = applications.get(app_name, {})
-            menu_id = app_config.get('Menu')
-            
-            if menu_id:
-                logger.debug(f"✅ Menü-ID für App '{app_name}': {menu_id}")
-                return menu_id
-            else:
-                logger.debug(f"⚠️ Keine Menü-ID für App '{app_name}' gefunden")
-                return None
-                
-        except Exception as e:
-            logger.warning(f"❌ Fehler beim Holen der Menü-ID für App '{app_name}': {e}")
-            return None
     
     def get_menu_id(self, app_name):
         """
@@ -221,24 +173,14 @@ class PdvmCentralSystemsteuerung:
             # Spezielle Behandlung für 'Startbereich' - kommt aus 'MeineApps'
             if app_name == 'Startbereich':
                 # Suche in Anwendungen -> MeineApps
-                anwendungen = self.get_property('Anwendungen', 'u')
-                if anwendungen and isinstance(anwendungen, dict):
-                    return anwendungen.get('MeineApps')
-                return None
+                anwendungen = self.get_property('start', 'u', 'MeineApps')
+                return anwendungen
             
-            # Für andere Apps: Suche in Anwendungen -> Application -> app_name
-            anwendungen = self.get_property('Anwendungen', 'u')
-            if anwendungen and isinstance(anwendungen, dict):
-                applications = anwendungen.get('Application', {})
-                if isinstance(applications, dict) and app_name in applications:
-                    app_config = applications[app_name]
-                    if isinstance(app_config, dict) and 'Menu' in app_config:
-                        menu_id = app_config['Menu']
-                        logger.debug(f"✅ Menü-ID für '{app_name}': {menu_id}")
-                        return menu_id
-            
-            logger.warning(f"⚠️ Menü-ID für App '{app_name}' nicht gefunden in Benutzerdaten")
-            return None
+            # Für andere Apps: Suche in Anwendungen -> app_name
+            app_data = self.get_property(app_name, 'u', 'Anwendungen')
+            menu_id = app_data['Menu']
+            logger.debug(f"✅ Menü-ID für '{app_name}': {menu_id}")
+            return menu_id
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Holen der Menü-ID für App '{app_name}': {e}")
@@ -666,8 +608,10 @@ class PdvmCentralSystemsteuerung:
                     'table_expert': [],
                     'search_standard': [],
                     'search_expert': [],
-                    'change_spalten': [],
-                    'admin': []
+                    'change_standard': [],
+                    'change_expert': [],
+                    'sort_standard': [],
+                    'sort_expert': []
                 }
                 return
             
@@ -713,52 +657,55 @@ class PdvmCentralSystemsteuerung:
             all_controls_display = sorted(all_controls, key=lambda x: x['display_order'])
             all_controls_expert = sorted(all_controls, key=lambda x: (x['expert_order'], x['display_order']))
             visible_controls_display = sorted([c for c in all_controls if c['show']], key=lambda x: x['display_order'])
-            non_expert_controls_sorted = sorted(non_expert_controls, key=lambda x: (x['expert_order'], x['display_order']))
+            non_expert_controls_display = sorted(non_expert_controls, key=lambda x: x['display_order'])
+            non_expert_controls_expert = sorted(non_expert_controls, key=lambda x: (x['expert_order'], x['display_order']))
             
-            # Baue die 6 Projektions-Tabellen
+            # LINEARES SYSTEM: 8 Projektions-Tabellen (4 Bereiche × 2 Modi)
             projections = {
-                # 1. Tabelle Standard: Nur sichtbare Spalten, display_order
-                'table_standard': [c['key'] for c in visible_controls_display],
+                # VIEW-Bereich: Darstellung in der Tabelle
+                'table_standard': [c['key'] for c in visible_controls_display],        # Nur sichtbare, display_order
+                'table_expert': [c['key'] for c in all_controls_display],              # Alle Spalten, display_order
                 
-                # 2. Tabelle Expert: Alle nicht-dummy Spalten, display_order  
-                'table_expert': [c['key'] for c in all_controls_display],
+                # SEARCH-Bereich: Verfügbare Suchspalten  
+                'search_standard': [c['key'] for c in visible_controls_display],      # Nur sichtbare, display_order
+                'search_expert': [c['key'] for c in all_controls_display],            # Alle Spalten, display_order
                 
-                # 3. Search Standard: Nur sichtbare Spalten, display_order
-                'search_standard': [c['key'] for c in visible_controls_display],
+                # CHANGE-Bereich: Verwaltbare Spalten in Spaltenverwaltung
+                'change_standard': [c['key'] for c in non_expert_controls_display],   # Nur non-expert, display_order
+                'change_expert': [c['key'] for c in all_controls_expert],             # Alle Spalten, expert_order
                 
-                # 4. Search Expert: Alle nicht-dummy Spalten, display_order
-                'search_expert': [c['key'] for c in all_controls_display],
-                
-                # 5. Change Spalten: Nur Spalten die NICHT expert_mode=True haben, expert_order
-                'change_spalten': [c['key'] for c in non_expert_controls_sorted],
-                
-                # 6. Admin: Alle nicht-dummy Spalten, expert_order 
-                'admin': [c['key'] for c in all_controls_expert]
+                # SORT-Bereich: Sortierbare Spalten im Sortier-Dialog
+                'sort_standard': [c['key'] for c in visible_controls_display],        # Nur sichtbare, display_order
+                'sort_expert': [c['key'] for c in all_controls_expert]                # Alle Spalten, expert_order
             }
             
             # Speichere in Matrix
             self._projection_tables[view_guid] = projections
             
-            logger.info(f"✅ Projektions-Tabellen für {view_guid} erstellt:")
-            logger.info(f"  • Table Standard: {len(projections['table_standard'])} Spalten (nur sichtbare)")
-            logger.info(f"  • Table Expert: {len(projections['table_expert'])} Spalten (alle)")
-            logger.info(f"  • Search Standard: {len(projections['search_standard'])} Spalten (nur sichtbare)") 
-            logger.info(f"  • Search Expert: {len(projections['search_expert'])} Spalten (alle)")
-            logger.info(f"  • Change Spalten: {len(projections['change_spalten'])} Spalten (nur non-expert)")
-            logger.info(f"  • Admin: {len(projections['admin'])} Spalten (alle)")
-            logger.info(f"  • Dummy Controls: {len(dummy_controls)} (ausgeschlossen)")
-            logger.info(f"  • Non-Expert Controls: {len(non_expert_controls)} (für Change Spalten)")
+            logger.info(f"✅ LINEARES Projektions-Tabellen für {view_guid} erstellt:")
+            logger.info(f"  📊 Table Standard: {len(projections['table_standard'])} Spalten (nur sichtbare)")
+            logger.info(f"  📊 Table Expert: {len(projections['table_expert'])} Spalten (alle)")
+            logger.info(f"  🔍 Search Standard: {len(projections['search_standard'])} Spalten (nur sichtbare)") 
+            logger.info(f"  🔍 Search Expert: {len(projections['search_expert'])} Spalten (alle)")
+            logger.info(f"  🔧 Change Standard: {len(projections['change_standard'])} Spalten (nur non-expert)")
+            logger.info(f"  🔧 Change Expert: {len(projections['change_expert'])} Spalten (alle)")
+            logger.info(f"  🔄 Sort Standard: {len(projections['sort_standard'])} Spalten (nur sichtbare)")
+            logger.info(f"  🔄 Sort Expert: {len(projections['sort_expert'])} Spalten (alle)")
+            logger.info(f"  ❌ Dummy Controls: {len(dummy_controls)} (ausgeschlossen)")
+            logger.info(f"  📋 Non-Expert Controls: {len(non_expert_controls)} (für Change Standard)")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Aufbau der Projektions-Tabellen für {view_guid}: {e}")
-            # Fallback: Leere Projektionen
+            # Fallback: Leere Projektionen (LINEARES SYSTEM)
             self._projection_tables[view_guid] = {
                 'table_standard': [],
                 'table_expert': [],
                 'search_standard': [],
                 'search_expert': [],
-                'change_spalten': [],
-                'admin': []
+                'change_standard': [],
+                'change_expert': [],
+                'sort_standard': [],
+                'sort_expert': []
             }
     
     def rebuild_projection_tables(self, view_guid: str):

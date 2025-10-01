@@ -168,9 +168,6 @@ class LinearStartManagerNew:
             from pdvm_central_systemsteuerung import initialize_gcs, is_gcs_initialized, get_gcs
             
             if not self.current_user_guid:
-               # Setze globale GCS-Instanz für alle Module
-               import global_gcs
-               global_gcs.gcs = gcs_instance
                raise ValueError("Keine User-GUID für Systemsteuerung verfügbar!")
             
             if not self.current_user_data:
@@ -206,9 +203,9 @@ class LinearStartManagerNew:
             # Speichere GCS-Instanz für MainApp
             self.gcs_instance = gcs_instance
             
-            # Setze globale GCS-Instanz für alle Module
+            # Aktualisiere globale GCS-Instanz für alle Module
             import global_gcs
-            global_gcs.gcs = gcs_instance
+            global_gcs.gcs = gcs_instance  # Direkte Zuweisung der globalen Variable
             logger.info("🌐 Globale GCS-Instanz für alle Module gesetzt")
             
             logger.info("✅ Finale Systemsteuerung erfolgreich initialisiert")

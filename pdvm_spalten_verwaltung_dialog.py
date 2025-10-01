@@ -96,44 +96,31 @@ class PdvmSpaltenVerwaltungsDialog(QDialog):
             raise
     
     def _filter_columns_by_mode(self):
-        """Filtere Spalten basierend auf aktuellen Modus"""
-        self.spalten_liste = []
-        
-        for control_key, control in self.working_controls.items():
-            # Dummy ausschließen
-            if control_key == 'dummy':
-                continue
-            
-            # Modus-spezifische Filterung
-            if gcs.expert_mode:
-                # ExpertMode: Alle Spalten (außer dummy)
-                self.spalten_liste.append(control_key)
+        """Spalten basierend auf GCS-Projektions-Tabellen laden (EINZIGE QUELLE DER WAHRHEIT)"""
+        try:
+            # Spaltenverwaltung verwendet spezielle Projektionen für ALLE verfügbaren Spalten (LINEARES SYSTEM)
+            if self.gcs.expert_mode:
+                self.spalten_liste = self.gcs.get_projection_table(self.view_dialog.view_guid, 'change_expert')
+                mode_info = "Change Expert (alle Spalten)"
             else:
-                # NormalMode: Nur Spalten mit expert_mode=false
-                if not control.get('expert_mode', False):
-                    self.spalten_liste.append(control_key)
-        
-        # Sortiere nach entsprechender Order
-        self._sort_columns_by_order()
-        
-        logger.info(f"✅ Spalten gefiltert für {'Expert' if self.gcs.expert_mode else 'Normal'}-Modus: {len(self.spalten_liste)} Spalten")
-    
-    def _sort_columns_by_order(self):
-        """Sortiere Spalten nach entsprechender Order-Eigenschaft"""
-    if gcs.expert_mode:
-            # ExpertMode: Sortiere nach expert_order
-            order_key = 'expert_order'
-    else:
-        # NormalMode: Sortiere nach display_order
-        order_key = 'display_order'
-    
-    def get_order_value(self, control_key):
-        control = self.working_controls.get(control_key, {})
-        return control.get(self.order_key, 999)  # Default: hohe Zahl für unsortierte
-    
-#        self.spalten_liste.sort(key=get_order_value)
-    
-#        logger.info(f"✅ Spalten sortiert nach {order_key}")
+                self.spalten_liste = self.gcs.get_projection_table(self.view_dialog.view_guid, 'change_standard')  
+                mode_info = "Change Standard (non-expert Spalten)"
+            
+            # Sicherstellung dass spalten_liste eine Liste ist
+            if not isinstance(self.spalten_liste, list):
+                self.spalten_liste = []
+                
+            logger.info(f"✅ Spalten aus GCS-Projektion ({mode_info}): {len(self.spalten_liste)} Spalten")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der GCS-Projektion: {e}")
+            # Fallback: Alle Controls verwenden
+            self.spalten_liste = []
+            for control_key, control in self.working_controls.items():
+                if control_key != 'dummy':
+                    if self.gcs.expert_mode or not control.get('expert_mode', False):
+                        self.spalten_liste.append(control_key)
+            logger.warning(f"⚠️ Fallback auf Controls: {len(self.spalten_liste)} Spalten")
     
     def _create_gui(self):
         """GUI-Elemente erstellen"""
@@ -332,6 +319,12 @@ class PdvmSpaltenVerwaltungsDialog(QDialog):
             
             # Controls im view_dialog aktualisieren
             self.view_dialog.controls_config = self.working_controls.copy()
+            
+            # GCS-Projektions-Tabellen neu aufbauen für sofortige Aktualisierung
+            self.gcs.rebuild_projection_tables(self.view_dialog.view_guid)
+            
+            # Sort-Projektionen werden automatisch durch GCS-Rebuild aktualisiert (LINEARES SYSTEM)
+            logger.info("✅ Sort-Projektionen über lineares GCS-System automatisch aktualisiert")
             
             logger.info("✅ Spalteneinstellungen gespeichert und persistiert")
             

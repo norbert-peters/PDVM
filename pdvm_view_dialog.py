@@ -121,6 +121,9 @@ class PdvmViewDialog:
         # NEUES LINEARES FILTER-SYSTEM
         self.linear_filter = None  # Wird nach display-Erstellung initialisiert
         
+        # SORTIERUNGS-MANAGER
+        self.sorting_manager = None  # Wird nach display-Erstellung initialisiert
+        
         # Initialisierung starten
         self._initialize_dialog()
     
@@ -1311,6 +1314,9 @@ class PdvmViewDisplay(QWidget):
         
         layout.addWidget(self.table)
         
+        # SORTIERUNGS-MANAGER nach Tabellen-Erstellung initialisieren
+        self._initialize_sorting_manager()
+        
         # Status
         self.status_label = QLabel()
         layout.addWidget(self.status_label)
@@ -1668,7 +1674,12 @@ class PdvmViewDisplay(QWidget):
             action_search.triggered.connect(self._suchparameter_verwaltung)
             settings_menu.addAction(action_search)
 
-            # 2. ExpertMode (nur für Admins) - LINEAR
+            # 3. Sortierung & Gruppierung (NEU!)
+            action_sorting = QAction("Sortierung & Gruppierung", self)
+            action_sorting.triggered.connect(self._sortierung_verwaltung)
+            settings_menu.addAction(action_sorting)
+
+            # 4. ExpertMode (nur für Admins) - LINEAR
             # GCS direkt verwenden
             if gcs and gcs.is_admin:
                 settings_menu.addSeparator()
@@ -1679,7 +1690,7 @@ class PdvmViewDisplay(QWidget):
                 action_expert.triggered.connect(self._toggle_expert_mode)
                 settings_menu.addAction(action_expert)
 
-            # 3. Zurücksetzen
+            # 5. Zurücksetzen
             settings_menu.addSeparator()
             action_reset = QAction("Zurücksetzen", self)
             action_reset.triggered.connect(self._reset_view)
@@ -1826,6 +1837,60 @@ class PdvmViewDisplay(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler beim Umschalten des ExpertModus: {e}")
             QMessageBox.warning(self, "Fehler", f"ExpertMode konnte nicht umgeschaltet werden:\n{e}")
+    
+    def _initialize_sorting_manager(self):
+        """Initialisiert den Sortierungs-Manager für die Tabelle"""
+        try:
+            from pdvm_sorting_manager import PdvmSortingManager
+            from pdvm_advanced_sorting_manager import PdvmAdvancedSortingManager
+            
+            # Standard Sorting Manager erstellen
+            self.view_dialog.sorting_manager = PdvmSortingManager(self.view_dialog, gcs)
+            
+            # Erweiterten Sorting Manager erstellen
+            self.view_dialog.advanced_sorting_manager = PdvmAdvancedSortingManager()
+            
+            # Header-Click Sortierung aktivieren
+            self.view_dialog.sorting_manager.setup_table_sorting(self.table)
+            
+            logger.info("✅ Sortierungs-Manager erfolgreich initialisiert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei der Sortierungs-Manager Initialisierung: {e}")
+            # Fallback: Einfache Sortierung ohne Manager
+            self.table.setSortingEnabled(True)
+    
+    def _sortierung_verwaltung(self):
+        """Sortierung & Gruppierung Dialog öffnen"""
+        try:
+            from pdvm_sorting_dialog import PdvmSortingDialog
+            
+            # Prüfe ob Sortierungs-Manager verfügbar ist
+            if not hasattr(self.view_dialog, 'sorting_manager') or not self.view_dialog.sorting_manager:
+                QMessageBox.warning(self, "Fehler", "Sortierungs-Manager nicht verfügbar")
+                return
+                
+            # Öffne Sortierungs-Dialog mit erweiterten Features
+            dialog = PdvmSortingDialog(self.view_dialog.sorting_manager, self)
+            result = dialog.exec_()
+            
+            if result == dialog.Accepted:
+                logger.info("✅ Sortierung & Gruppierung Dialog erfolgreich angewendet")
+                
+                # Tabelle aktualisieren
+                self.refresh_table()
+                
+                # Wenn Gruppierung aktiviert wurde, zeige Info
+                if hasattr(self.view_dialog, 'advanced_sorting_manager') and \
+                   self.view_dialog.advanced_sorting_manager.is_grouped_sorting_active():
+                    QMessageBox.information(self, "Sortierung", 
+                                          "Erweiterte Sortierung mit Gruppierung wurde angewendet!")
+            else:
+                logger.info("ℹ️ Sortierung & Gruppierung Dialog abgebrochen")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Sortierung & Gruppierung: {e}")
+            QMessageBox.warning(self, "Fehler", f"Sortierung & Gruppierung Fehler:\n{e}")
     
     def _toggle_filter_panel(self):
         """Filter-Panel ein/aus blenden"""
