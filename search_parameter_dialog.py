@@ -77,6 +77,14 @@ class SearchParameterDialog(QDialog):
         # GCS Key für persistente Speicherung der Suchparameter
         self.gcs_filters_key = f"search_parameters_{view_guid}"
         
+        # LinearFilterExecutionManager für direkte Filter-Ausführung
+        try:
+            self.linear_filter_manager = get_linear_filter_manager(view_guid)
+            logger.info("✅ LinearFilterExecutionManager im SearchParameterDialog initialisiert")
+        except Exception as e:
+            logger.warning(f"⚠️ LinearFilterExecutionManager konnte nicht initialisiert werden: {e}")
+            self.linear_filter_manager = None
+        
         self.setup_ui()
         self.load_persistent_filters()  # Lade persistente Filter
         self.load_current_filters()
@@ -510,7 +518,7 @@ class SearchParameterDialog(QDialog):
             # Erweiterte Filter aus GCS löschen
             for field_key in self.filter_widgets.keys():
                 try:
-                    gcs.save_extended_filters(self.view_guid, f"field_{field_key}", {'conditions': []})
+                    gcs.save_extended_filters(self.view_guid, field_key, {'conditions': []})
                 except Exception as e:
                     logger.warning(f"⚠️ Fehler beim Löschen erweiterter Filter für {field_key}: {e}")
             
@@ -560,11 +568,11 @@ class SearchParameterDialog(QDialog):
             # Filter-UI erstellen - nur für sichtbare Spalten
             self._create_filter_fields(searchable_controls)
             
-            # Details-Buttons Zustand nach dem Laden der Filter-Felder aktualisieren
-            self._update_all_details_button_states()
+            # Lade persistente Filter (LINEAR - einmalig aus GCS)  
+            self.load_persistent_filters()
             
-            # Extended Filter Engine mit aktuellen Bedingungen initialisieren
-            self._initialize_extended_filter_engine()
+            # UI mit geladenen Daten aktualisieren (LINEAR - ersetzt Details-Button-Update)
+            self._update_ui_with_current_data()
             
             mode_info = "Expert" if gcs.expert_mode else "Standard"
             logger.info(f"✅ Filter-Felder ({mode_info}) erstellt für {len(searchable_controls)} sichtbare Spalten")
@@ -854,58 +862,174 @@ class SearchParameterDialog(QDialog):
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Setzen des Widget-Werts: {e}")
     
-    def accept_changes(self):
-        """EINFACHER LINEARER ABLAUF: Sammle Widget-Werte und wende sie an - MIT Filter-Reset"""
+    def _update_ui_with_current_data(self):
+        """LINEAR: Aktualisiere UI mit bereits geladenen Daten"""
         try:
-            logger.info("🎯 === EINFACHER LINEARER ABLAUF: OK GEDRÜCKT ===")
+            logger.info("🔄 LINEAR: UI mit aktuellen Daten aktualisieren...")
             
-            # SCHRITT 0: FILTER-RESET - Lösche alle vorherigen Filter (außer Gesamtfilter)
-            logger.info("🔄 Starte Filter-Reset für neue Suche")
+            # 1. Einfache Filter in Widgets laden
+            for field_key, value in self.current_filters.items():
+                if field_key in self.filter_widgets:
+                    widget_info = self.filter_widgets[field_key]
+                    widget = widget_info['widget']
+                    field_type = widget_info.get('type', 'text')
+                    self._set_widget_value(widget, value, field_type)
+                    logger.info(f"� UI gesetzt: {field_key} = '{value}'")
+            
+            # 2. Details-Button-Zustände aktualisieren (BEIDE Modi)
+            self._update_all_details_button_states_linear()
+            
+            logger.info("✅ UI linear aktualisiert")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler bei linearer UI-Aktualisierung: {e}")
+    
+    def _update_all_details_button_states_linear(self):
+        """LINEAR: Aktualisiere Details-Button-Zustände für BEIDE Modi"""
+        try:
+            from extended_filter_engine import extended_filter_engine
+            
+            for field_key in self.filter_widgets.keys():
+                # DIREKT aus Extended Filter Engine abfragen - EINFACH
+                has_conditions = bool(extended_filter_engine.extended_conditions.get(field_key, []))
+                self._update_details_button_state(field_key, has_conditions)
+                
+                if has_conditions:
+                    logger.info(f"🟢 Grüner Button: {field_key} hat erweiterte Bedingungen")
+                    
+            logger.info("✅ Details-Button-Zustände linear aktualisiert")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler bei Details-Button-Aktualisierung: {e}")
+    
+    def accept_changes(self):
+        """VEREINFACHTER ABLAUF: Sammle alle Filter-Werte und generiere Filterstring"""
+        try:
+            logger.info("🎯 === VEREINFACHTER FILTER-DIALOG: OK GEDRÜCKT ===")
+            
+            # SCHRITT 1: Sammle alle Filter-Werte aus den UI-Widgets
+            logger.info("� Sammle alle Filter-Werte aus UI")
+            collected_filters = {}
+            
+            for field_key, widget_dict in self.filter_widgets.items():
+                # Hole Wert aus normalem Widget
+                simple_value = self._get_widget_value(widget_dict)
+                
+                # Prüfe ob Extended Conditions für dieses Feld existieren
+                extended_conditions = self.extended_filter_conditions.get(field_key, [])
+                
+                if extended_conditions:
+                    # Komplexer Filter für dieses Feld
+                    logger.info(f"🔧 Komplexer Filter für {field_key}: {len(extended_conditions)} Bedingungen")
+                    collected_filters[field_key] = {
+                        'type': 'complex',
+                        'simple_value': simple_value,
+                        'conditions': extended_conditions
+                    }
+                elif simple_value and simple_value.strip():
+                    # Einfacher Filter für dieses Feld
+                    logger.info(f"� Einfacher Filter für {field_key}: '{simple_value}'")
+                    collected_filters[field_key] = {
+                        'type': 'simple',
+                        'simple_value': simple_value.strip()
+                    }
+            
+            logger.info(f"📊 Gesammelte Filter: {len(collected_filters)} Felder")
+            
+            # SCHRITT 2: Sammle alle einfachen Filter-Werte aus Widgets
+            logger.info("🟢 Sammle EINFACH-Filter aus normalen Suchfeldern")
+            new_filters = {}
+            for control_key, widget_dict in self.filter_widgets.items():
+                value = self._get_widget_value(widget_dict)
+                if value and value.strip():  # Nur nicht-leere Werte
+                    new_filters[control_key] = value.strip()
+
+            # SCHRITT 3: Extended Filter zu new_filters hinzufügen (falls vorhanden)
+            # HOTFIX: extended_summary definieren für Rückwärtskompatibilität
+            extended_summary = {}
+            try:
+                from extended_filter_engine import extended_filter_engine
+                if hasattr(extended_filter_engine, 'get_active_conditions_summary'):
+                    extended_summary = extended_filter_engine.get_active_conditions_summary()
+            except:
+                extended_summary = {}
+                
+            if extended_summary:
+                logger.info("� Füge KOMPLEX-Filter zu Gesamtfiltern hinzu")
+                for field_key, summary in extended_summary.items():
+                    extended_key = f"EXTENDED:{field_key}"
+                    new_filters[extended_key] = summary
+                    logger.info(f"� Extended Filter hinzugefügt: {field_key} = {summary}")
+
+            # SCHRITT 4: JETZT ERST Filter-Reset (nachdem ALLES ausgelesen wurde)
+            logger.info("🔄 Starte Filter-Reset NACH dem Sammeln aller Bedingungen")
             from central_filter_reset import CentralFilterResetManager
             reset_manager = CentralFilterResetManager(self.view_guid)
             
             # Reset Extended Filter Engine und Caches (aber nicht die aktuell zu setzenden Filter)
             reset_manager._reset_extended_filter_engine()
             reset_manager._reset_filter_caches()
-            
-            # SCHRITT 1: Sammle alle Filter-Werte aus Widgets
-            new_filters = {}
-            for control_key, widget_dict in self.filter_widgets.items():
-                value = self._get_widget_value(widget_dict)
-                if value and value.strip():  # Nur nicht-leere Werte
-                    new_filters[control_key] = value.strip()
-            
-            # SCHRITT 2: Extended Filter hinzufügen (falls vorhanden)
-            extended_summary = extended_filter_engine.get_active_conditions_summary()
-            if extended_summary:
-                for field_key, summary in extended_summary.items():
-                    extended_key = f"EXTENDED:{field_key}"
-                    new_filters[extended_key] = summary
-            
-            # SCHRITT 3: Filterstring erstellen
-            filter_string = self.get_filter_string()
-            
-            # SCHRITT 4: Persistent speichern
+
+            # SCHRITT 5: Persistent speichern
             self.save_persistent_filters(new_filters)
+            logger.info(f"✅ {len(new_filters)} Filter persistent in ANWENDUNGSDATEN gespeichert")
             
-            # Ergebnis setzen - JETZT MIT FILTERSTRING
+            # SCHRITT 5: DIREKTE FILTER-AUSFÜHRUNG über LinearFilterExecutionManager
+            if self.linear_filter_manager:
+                try:
+                    # EINFACH: Nur UI-Modus entscheidet
+                    logger.info(f"🔍 Filter-Entscheidung: UI-Modus={self.filter_mode}, Filter-Anzahl={len(new_filters)}")
+                    
+                    if self.filter_mode == "KOMPLEX":
+                        # KOMPLEX-Modus: Benutzer hat explizit KOMPLEX gewählt
+                        logger.info(f"🔵 KOMPLEX-Modus gewählt")
+                        
+                        success = self.linear_filter_manager.execute_parameter_dialog_filter(
+                            new_filters, 
+                            extended_conditions,  # Verwende gespeicherte Conditions
+                            force_complex=True
+                        )
+                        if success:
+                            logger.info("✅ Komplexe Parameter-Filter erfolgreich ausgeführt")
+                        else:
+                            logger.warning("⚠️ Komplexe Parameter-Filter-Ausführung fehlgeschlagen")
+                    else:
+                        # EINFACH-Modus: Benutzer hat EINFACH gewählt (oder Standard)
+                        logger.info(f"🟢 EINFACH-Modus gewählt")
+                        
+                        success = self.linear_filter_manager.execute_parameter_dialog_filter(
+                            new_filters
+                        )
+                        if success:
+                            logger.info("✅ Einfache Parameter-Filter erfolgreich ausgeführt")
+                        else:
+                            logger.warning("⚠️ Einfache Parameter-Filter-Ausführung fehlgeschlagen")
+                        
+                except Exception as filter_exec_error:
+                    logger.error(f"❌ Fehler bei Filter-Ausführung: {filter_exec_error}")
+            else:
+                logger.warning("⚠️ LinearFilterExecutionManager nicht verfügbar - verwende Signal-Fallback")
+                # Fallback: Signal emittieren
+                self.search_changed.emit(new_filters)
+            
+            # SCHRITT 6: Ergebnis setzen - TRENNUNG UI/VERARBEITUNG
             self.result_filters = new_filters
-            self.result_filter_string = filter_string  # NEU: Einheitlicher Filterstring
             self.was_accepted = True
             
-            # Signal emittieren (BEVOR die Gesamtsuche geleert wird)
-            self.search_changed.emit(new_filters)
-            
-            # WICHTIG: Gesamtfilter löschen NACH dem Anwenden der Filter
+            # WICHTIG: Gesamtfilter SOFORT löschen beim Anwenden der Filter
             if new_filters:
                 try:
-                    # Kurz warten damit Filter angewendet werden können
+                    # Sofortiges Löschen der Gesamtsuche
+                    self._clear_global_search()
+                    # Zusätzlich verzögert für Sicherheit
                     from PyQt5.QtCore import QTimer
                     QTimer.singleShot(100, self._clear_global_search)
+                    logger.info("✅ Gesamtsuche sofort und verzögert geleert da Spaltenfilter aktiv")
                 except Exception as e:
-                    logger.warning(f"⚠️ Konnte Gesamtsuche nicht verzögert löschen: {e}")
+                    logger.warning(f"⚠️ Konnte Gesamtsuche nicht löschen: {e}")
             
             logger.info(f"✅ Filter-Parameter aktualisiert: {len(new_filters)} aktive Filter")
+            logger.info("✅ Erweiterte Suchparameter angewendet")
             
             # Dialog schließen
             self.accept()
@@ -1177,7 +1301,7 @@ class SearchParameterDialog(QDialog):
         """Lade erweiterte Filter für ein Feld - konvertiert Dictionaries zu SearchCondition-Objekten"""
         try:
             # Lade aus GCS anwendungsdaten
-            extended_filters = gcs.load_extended_filters(self.view_guid, f"field_{field_key}")
+            extended_filters = gcs.load_extended_filters(self.view_guid, field_key)
             conditions_data = extended_filters.get('conditions', [])
             
             # Konvertiere Dictionaries zurück zu SearchCondition-Objekten
@@ -1214,27 +1338,37 @@ class SearchParameterDialog(QDialog):
                 'conditions': conditions_dicts,  # Verwende Dictionaries statt Objekte
                 'created_at': str(QDate.currentDate().toString('yyyy-MM-dd'))
             }
-            gcs.save_extended_filters(self.view_guid, f"field_{field_key}", filter_config)
+            gcs.save_extended_filters(self.view_guid, field_key, filter_config)
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern erweiterter Filter für {field_key}: {e}")
     
     def _update_details_button_state(self, field_key: str, has_conditions: bool):
-        """Aktualisiere visuellen Zustand des Details-Buttons und aktiviere/deaktiviere normale Suchfelder"""
+        """Aktualisiere visuellen Zustand des Details-Buttons - EINFACH"""
         try:
             if field_key in self.filter_widgets:
-                container = self.filter_widgets[field_key]['container']
-                widget_info = self.filter_widgets[field_key]['widget']
+                widget_info = self.filter_widgets[field_key]
+                # EINFACH: Erwarte dict-Struktur, fallback bei Problemen
+                container = widget_info.get('container') if isinstance(widget_info, dict) else None
+                if not container:
+                    return
+                    
                 layout = container.layout()
+                
+                # Tooltip-Text erstellen falls Bedingungen vorhanden
+                tooltip_text = self._create_conditions_tooltip(field_key) if has_conditions else "Erweiterte Filteroptionen öffnen"
                 
                 # 1. Details-Button aktualisieren
                 for i in range(layout.count()):
                     widget = layout.itemAt(i).widget()
                     if isinstance(widget, QPushButton) and widget.text() == "Details...":
+                        # Tooltip setzen
+                        widget.setToolTip(tooltip_text)
+                        
                         if has_conditions:
-                            # Aktiv-Zustand: Orange Hervorhebung
+                            # Aktiv-Zustand: Grüne Hervorhebung (konsistent mit EINFACH-Modus)
                             widget.setStyleSheet("""
                                 QPushButton { 
-                                    background-color: #FF9800; 
+                                    background-color: #4CAF50; 
                                     color: white; 
                                     border: none; 
                                     border-radius: 3px; 
@@ -1242,10 +1376,9 @@ class SearchParameterDialog(QDialog):
                                     font-size: 10px;
                                 }
                                 QPushButton:hover { 
-                                    background-color: #F57C00; 
+                                    background-color: #45a049; 
                                 }
                             """)
-                            widget.setToolTip(f"Erweiterte Suchoptionen aktiv!\nKlicken zum Bearbeiten")
                         else:
                             # Standard-Zustand: Blau
                             widget.setStyleSheet("""
@@ -1261,7 +1394,6 @@ class SearchParameterDialog(QDialog):
                                     background-color: #1976D2; 
                                 }
                             """)
-                            widget.setToolTip(f"Erweiterte Suchoptionen\nAND/OR/NOT Logik, mehrere Bedingungen")
                         break
                 
                 # 2. Normale Suchfelder aktivieren/deaktivieren
@@ -1301,15 +1433,47 @@ class SearchParameterDialog(QDialog):
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Aktualisieren aller Details-Button-Zustände: {e}")
     
+    def _create_conditions_tooltip(self, field_key: str) -> str:
+        """Erstelle Tooltip-Text mit aktuellen Filtereinstellungen"""
+        try:
+            extended_conditions = self._load_field_extended_filters(field_key)
+            if not extended_conditions:
+                return "Erweiterte Filteroptionen öffnen"
+            
+            tooltip_parts = []
+            tooltip_parts.append(f"Erweiterte Filter für {field_key.replace('_show', '').replace('_', ' ').title()}:")
+            tooltip_parts.append("")
+            
+            for i, condition in enumerate(extended_conditions, 1):
+                # Erstelle lesbaren Text für jede Bedingung
+                logic = condition.logic_operator if hasattr(condition, 'logic_operator') else 'AND'
+                negation = condition.negation if hasattr(condition, 'negation') else 'IS'
+                operator = condition.operator_type if hasattr(condition, 'operator_type') else 'enthält'
+                value = condition.value if hasattr(condition, 'value') else ''
+                
+                if i == 1 and logic == 'FIRST':
+                    logic_text = ""
+                else:
+                    logic_text = f"{logic} "
+                
+                negation_text = "NICHT " if negation == 'NOT' else ""
+                condition_text = f"{logic_text}{negation_text}{operator} '{value}'"
+                tooltip_parts.append(f"{i}. {condition_text}")
+            
+            return "\n".join(tooltip_parts)
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Erstellen des Condition-Tooltips: {e}")
+            return "Erweiterte Filteroptionen (Fehler beim Laden der Details)"
+    
     def _initialize_extended_filter_engine(self):
-        """Initialisiere Extended Filter Engine mit aktuellen gespeicherten Bedingungen"""
+        """Initialisiere Extended Filter Engine - VEREINFACHT ohne view_guid Abhängigkeit"""
         try:
             # Extended Filter Engine zurücksetzen
             extended_filter_engine.clear_all_conditions()
             
-            # KRITISCH: view_guid im Extended Filter Engine setzen für reload_extended_conditions
-            extended_filter_engine.view_guid = self.view_guid
-            logger.info(f"✅ Extended Filter Engine view_guid gesetzt: {self.view_guid}")
+            # VEREINFACHT: Keine view_guid mehr nötig - wird als Parameter übergeben
+            logger.info("✅ Extended Filter Engine zurückgesetzt")
             
             # Alle Felder mit gespeicherten erweiterten Bedingungen laden
             for field_key in self.filter_widgets.keys():
@@ -1345,9 +1509,9 @@ class SearchParameterDialog(QDialog):
                 # 2. KOMPLEXE FILTER: Sammle erweiterte Filter-Bedingungen
                 logger.info("🔵 Erstelle KOMPLEX-Filterstring aus erweiterten Bedingungen")
                 
-                # KRITISCHER FIX: Erweiterte Bedingungen NEU LADEN bevor Filterstring erstellt wird!
+                # VEREINFACHT: Erweiterte Bedingungen NEU LADEN mit view_guid Parameter
                 try:
-                    extended_filter_engine.reload_extended_conditions()
+                    extended_filter_engine.reload_extended_conditions(self.view_guid)
                     logger.info("🔄 Erweiterte Bedingungen neu geladen für Filterstring-Erstellung")
                 except Exception as e:
                     logger.warning(f"⚠️ Fehler beim Neuladen der erweiterten Bedingungen: {e}")
@@ -1396,12 +1560,12 @@ class SearchParameterDialog(QDialog):
             # Bestimme Filter-Type basierend auf filters_dict
             if len(filters_dict) == 1 and 'global' in filters_dict:
                 # Gesamtfilter
-                filter_config = {'filter_text': filters_dict['global']}
+                filter_config = {'search_text': filters_dict['global']}
                 success = manager.execute_filter_linear('gesamtfilter', filter_config)
                 logger.info(f"🌐 Gesamtfilter angewendet: {'✅' if success else '❌'}")
                 return success
             else:
-                # Parametrische Filter - nur ersten verwenden (linear = nur ein Filter!)
+                # Einfacher Filter (aus erweiterten Filterdaten) - nur ersten verwenden (linear = nur ein Filter!)
                 first_field = list(filters_dict.keys())[0]
                 first_value = filters_dict[first_field]
                 
@@ -1411,12 +1575,28 @@ class SearchParameterDialog(QDialog):
                     'operator': 'enthält'
                 }
                 
-                success = manager.execute_filter_linear('parametric', filter_config)
-                logger.info(f"🎛️ Parametrischer Filter angewendet: {'✅' if success else '❌'}")
+                success = manager.execute_filter_linear('einfach', filter_config)
+                logger.info(f"🔍 Einfacher Filter angewendet: {'✅' if success else '❌'}")
                 
-                # Warnung bei mehreren Filtern
+                # Warnung bei mehreren Filtern - diese werden als komplexer Filter behandelt
                 if len(filters_dict) > 1:
-                    logger.warning(f"⚠️ LINEARE PIPELINE: Nur erster Filter angewendet! Ignoriert: {list(filters_dict.keys())[1:]}")
+                    logger.info(f"🔧 Mehrere Filter erkannt - verwende komplexen Filter")
+                    # Erstelle komplexen Filter aus allen Bedingungen
+                    conditions = []
+                    for field_name, search_value in filters_dict.items():
+                        conditions.append({
+                            'field': field_name,
+                            'operator': 'enthält',
+                            'value': search_value
+                        })
+                    
+                    complex_filter_config = {
+                        'conditions': conditions,
+                        'logical_operator': 'AND'
+                    }
+                    
+                    success = manager.execute_filter_linear('komplex', complex_filter_config)
+                    logger.info(f"🔧 Komplexer Filter angewendet: {'✅' if success else '❌'}")
                 
                 return success
                 
@@ -1450,3 +1630,14 @@ def show_search_parameter_dialog(parent, view_guid, controls_config, current_fil
         # Abgebrochen - ursprüngliche Filter beibehalten
         # WICHTIG: Bei Abbruch die result_filters nutzen (enthalten die original Filter)
         return dialog.result_filters
+
+# NEUE VEREINFACHTE HILFSMETHODEN (am Ende der Datei)
+def save_persistent_filters_unified(view_guid, collected_filters):
+    """Speichere alle Filter einheitlich"""
+    from filter_helper_methods import save_persistent_filters_unified
+    return save_persistent_filters_unified(view_guid, collected_filters)
+
+def generate_filter_string(collected_filters):
+    """Generiere Filterstring"""
+    from filter_helper_methods import generate_filter_string
+    return generate_filter_string(collected_filters)

@@ -24,6 +24,7 @@ ENTFERNT (ROLLBACK):
 
 NUR BEHALTEN:
 - Einfache Filter (familienname, ort, etc.)
+- Komplexe Filter (wenn wirklich gebraucht)
 - MatrixManager Integration
 - Lokaler Reset
 """
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
-class LinearFilterExecutionManager:
+class SimpleLinearFilterExecutionManager:
     """
     EINFACHER Manager für BASIC Filter-Operationen
     
@@ -59,14 +60,14 @@ class LinearFilterExecutionManager:
         self.last_filter_type = None
         self.last_filter_config = None
         
-        logger.info(f"🎯 LinearFilterExecutionManager initialisiert für View: {self.view_guid}")
+        logger.info(f"🎯 SimpleLinearFilterExecutionManager initialisiert für View: {self.view_guid}")
     
     def execute_filter_linear(self, filter_type: str, filter_config: Dict[str, Any]) -> bool:
         """
         EINFACHER FILTER-EINSTIEG - Nur grundlegende Funktionen!
         
         Args:
-            filter_type: 'einfach', 'komplex', 'simple', 'parametric' (NUR DIESE!)
+            filter_type: 'einfach', 'komplex' (NUR DIESE ZWEI!)
             filter_config: Einfache Filter-Konfiguration
         
         Returns:
@@ -87,12 +88,12 @@ class LinearFilterExecutionManager:
                 logger.warning("⚠️ Reset konnte nicht durchgeführt werden, versuche trotzdem Filter")
             
             # Schritt 2: EINFACHE Filter-Ausführung
-            if filter_type in ['einfach', 'simple', 'parametric']:
+            if filter_type == 'einfach':
                 success = self._execute_simple_filter(filter_config)
             elif filter_type == 'komplex':
                 success = self._execute_complex_filter(filter_config)
             else:
-                logger.error(f"❌ Unbekannter Filter-Typ: {filter_type}")
+                logger.error(f"❌ Unbekannter Filter-Typ: {filter_type} (Nur 'einfach' und 'komplex' unterstützt)")
                 return False
             
             if success:
@@ -166,158 +167,73 @@ class LinearFilterExecutionManager:
             return None
     
     def _execute_simple_filter(self, filter_config: Dict[str, Any]):
-        """EINFACHE FILTER-AUSFÜHRUNG - erstellt search_string und ruft einheitlichen Filter auf"""
+        """EINFACHE FILTER-AUSFÜHRUNG"""
         logger.info("🎯 EINFACHE FILTER-AUSFÜHRUNG")
         
         try:
-            # Prüfe auf bereits fertigen search_string
-            search_string = filter_config.get('search_string')
+            # Hole Filter-Parameter
+            filter_field = filter_config.get('filter_field')
+            filter_value = filter_config.get('filter_value')
             
-            if not search_string:
-                # Erstelle search_string aus traditionellen field/value Parametern
-                filter_field = filter_config.get('filter_field') or filter_config.get('field_name')
-                filter_value = filter_config.get('filter_value') or filter_config.get('search_value')
+            # Alternative Parameternamen prüfen
+            if not filter_field:
+                filter_field = filter_config.get('field_name')
+            if not filter_value:
+                filter_value = filter_config.get('search_value')
+            
+            if not filter_field or not filter_value:
+                logger.error(f"❌ Unvollständige Filter-Konfiguration: field='{filter_field}', value='{filter_value}'")
+                logger.error(f"📋 Verfügbare Config-Keys: {list(filter_config.keys())}")
+                return False
+            
+            logger.info(f"🔍 Einfacher Filter: {filter_field} = '{filter_value}'")
+            
+            # MatrixManager Integration
+            matrix_manager = self._get_matrix_manager()
+            if matrix_manager:
+                # Einfache Filter-Parameter: field_show Format
+                filter_params = {f"{filter_field}_show": filter_value}
+                logger.info(f"📊 Filter-Parameter für Matrix: {filter_params}")
                 
-                if not filter_field or not filter_value:
-                    logger.error(f"❌ Unvollständige Filter-Konfiguration: field='{filter_field}', value='{filter_value}'")
-                    logger.error(f"📋 Verfügbare Config-Keys: {list(filter_config.keys())}")
+                result = matrix_manager.apply_filter('einfach', filter_params)
+                
+                if result:
+                    logger.info("✅ Einfacher Filter auf Matrix erfolgreich angewendet")
+                    return True
+                else:
+                    logger.error("❌ Einfacher Filter auf Matrix fehlgeschlagen")
                     return False
-                
-                # Erstelle search_string aus field/value
-                search_string = f"{filter_field}_show:{filter_value}"
-                logger.info(f"🔧 Search-String aus Parametern erstellt: '{search_string}'")
-            
-            logger.info(f"🔍 Führe einheitlichen Filter aus mit: '{search_string}'")
-            
-            # Rufe den EINHEITLICHEN Filter auf
-            return self._execute_unified_filter(search_string)
+            else:
+                logger.error("❌ MatrixManager nicht verfügbar für einfachen Filter")
+                return False
                 
         except Exception as e:
             logger.error(f"❌ Fehler bei einfachem Filter: {e}")
             return False
     
-    def _execute_unified_filter(self, search_string: str):
-        """EINHEITLICHER FILTER - akzeptiert nur search_string"""
-        logger.info(f"🎯 EINHEITLICHER FILTER: '{search_string}'")
-        
-        try:
-            # MatrixManager Integration für einheitlichen Filter
-            matrix_manager = self._get_matrix_manager()
-            if matrix_manager:
-                # Verwende einheitlichen Filter-Aufruf - kein Filter-Typ mehr!
-                result = matrix_manager.apply_filter(search_string)
-                
-                if result:
-                    logger.info("✅ Einheitlicher Filter erfolgreich angewendet")
-                    return True
-                else:
-                    logger.error("❌ Einheitlicher Filter fehlgeschlagen")
-                    return False
-            else:
-                logger.error("❌ MatrixManager nicht verfügbar für einheitlichen Filter")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler bei einheitlichem Filter: {e}")
-            return False
-    
     def _execute_complex_filter(self, filter_config: Dict[str, Any]):
-        """KOMPLEXE FILTER-AUSFÜHRUNG - erstellt search_string und ruft einheitlichen Filter auf"""
+        """KOMPLEXE FILTER-AUSFÜHRUNG (falls wirklich gebraucht)"""
         logger.info("🎯 KOMPLEXE FILTER-AUSFÜHRUNG")
         
         try:
-            # Prüfe auf bereits fertigen search_string
-            search_string = filter_config.get('search_string')
+            # Komplexe Filter-Logik - später implementieren falls nötig
+            logger.warning("⚠️ Komplexe Filter noch nicht implementiert - verwende einfachen Fallback")
             
-            if not search_string:
-                # Komplexe Filter müssen ihren eigenen search_string erstellen
-                logger.warning("⚠️ Komplexe Filter ohne search_string noch nicht implementiert")
-                return False
+            # Falls es doch nur ein einfacher Filter in komplexer Verpackung ist
+            if 'filter_field' in filter_config and 'filter_value' in filter_config:
+                return self._execute_simple_filter(filter_config)
             
-            logger.info(f"🔍 Führe einheitlichen Filter für komplexen Filter aus: '{search_string}'")
-            
-            # Rufe den EINHEITLICHEN Filter auf
-            return self._execute_unified_filter(search_string)
+            return True
             
         except Exception as e:
             logger.error(f"❌ Fehler bei komplexem Filter: {e}")
             return False
-    
-    def reset_all_filters(self):
-        """Reset alle Filter und kehre zur kompletten Datenbasis zurück"""
-        logger.info("🔄 === RESET ALLE FILTER ===")
-        
-        try:
-            # Reset Filter-State
-            self.last_filter_type = None
-            self.last_filter_config = None
-            
-            # Reset zur kompletten Datenbasis
-            success = self._reset_to_complete_data()
-            
-            if success:
-                logger.info("✅ Alle Filter erfolgreich zurückgesetzt")
-                return True
-            else:
-                # Fallback: MatrixManager direkt mit leerem Filter aufrufen
-                matrix_manager = self._get_matrix_manager()
-                if matrix_manager:
-                    result = matrix_manager.apply_filter(None)  # None = kein Filter
-                    if result:
-                        logger.info("✅ Filter-Reset über MatrixManager.apply_filter(None) erfolgreich")
-                        return True
-                
-                logger.warning("⚠️ Filter-Reset nur teilweise erfolgreich")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Reset aller Filter: {e}")
-            return False
-    
-    def execute_global_search_filter(self, search_string: str) -> bool:
-        """
-        GLOBALE SUCHE - sucht in allen Feldern nach dem Suchbegriff
-        
-        Args:
-            search_string: Globaler Suchbegriff (z.B. 'li')
-        
-        Returns:
-            bool: True wenn erfolgreich, False wenn Fehler
-        """
-        logger.info(f"🔍 === GLOBALE SUCHE ===")
-        logger.info(f"🔍 Suchbegriff: '{search_string}'")
-        
-        try:
-            # Reset zur kompletten Datenbasis
-            success_reset = self._reset_to_complete_data()
-            if not success_reset:
-                logger.warning("⚠️ Reset konnte nicht durchgeführt werden, versuche trotzdem globale Suche")
-            
-            # Führe globale Suche aus
-            matrix_manager = self._get_matrix_manager()
-            if matrix_manager:
-                # Verwende globalen Filter-Aufruf
-                result = matrix_manager.apply_filter(search_string)
-                
-                if result:
-                    logger.info("✅ Globale Suche erfolgreich angewendet")
-                    return True
-                else:
-                    logger.error("❌ Globale Suche fehlgeschlagen")
-                    return False
-            else:
-                logger.error("❌ MatrixManager nicht verfügbar für globale Suche")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler bei globaler Suche: {e}")
-            return False
 
 
 # Globaler Manager-Cache
-_linear_filter_managers = {}
+_simple_linear_filter_managers = {}
 
-def get_linear_filter_manager(view_guid: str) -> Optional[LinearFilterExecutionManager]:
+def get_simple_linear_filter_manager(view_guid: str) -> Optional[SimpleLinearFilterExecutionManager]:
     """
     Hole oder erstelle EINFACHEN LinearFilterExecutionManager für View-GUID
     
@@ -325,23 +241,23 @@ def get_linear_filter_manager(view_guid: str) -> Optional[LinearFilterExecutionM
         view_guid: Eindeutige View-Identifikation
         
     Returns:
-        LinearFilterExecutionManager Instance oder None
+        SimpleLinearFilterExecutionManager Instance oder None
     """
-    global _linear_filter_managers
+    global _simple_linear_filter_managers
     
     try:
-        if view_guid not in _linear_filter_managers:
-            _linear_filter_managers[view_guid] = LinearFilterExecutionManager(view_guid)
+        if view_guid not in _simple_linear_filter_managers:
+            _simple_linear_filter_managers[view_guid] = SimpleLinearFilterExecutionManager(view_guid)
             logger.info(f"✅ Neue EINFACHE LinearFilterExecutionManager Instanz für View: {view_guid}")
         
-        return _linear_filter_managers[view_guid]
+        return _simple_linear_filter_managers[view_guid]
         
     except Exception as e:
-        logger.error(f"❌ Fehler beim Erstellen LinearFilterExecutionManager: {e}")
+        logger.error(f"❌ Fehler beim Erstellen einfacher LinearFilterExecutionManager: {e}")
         return None
 
-def reset_all_linear_filter_managers():
-    """Reset aller Manager-Instanzen"""
-    global _linear_filter_managers
-    _linear_filter_managers.clear()
-    logger.info("🔄 Alle LinearFilterExecutionManager-Instanzen zurückgesetzt")
+def reset_all_simple_linear_filter_managers():
+    """Reset aller einfachen Manager-Instanzen"""
+    global _simple_linear_filter_managers
+    _simple_linear_filter_managers.clear()
+    logger.info("🔄 Alle EINFACHEN LinearFilterExecutionManager-Instanzen zurückgesetzt")

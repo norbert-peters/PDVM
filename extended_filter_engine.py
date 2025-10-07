@@ -56,15 +56,11 @@ class ExtendedFilterEngine:
         self.extended_conditions = {}  # field_key -> List[SearchCondition]
         self.view_guid = None  # Wird beim ersten Laden gesetzt
         
-    def reload_extended_conditions(self):
+    def reload_extended_conditions(self, view_guid=None):
         """
-        Lädt alle erweiterten Bedingungen neu aus der Persistenz - KORRIGIERT: aus anwendungsdaten
-        KRITISCH für das erste Filter-Anwenden!
+        Lädt alle erweiterten Bedingungen neu aus der Persistenz - DIREKT über GCS
+        VEREINFACHT: Arbeitet immer direkt über GCS, keine view_guid-Abhängigkeit
         """
-        if not self.view_guid:
-            logger.warning("⚠️ Keine view_guid gesetzt - kann erweiterte Bedingungen nicht neu laden")
-            return
-            
         try:
             # Importiere GCS lokal um Circular Imports zu vermeiden
             from pdvm_central_systemsteuerung import get_gcs
@@ -72,15 +68,30 @@ class ExtendedFilterEngine:
             
             if not gcs or not hasattr(gcs, '_app_db') or not gcs._app_db:
                 logger.warning("⚠️ GCS._app_db nicht verfügbar für Neuladen der erweiterten Bedingungen")
-                return
+                return []
                 
-            # KORREKT: Durchsuche anwendungsdaten über self._app_db
+            # VEREINFACHT: Verwende übergebene view_guid oder hole aus SearchParameterDialog Context
+            target_view_guid = view_guid or self.view_guid
+            if not target_view_guid:
+                # Fallback: Hole view_guid aus dem aktuellen Dialog-Context (falls verfügbar)
+                # Das ist sicherer als eine fest codierte GUID
+                logger.info("ℹ️ Keine view_guid verfügbar - überspringen Extended Conditions Reload")
+                return []
+                
+            # WICHTIG: Speichere view_guid für künftige Verwendung
+            if view_guid:
+                self.view_guid = view_guid
+                
+            # RESET: Alte Bedingungen löschen 
+            self.extended_conditions.clear()
+                
+            # KORREKT: Durchsuche anwendungsdaten über GCS._app_db
             possible_columns = ['familienname_show', 'vorname_show', 'anrede_show', 'geburtsdatum_show', 'geburtsdatum_alter_show', 'uid_show']
             
             loaded_count = 0
             for column_key in possible_columns:
                 try:
-                    column_data, _ = gcs._app_db.get_value(self.view_guid, column_key) or (None, None)
+                    column_data, _ = gcs._app_db.get_value(target_view_guid, column_key) or (None, None)
                     
                     if column_data and isinstance(column_data, dict) and 'conditions' in column_data:
                         conditions_data = column_data['conditions']
@@ -94,36 +105,18 @@ class ExtendedFilterEngine:
                 except Exception as e:
                     logger.warning(f"⚠️ Fehler beim Neuladen der Bedingungen für '{column_key}': {e}")
                     continue
+                    
+            logger.info(f"✅ {loaded_count} erweiterte Filter-Felder neu geladen")
+            return self.extended_conditions
             
-            # Fallback: Alte field_* Struktur prüfen (falls noch vorhanden)
-            if loaded_count == 0:
-                all_keys = gcs._app_db.get_all_keys_for_guid(self.view_guid)
-                field_keys = [key for key in all_keys if key.startswith('field_') and key.endswith('_show')]
-                
-                for field_key in field_keys:
-                    try:
-                        data, timestamp = gcs._app_db.get_value(self.view_guid, field_key)
-                        
-                        if data and isinstance(data, dict) and 'conditions' in data:
-                            conditions_data = data['conditions']
-                            if conditions_data:
-                                # Konvertiere zu SearchCondition Objekten
-                                conditions = [SearchCondition.from_dict(c) for c in conditions_data]
-                                self.extended_conditions[field_key] = conditions
-                                loaded_count += 1
-                                logger.info(f"🔄 APP-DB ALT-Format erweiterte Bedingungen für '{field_key}' neu geladen: {len(conditions)} Bedingungen")
-                                
-                    except Exception as e:
-                        logger.warning(f"⚠️ Fehler beim Neuladen der Bedingungen für '{field_key}': {e}")
-                        continue
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Neuladen der erweiterten Bedingungen: {e}")
+            return []
             
             logger.info(f"✅ {loaded_count} erweiterte Filter-Felder aus ANWENDUNGSDATEN neu geladen")
             
         except Exception as e:
             logger.error(f"❌ Kritischer Fehler beim Neuladen der erweiterten Bedingungen: {e}")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Neuladen der erweiterten Bedingungen: {e}")
         
     def set_field_conditions(self, field_key: str, conditions: List[Dict]):
         """
@@ -635,6 +628,16 @@ class ExtendedFilterEngine:
                 summary[field_key] = " ".join(condition_texts)
             
         return summary
+    
+    def get_active_conditions(self) -> Dict[str, List]:
+        """
+        Gibt die aktuell aktiven erweiterten Bedingungen zurück
+        
+        Returns:
+            Dict: field_key -> Liste der Bedingungen
+        """
+        # Kopie der aktuellen Bedingungen zurückgeben
+        return dict(self.extended_conditions)
     
     def _create_display_text_fallback(self, condition) -> str:
         """

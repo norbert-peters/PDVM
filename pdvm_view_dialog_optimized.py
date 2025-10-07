@@ -431,6 +431,18 @@ class PdvmViewDisplay(QWidget):
         expert_action.setChecked(self.view_dialog.gcs.expert_mode)
         settings_menu.addAction(expert_action)
         
+        # Separator
+        settings_menu.addSeparator()
+        
+        # Erweiterte Sortierung und Gruppierung
+        sort_action = QAction("⚙️ Erweiterte Sortierung...", self)
+        sort_action.triggered.connect(self._open_advanced_sorting)
+        settings_menu.addAction(sort_action)
+        
+        group_action = QAction("📁 Gruppierung...", self)
+        group_action.triggered.connect(self._open_grouping)
+        settings_menu.addAction(group_action)
+        
         self.settings_button.setMenu(settings_menu)
     
     def update_header_text(self):
@@ -450,10 +462,22 @@ class PdvmViewDisplay(QWidget):
         self.update_header_text()
     
     def _refresh_table(self):
-        """Tabelle mit Daten füllen"""
+        """Tabelle mit Daten füllen - Pipeline-Ende: get_final_data() aus MatrixManager"""
         try:
-            # Einfache Tabellendarstellung für Performance-Test
-            matrix = self.view_dialog.display_matrix
+            logger.info("🔄 Pipeline-Projektion: SortMatrix → Tabelle")
+            
+            # PIPELINE-ENDE: Hole die finalen Daten aus der SortMatrix über get_final_data()
+            matrix = None
+            try:
+                if hasattr(self.view_dialog, 'matrix_manager') and self.view_dialog.matrix_manager:
+                    matrix = self.view_dialog.matrix_manager.get_final_data()
+                    logger.info(f"📊 Pipeline-Projektion: {len(matrix)} Zeilen aus SortMatrix")
+                else:
+                    logger.warning("⚠️ Kein MatrixManager - Fallback auf display_matrix")
+                    matrix = self.view_dialog.display_matrix
+            except Exception as e:
+                logger.error(f"❌ Fehler bei Pipeline-Projektion: {e}")
+                matrix = self.view_dialog.display_matrix
             
             if not matrix:
                 self.table.setRowCount(0)
@@ -478,10 +502,112 @@ class PdvmViewDisplay(QWidget):
                     self.table.setItem(row_idx, col_idx, item)
             
             # Status aktualisieren
-            self.status_label.setText(f"{len(matrix)} Datensätze, {len(visible_columns)} Spalten")
+            matrix_status = ""
+            if hasattr(self.view_dialog, 'matrix_manager') and self.view_dialog.matrix_manager:
+                status = self.view_dialog.matrix_manager.get_status()
+                if status['filter_rows'] != status['basis_rows']:
+                    matrix_status = f" (gefiltert von {status['basis_rows']})"
             
-            logger.info(f"✅ Tabelle aktualisiert: {len(matrix)} Zeilen × {len(visible_columns)} Spalten")
+            self.status_label.setText(f"{len(matrix)} Datensätze{matrix_status}, {len(visible_columns)} Spalten")
+            
+            logger.info(f"✅ Tabelle aus MatrixManager aktualisiert: {len(matrix)} Zeilen × {len(visible_columns)} Spalten")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren der Tabelle: {e}")
             self.status_label.setText(f"Fehler: {e}")
+
+    def _open_advanced_sorting(self):
+        """Öffnet den Dialog für erweiterte Sortierung"""
+        try:
+            # Überprüfe ob MatrixManager verfügbar ist
+            if hasattr(self.view_dialog, 'matrix_manager') and self.view_dialog.matrix_manager:
+                matrix_manager = self.view_dialog.matrix_manager
+                
+                # Teste zuerst die Filter-Funktionalität
+                logger.info("🧪 Teste Filter-Funktionalität vor Sortierung...")
+                matrix_manager.test_filter_functionality()
+                
+                # Verfügbare Spalten für Sortierung sammeln
+                if hasattr(matrix_manager, 'get_available_columns'):
+                    available_columns = matrix_manager.get_available_columns()
+                    columns_list = sorted([col for col in available_columns if col.endswith('_show')])
+                    
+                    if columns_list:
+                        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+                        column, ok = QInputDialog.getItem(
+                            self, 
+                            "Sortierung auswählen", 
+                            "Spalte zum Sortieren auswählen:", 
+                            columns_list, 
+                            0, 
+                            False
+                        )
+                        
+                        if ok and column:
+                            # Sortierung anwenden
+                            matrix_manager.apply_sort(column, True)  # Aufsteigend
+                            QMessageBox.information(self, "Sortierung", f"Nach '{column}' sortiert (aufsteigend)")
+                            
+                            # View aktualisieren (falls möglich)
+                            if hasattr(self.view_dialog, 'refresh_view'):
+                                self.view_dialog.refresh_view()
+                    else:
+                        from PyQt5.QtWidgets import QMessageBox
+                        QMessageBox.warning(self, "Sortierung", "Keine sortierbaren Spalten verfügbar.")
+                else:
+                    # Fallback für Tests
+                    from PyQt5.QtWidgets import QMessageBox
+                    status = matrix_manager.get_status()
+                    QMessageBox.information(self, "Erweiterte Sortierung", 
+                                          f"MatrixManager verfügbar!\n\n"
+                                          f"Filter-Tests wurden ausgeführt.\n"
+                                          f"Matrix-Status:\n"
+                                          f"Basis: {status['basis_rows']} Zeilen\n"
+                                          f"Filter: {status['filter_rows']} Zeilen\n"
+                                          f"Sort: {status['sort_rows']} Zeilen\n"
+                                          f"Spalten: {status['columns_count']}")
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Fehler", "MatrixManager nicht verfügbar.")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Öffnen der erweiterten Sortierung: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Öffnen der erweiterten Sortierung:\n{e}")
+
+    def _open_grouping(self):
+        """Öffnet den Dialog für Gruppierung"""
+        try:
+            # Überprüfe ob MatrixManager verfügbar ist
+            if hasattr(self.view_dialog, 'matrix_manager') and self.view_dialog.matrix_manager:
+                matrix_manager = self.view_dialog.matrix_manager
+                
+                # Teste Filter-Funktionalität
+                logger.info("🧪 Teste Filter-Funktionalität für Gruppierung...")
+                matrix_manager.test_filter_functionality()
+                
+                # Zeige aktuellen Matrix-Status
+                status = matrix_manager.get_status()
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Gruppierung", 
+                                      f"MatrixManager Gruppierung!\n\n"
+                                      f"Filter-Tests wurden ausgeführt.\n\n"
+                                      f"Matrix-Status:\n"
+                                      f"View GUID: {status['view_guid']}\n"
+                                      f"Basis-Zeilen: {status['basis_rows']}\n"
+                                      f"Filter-Zeilen: {status['filter_rows']}\n"
+                                      f"Sort-Zeilen: {status['sort_rows']}\n"
+                                      f"Spalten: {status['columns_count']}\n\n"
+                                      f"Geplante Features:\n"
+                                      f"• Gruppierung nach Spalten\n"
+                                      f"• Hierarchische Matrix-Anzeige\n" 
+                                      f"• Gruppen-Summen\n"
+                                      f"• QuellMatrix → ZielMatrix Pipeline")
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Fehler", "MatrixManager nicht verfügbar.")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Öffnen der Gruppierung: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Öffnen der Gruppierung:\n{e}")

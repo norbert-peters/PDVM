@@ -49,11 +49,12 @@ from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_spalten_parameter_dialog import PdvmSpaltenParameterDialog
 from pdvm_spalten_konfig_dialog import PdvmSpaltenKonfigDialog
 from pdvm_datetime import Pdvm_DateTime
+from PyQt5.QtWidgets import QWidget
 
 
-class PdvmViewDialog:
+class PdvmViewDialog(QWidget):
     """
-    SAUBERER Autonomer View-Dialog mit integriertem Datenmanagement
+    SAUBERER Autonomer View-Dialog mit integriertem Datenmanagement - EINE KLASSE!
     
     LINEARE ARCHITEKTUR:
     1. Validation der call_daten
@@ -61,18 +62,21 @@ class PdvmViewDialog:
     3. Controls linear generieren: ViewDaten → _original → _show → dummy
     4. Controls in GCS speichern
     5. Daten laden und Matrix erstellen
-    6. UI-Display erstellen
+    6. UI direkt erstellen (KEINE separate Display-Klasse!)
     """
     
     def __init__(self, call_daten, parent=None, view_manager=None):
         """
-        Initialisierung des autonomen View-Dialogs
+        Initialisierung des autonomen View-Dialogs als QWidget
         
         Args:
             call_daten: Enthält view_guid, title, first_call, reset
             parent: Parent-Widget
             view_manager: Optional View-Manager für synchronisierte Projektion
         """
+        # WICHTIG: Zuerst QWidget initialisieren!
+        super().__init__(parent)
+        
         self.call_daten = call_daten
         self.parent = parent
         self.view_manager = view_manager  # Optional: View-Manager für Synchronisation
@@ -81,11 +85,6 @@ class PdvmViewDialog:
         if self.view_manager is None and hasattr(parent, 'view_manager'):
             self.view_manager = parent.view_manager
             logger.info("✅ View-Manager aus Parent übernommen")
-            
-        # Wenn View-Manager verfügbar ist, aktualisiere Filter-Panel
-        if hasattr(self, 'display') and self.display and hasattr(self.display, 'filter_panel') and self.display.filter_panel:
-            self.display.filter_panel.refresh_column_search_fields()
-            logger.info("✅ Filter-Panel nach View-Manager Zuweisung aktualisiert")
         
         # 🔍 1. TITEL-VALIDATION: Prüfung auf erforderliche Daten
         self.view_guid = call_daten.get("view_guid")
@@ -113,10 +112,13 @@ class PdvmViewDialog:
         self.view_config = None
         self.controls_config = None
         self.all_data_records = []
-        self.display_matrix = []
+        self.display_matrix = []  # Legacy - wird durch MatrixManager ersetzt
         
         # UI-Container
         self.display = None
+        
+        # 🚀 NEUES 4-SCHICHTEN MATRIX-SYSTEM
+        self.matrix_integration = None  # Wird nach GCS-Verfügbarkeit initialisiert
         
         # NEUES LINEARES FILTER-SYSTEM
         self.linear_filter = None  # Wird nach display-Erstellung initialisiert
@@ -656,6 +658,69 @@ class PdvmViewDialog:
 
         logger.info(f"✅ Matrix erstellt: {len(self.display_matrix)} Zeilen (aus {len(self.optimized_instances)} Instanzen)")
         logger.info("🎯 LINEARE Matrix-Erstellung abgeschlossen - robust und einfach!")
+        
+        # 🚀 PDVM MATRIX-MANAGER - DIREKTE INTEGRATION
+        self._initialize_clean_matrix_manager()
+        
+        # Matrix-Manager mit Daten versorgen
+        if hasattr(self, 'display_matrix') and self.display_matrix:
+            # Alle Spalten sammeln
+            all_columns = set()
+            for row in self.display_matrix:
+                all_columns.update(row.keys())
+            
+            # Matrix-Manager initialisieren
+            self._initialize_matrix_with_data(self.display_matrix, all_columns)
+    
+    def _initialize_clean_matrix_manager(self):
+        """
+        🎯 ULTRA-LINEARER Matrix-Manager (DIREKT - KEINE INTEGRATION!)
+        """
+        try:
+            logger.info("🏗️ Initialisiere PdvmMatrixManager (DIREKT)...")
+            
+            from pdvm_matrix_manager import get_matrix_manager
+            
+            # Direkter Matrix-Manager - KEINE komplexe Integration!
+            self.matrix_manager = get_matrix_manager(self.view_guid)
+            
+            if not self.matrix_manager:
+                raise RuntimeError("PdvmMatrixManager konnte nicht erstellt werden!")
+            
+            logger.info("✅ PdvmMatrixManager DIREKT initialisiert")
+            
+        except Exception as e:
+            error_msg = f"❌ KRITISCHER FEHLER: Matrix-Manager nicht verfügbar!\n{e}"
+            logger.error(error_msg)
+            raise RuntimeError("Matrix-Manager ist ERFORDERLICH!")
+    
+    def _initialize_matrix_with_data(self, data, columns):
+        """
+        Matrix-Manager mit Daten versorgen (BASIS-Matrix setzen)
+        
+        Args:
+            data: Matrix-Daten
+            columns: Spalten-Set
+        """
+        if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+            logger.error("❌ Matrix-Manager nicht verfügbar!")
+            return
+        
+        try:
+            # BASIS-MATRIX im Matrix-Manager setzen
+            self.matrix_manager.set_basis_matrix(data, columns)
+            
+            # Initial: Filter anwenden (auch wenn leer)
+            self.matrix_manager.apply_filter(None)
+            
+            # Initial: Sortierung anwenden (auch wenn leer)
+            self.matrix_manager.apply_sort(None)
+            
+            logger.info("✅ Matrix-Manager mit Daten versorgt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Matrix-Daten setzen: {e}")
+            raise
     
     def _format_abdatum(self, abdatum_value):
         """Formatiert einen Abdatum-Wert in lesbares Format - PERFORMANCE OPTIMIERT"""
@@ -713,10 +778,11 @@ class PdvmViewDialog:
         return True
     
     def _create_ui(self):
-        """5. UI erstellen"""
+        """5. UI erstellen - DIREKT ohne separate Display-Klasse"""
         logger.info("🔧 Erstelle UI...")
         
-        self.display = PdvmViewDisplay(self)
+        # UI direkt in PdvmViewDialog erstellen
+        self._setup_ui_direct()
         
         logger.info("✅ UI erstellt")
         
@@ -755,7 +821,7 @@ class PdvmViewDialog:
             # Filter-Integration sicherstellen
             if not self.linear_filter and hasattr(self, 'display') and self.display and hasattr(self.display, 'table'):
                 # VEREINFACHT: Keine Column-Mappings mehr - Control-Key Patch übernimmt das
-                self.linear_filter = create_pdvm_linear_filter(self.display.table, self.view_guid)
+                self.linear_filter = create_pdvm_linear_filter(self.table, self.view_guid)
                 logger.info("✅ Linear Filter Integration mit Control-Key Patch erstellt")
             
             if not self.linear_filter:
@@ -767,9 +833,8 @@ class PdvmViewDialog:
             
             if success:
                 logger.info("✅ Unified Linear Filter-Anwendung erfolgreich")
-                # UI refresh falls erforderlich
-                if hasattr(self, 'display') and self.display and hasattr(self.display, 'refresh_table'):
-                    self.display.refresh_table()
+                # UI refresh direkt
+                self.refresh_table_direct()
             else:
                 logger.error("❌ Unified Linear Filter-Anwendung fehlgeschlagen")
                 
@@ -778,9 +843,8 @@ class PdvmViewDialog:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # SCHRITT 3: Display-Update
-            if hasattr(self, 'display') and self.display:
-                self.display.refresh_table()
+            # SCHRITT 3: Display-Update direkt
+            self.refresh_table_direct()
                 
         except Exception as e:
             logger.error(f"❌ Fehler beim stufenweisen Filtern: {e}")
@@ -862,7 +926,7 @@ class PdvmViewDialog:
         visible_columns = []
         if hasattr(self, 'display') and self.display:
             try:
-                visible_columns = self.display._get_visible_columns_from_gcs()
+                visible_columns = self._get_visible_columns_from_gcs()
                 logger.info(f"🔍 Globale Suche in {len(visible_columns)} sichtbaren Spalten")
             except Exception as e:
                 logger.warning(f"⚠️ Fehler beim Abrufen sichtbarer Spalten: {e}")
@@ -1082,7 +1146,7 @@ class PdvmViewDialog:
             
             # Tabelle finden (wie Extended Filter Engine)
             if hasattr(self, 'display') and hasattr(self.display, 'table'):
-                table = self.display.table
+                table = self.table
             elif hasattr(self, 'table'):
                 table = self.table
             
@@ -1097,7 +1161,7 @@ class PdvmViewDialog:
                 
                 # Gesamtsuche leeren
                 if hasattr(self, 'display') and hasattr(self.display, 'search_input'):
-                    self.display.search_input.clear()
+                    self.search_input.clear()
                     logger.info("✅ Gesamtsuche-Feld geleert")
                 
                 # VERIFIKATION der echten Tabellen-Sichtbarkeit
@@ -1124,8 +1188,9 @@ class PdvmViewDialog:
     
     
     def get_display_widget(self):
-        """Widget für Integration zurückgeben"""
-        return self.display
+        """Widget für Integration zurückgeben - SELF da UI direkt hier ist"""
+        logger.info("🔹 get_display_widget() - UI ist direkt in PdvmViewDialog integriert")
+        return self
     
     def _get_columns_from_controls(self):
         """Basis-Spalten aus controls_config ableiten (wie View-Manager)"""
@@ -1178,8 +1243,1109 @@ class PdvmViewDialog:
         """Reload bei Stichtag-Änderung"""
         logger.info("🔄 Reload...")
         self._build_matrix()
-        if self.display:
-            self.display.refresh_table()
+        self.refresh_table_direct()
+
+    # === DIREKTE UI-FUNKTIONEN - KEINE SEPARATE DISPLAY-KLASSE! ===
+    
+    def _setup_ui_direct(self):
+        """Direkte UI-Erstellung in PdvmViewDialog ohne separate Display-Klasse"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QFrame, QLineEdit, 
+                                       QTableWidget, QPushButton, QToolBar, QAction, QComboBox, QCheckBox)
+            from PyQt5.QtGui import QFont, QIcon
+            from PyQt5.QtCore import QSize
+            
+            logger.info("🔧 Starte UI-Setup...")
+            
+            # CRITICAL: Prüfe, ob bereits ein Layout existiert
+            if self.layout() is not None:
+                logger.warning("⚠️ Widget hat bereits ein Layout - überspringe Setup")
+                return
+            
+            # Layout für den Dialog - ERST erstellen, DANN setzen
+            layout = QVBoxLayout()
+            layout.setSpacing(5)
+            layout.setContentsMargins(10, 10, 10, 10)
+            logger.info(f"🔧 Layout erstellt: {layout}")
+            
+            # Header-Bereich mit Titel und Einstellungen-Zahnrad
+            header_widget = QWidget()
+            header_layout = QHBoxLayout(header_widget)
+            header_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Header-Label - SICHERE Erstellung
+            gcs = get_gcs()
+            base_title = getattr(self, 'title', f"View: {self.view_guid}")
+            if gcs and gcs.expert_mode and hasattr(gcs, 'st_inst') and gcs.st_inst:
+                formatted_stichtag = getattr(gcs.st_inst, 'FormTimeStamp', str(gcs.st_inst.PdvmDateTime))
+                title_text = f"{base_title} - Stichtag: {formatted_stichtag}"
+            else:
+                title_text = base_title
+                
+            self.header_label = QLabel(title_text)
+            if self.header_label is None:
+                logger.error("❌ Header-Label konnte nicht erstellt werden!")
+                return
+                
+            header_font = QFont("Segoe UI", 12, QFont.Bold)
+            self.header_label.setFont(header_font)
+            self.header_label.setStyleSheet("""
+                QLabel {
+                    color: #1a365d;
+                    padding: 10px;
+                    background-color: #e2e8f0;
+                    border-radius: 6px;
+                    border: 1px solid #cbd5e0;
+                }
+            """)
+            header_layout.addWidget(self.header_label)
+            
+            # Einstellungs-Zahnrad rechts
+            self.settings_btn = QPushButton("⚙️")
+            self.settings_btn.setToolTip("Einstellungen")
+            self.settings_btn.setFixedSize(35, 35)
+            self.settings_btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 16px;
+                    background-color: #3498db;
+                    border: none;
+                    border-radius: 17px;
+                    color: white;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QPushButton:pressed {
+                    background-color: #21618c;
+                }
+            """)
+            self.settings_btn.clicked.connect(self._show_settings_menu)
+            header_layout.addWidget(self.settings_btn)
+            
+            # Header-Widget zum Layout hinzufügen
+            layout.addWidget(header_widget)
+            logger.info(f"✅ Header mit Einstellungs-Zahnrad hinzugefügt")
+            
+            # === GESAMTSUCHE-FELD ===
+            self._create_global_search_field(layout)
+            
+            # Tabelle DIREKT in PdvmViewDialog - SICHERE Erstellung
+            self.table = QTableWidget()
+            if self.table is None:
+                logger.error("❌ Tabelle konnte nicht erstellt werden!")
+                return
+                
+            self.table.setAlternatingRowColors(True)
+            self.table.setSelectionBehavior(QTableWidget.SelectRows)
+            
+            # Header-Schrift konfigurieren
+            header_font = QFont("Segoe UI", 10, QFont.Bold)
+            self.table.horizontalHeader().setFont(header_font)
+            
+            # KRITISCH: Tabelle explizit sichtbar machen
+            self.table.setVisible(True)
+            self.table.show()
+            logger.info(f"🔧 Tabelle Sichtbarkeit: {self.table.isVisible()}")
+            
+            # Mindestgröße setzen damit Tabelle sichtbar wird
+            self.table.setMinimumSize(400, 200)
+            
+            # SICHERE Widget-Hinzufügung
+            if self.table is not None and layout is not None:
+                layout.addWidget(self.table)
+                logger.info(f"✅ Tabelle hinzugefügt: {self.table}")
+            else:
+                logger.error(f"❌ Kann Tabelle nicht hinzufügen: Widget={self.table}, Layout={layout}")
+                return
+            
+            # DIREKTE Header-Click Verbindung in derselben Klasse
+            self._setup_header_click_direct()
+            
+            # Status-Label - SICHERE Erstellung
+            self.status_label = QLabel("Bereit")
+            if self.status_label is None:
+                logger.error("❌ Status-Label konnte nicht erstellt werden!")
+                return
+                
+            self.status_label.setMinimumHeight(20)
+            
+            # SICHERE Widget-Hinzufügung
+            if self.status_label is not None and layout is not None:
+                layout.addWidget(self.status_label)
+                logger.info(f"✅ Status-Label hinzugefügt: {self.status_label}")
+            else:
+                logger.error(f"❌ Kann Status-Label nicht hinzufügen: Widget={self.status_label}, Layout={layout}")
+                return
+            
+            # CRITICAL: Layout zum Widget setzen - GANZ AM ENDE!
+            try:
+                if layout is not None:
+                    self.setLayout(layout)
+                    logger.info(f"✅ Layout zum Widget gesetzt: {layout}")
+                    
+                    # SOFORTIGE SICHTBARKEITS-PRÜFUNG
+                    logger.info(f"🔍 Widget selbst sichtbar: {self.isVisible()}")
+                    logger.info(f"🔍 Tabelle sichtbar: {self.table.isVisible() if hasattr(self, 'table') else 'N/A'}")
+                    logger.info(f"🔍 Header-Label sichtbar: {self.header_label.isVisible() if hasattr(self, 'header_label') else 'N/A'}")
+                    logger.info(f"🔍 Status-Label sichtbar: {self.status_label.isVisible() if hasattr(self, 'status_label') else 'N/A'}")
+                    
+                    # Widget explizit sichtbar machen
+                    self.setVisible(True)
+                    self.show()
+                    logger.info(f"🔧 Widget nach show(): {self.isVisible()}")
+                    
+                else:
+                    logger.error("❌ Layout ist None - kann nicht gesetzt werden!")
+                    return
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Layout setzen: {e}")
+                return
+            
+            # Nach UI-Setup: Tabelle füllen
+            logger.info("🔧 Starte Tabellen-Befüllung...")
+            self.refresh_table_direct()
+            
+            logger.info("✅ UI-Setup abgeschlossen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei direkter UI-Erstellung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+    
+    def _create_global_search_field(self, layout):
+        """Erstelle das Gesamtsuche-Feld"""
+        try:
+            # Such-Widget Container
+            search_widget = QWidget()
+            search_layout = QHBoxLayout(search_widget)
+            search_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # Such-Label
+            search_label = QLabel("🔍 Gesamtsuche:")
+            search_label.setStyleSheet("""
+                QLabel {
+                    font-weight: bold;
+                    color: #2c3e50;
+                    padding: 5px;
+                }
+            """)
+            search_layout.addWidget(search_label)
+            
+            # Such-Input
+            self.search_input = QLineEdit()
+            self.search_input.setPlaceholderText("Suchbegriff eingeben...")
+            self.search_input.setStyleSheet("""
+                QLineEdit {
+                    padding: 8px;
+                    border: 2px solid #3498db;
+                    border-radius: 5px;
+                    font-size: 14px;
+                    background-color: white;
+                }
+                QLineEdit:focus {
+                    border-color: #2980b9;
+                    background-color: #f8f9fa;
+                }
+            """)
+            self.search_input.textChanged.connect(self._on_search_text_changed)
+            self.search_input.returnPressed.connect(self._perform_global_search)
+            search_layout.addWidget(self.search_input)
+            
+            # Such-Button  
+            search_btn = QPushButton("Suchen")
+            search_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QPushButton:pressed {
+                    background-color: #21618c;
+                }
+            """)
+            search_btn.clicked.connect(self._perform_global_search)
+            search_layout.addWidget(search_btn)
+            
+            # Reset-Button
+            reset_btn = QPushButton("Zurücksetzen")
+            reset_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #95a5a6;
+                    color: white;
+                    border: none;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #7f8c8d;
+                }
+            """)
+            reset_btn.clicked.connect(self._reset_search)
+            search_layout.addWidget(reset_btn)
+            
+            layout.addWidget(search_widget)
+            logger.info("✅ Gesamtsuche-Feld erstellt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen des Gesamtsuche-Felds: {e}")
+    
+    def _show_settings_menu(self):
+        """Zeige Einstellungsmenü beim Klick auf Zahnrad"""
+        try:
+            from PyQt5.QtWidgets import QMenu, QAction
+            
+            # Menü erstellen
+            menu = QMenu(self)
+            menu.setStyleSheet("""
+                QMenu {
+                    background-color: white;
+                    border: 1px solid #bdc3c7;
+                    border-radius: 5px;
+                    padding: 5px;
+                }
+                QMenu::item {
+                    padding: 8px 20px;
+                    border-radius: 3px;
+                }
+                QMenu::item:selected {
+                    background-color: #3498db;
+                    color: white;
+                }
+            """)
+            
+            # Menü-Aktionen
+            column_action = QAction("📋 Spalten verwalten", self)
+            column_action.triggered.connect(self._show_column_management)
+            menu.addAction(column_action)
+            
+            search_action = QAction("🔎 Erweiterte Suche", self)
+            search_action.triggered.connect(self._show_advanced_search)
+            menu.addAction(search_action)
+            
+            menu.addSeparator()
+            
+            expert_action = QAction("🔧 Expert Mode", self)
+            expert_action.setCheckable(True)
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            if gcs:
+                expert_action.setChecked(gcs.expert_mode)
+            expert_action.triggered.connect(self._toggle_expert_mode)
+            menu.addAction(expert_action)
+            
+            menu.addSeparator()
+            
+            refresh_action = QAction("🔄 Daten aktualisieren", self)
+            refresh_action.triggered.connect(self._refresh_data)
+            menu.addAction(refresh_action)
+            
+            export_action = QAction("📤 Daten exportieren", self)
+            export_action.triggered.connect(self._export_data)
+            menu.addAction(export_action)
+            
+            # Menü unter dem Button anzeigen
+            button_pos = self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
+            menu.exec_(button_pos)
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anzeigen des Einstellungsmenüs: {e}")
+    
+    def _on_search_text_changed(self, text):
+        """Reagiere auf Änderungen im Suchfeld (Live-Suche)"""
+        try:
+            if len(text.strip()) >= 3:  # Live-Suche ab 3 Zeichen
+                self._perform_global_search()
+            elif len(text.strip()) == 0:  # Reset bei leerem Feld
+                self._reset_search()
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Live-Suche: {e}")
+    
+    def _reset_search(self):
+        """Suche zurücksetzen"""
+        try:
+            self.search_input.clear()
+            
+            # Filter-Reset über LinearFilterExecutionManager
+            from linear_filter_execution_manager import get_linear_filter_manager
+            manager = get_linear_filter_manager(self.view_guid)
+            if manager:
+                manager.reset_all_filters()
+                logger.info("🔄 Alle Filter zurückgesetzt")
+            
+            # Tabelle aktualisieren
+            self.refresh_table_direct()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Zurücksetzen der Suche: {e}")
+    
+    def _create_toolbar(self, layout):
+        """Erstelle Toolbar mit allen wichtigen Funktionen"""
+        try:
+            from PyQt5.QtWidgets import QHBoxLayout, QPushButton, QFrame, QComboBox, QCheckBox
+            
+            # Toolbar-Frame
+            toolbar_frame = QFrame()
+            toolbar_frame.setFrameStyle(QFrame.StyledPanel)
+            toolbar_frame.setStyleSheet("""
+                QFrame {
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 4px;
+                    padding: 5px;
+                }
+            """)
+            
+            toolbar_layout = QHBoxLayout()
+            toolbar_layout.setSpacing(10)
+            toolbar_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # === SUCH-BUTTONS ===
+            self.btn_search = QPushButton("🔍 Suchen")
+            self.btn_search.setToolTip("Globale Suche aktivieren")
+            self.btn_search.clicked.connect(self._toggle_search)
+            toolbar_layout.addWidget(self.btn_search)
+            
+            self.btn_advanced_search = QPushButton("🔎 Erweitert")
+            self.btn_advanced_search.setToolTip("Erweiterte Suchparameter")
+            self.btn_advanced_search.clicked.connect(self._show_advanced_search)
+            toolbar_layout.addWidget(self.btn_advanced_search)
+            
+            # Trennlinie
+            separator1 = QFrame()
+            separator1.setFrameShape(QFrame.VLine)
+            separator1.setFrameShadow(QFrame.Sunken)
+            toolbar_layout.addWidget(separator1)
+            
+            # === ANSICHT-CONTROLS ===
+            self.btn_settings = QPushButton("⚙️ Einstellungen")
+            self.btn_settings.setToolTip("Spalten und Ansicht konfigurieren")
+            self.btn_settings.clicked.connect(self._show_settings)
+            toolbar_layout.addWidget(self.btn_settings)
+            
+            self.btn_columns = QPushButton("📋 Spalten")
+            self.btn_columns.setToolTip("Spalten verwalten")
+            self.btn_columns.clicked.connect(self._show_column_management)
+            toolbar_layout.addWidget(self.btn_columns)
+            
+            # Expert Mode Toggle
+            self.checkbox_expert = QCheckBox("Expert Mode")
+            self.checkbox_expert.setToolTip("Erweiterte Funktionen anzeigen")
+            self.checkbox_expert.stateChanged.connect(self._toggle_expert_mode)
+            toolbar_layout.addWidget(self.checkbox_expert)
+            
+            # Trennlinie
+            separator2 = QFrame()
+            separator2.setFrameShape(QFrame.VLine)
+            separator2.setFrameShadow(QFrame.Sunken)
+            toolbar_layout.addWidget(separator2)
+            
+            # === DATEN-CONTROLS ===
+            self.btn_refresh = QPushButton("🔄 Aktualisieren")
+            self.btn_refresh.setToolTip("Daten neu laden")
+            self.btn_refresh.clicked.connect(self._refresh_data)
+            toolbar_layout.addWidget(self.btn_refresh)
+            
+            self.btn_export = QPushButton("📤 Export")
+            self.btn_export.setToolTip("Daten exportieren")
+            self.btn_export.clicked.connect(self._export_data)
+            toolbar_layout.addWidget(self.btn_export)
+            
+            # Stretchable space
+            toolbar_layout.addStretch()
+            
+            # === INFO-BEREICH ===
+            self.lbl_row_count = QLabel("0 Zeilen")
+            self.lbl_row_count.setStyleSheet("font-weight: bold; color: #495057;")
+            toolbar_layout.addWidget(self.lbl_row_count)
+            
+            toolbar_frame.setLayout(toolbar_layout)
+            layout.addWidget(toolbar_frame)
+            
+            logger.info("✅ Toolbar mit allen Funktionen erstellt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen der Toolbar: {e}")
+    
+    def _create_search_section(self, layout):
+        """Erstelle erweiterten Suchbereich"""
+        try:
+            from PyQt5.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QFrame
+            
+            # Such-Frame (initial versteckt)
+            self.search_frame = QFrame()
+            self.search_frame.setFrameStyle(QFrame.StyledPanel)
+            self.search_frame.setStyleSheet("""
+                QFrame {
+                    background-color: #e3f2fd;
+                    border: 1px solid #2196f3;
+                    border-radius: 4px;
+                    padding: 8px;
+                }
+            """)
+            self.search_frame.setVisible(False)  # Initial versteckt
+            
+            search_layout = QHBoxLayout()
+            search_layout.setSpacing(10)
+            search_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # Global Search Input
+            self.search_input = QLineEdit()
+            self.search_input.setPlaceholderText("Globale Suche - Suchbegriff eingeben...")
+            self.search_input.returnPressed.connect(self._perform_global_search)
+            self.search_input.textChanged.connect(self._on_search_text_changed)
+            search_layout.addWidget(self.search_input)
+            
+            # Such-Buttons
+            self.btn_search_execute = QPushButton("Suchen")
+            self.btn_search_execute.clicked.connect(self._perform_global_search)
+            search_layout.addWidget(self.btn_search_execute)
+            
+            self.btn_search_clear = QPushButton("Löschen")
+            self.btn_search_clear.clicked.connect(self._clear_search)
+            search_layout.addWidget(self.btn_search_clear)
+            
+            self.search_frame.setLayout(search_layout)
+            layout.addWidget(self.search_frame)
+            
+            logger.info("✅ Such-Bereich erstellt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen des Such-Bereichs: {e}")
+    
+    def _toggle_search(self):
+        """Toggle Suchbereich Sichtbarkeit"""
+        try:
+            if hasattr(self, 'search_frame'):
+                is_visible = self.search_frame.isVisible()
+                self.search_frame.setVisible(not is_visible)
+                
+                if not is_visible:
+                    # Fokus auf Suchfeld setzen
+                    if hasattr(self, 'search_input'):
+                        self.search_input.setFocus()
+                    self.btn_search.setText("🔍 Ausblenden")
+                else:
+                    self.btn_search.setText("🔍 Suchen")
+                    
+                logger.info(f"🔍 Suchbereich {'ein' if not is_visible else 'aus'}geblendet")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Toggle der Suche: {e}")
+    
+    def _show_advanced_search(self):
+        """Zeige erweiterte Suchparameter"""
+        try:
+            logger.info("🔎 Öffne erweiterten Filter-Dialog...")
+            
+            # Import des erweiterten Filter-Dialogs
+            from pdvm_extended_filter_dialog import show_pdvm_extended_filter_dialog
+            
+            # WICHTIG: Filter arbeitet auf ALLEN Spalten der BASIS_MATRIX!
+            # Aber Dialog zeigt nur SICHTBARE Spalten für bessere UX
+            all_columns = []
+            visible_columns = []
+            
+            try:
+                # 1. Hole ALLE Spalten aus MatrixManager (für Filter)
+                if hasattr(self, 'matrix_manager') and self.matrix_manager:
+                    all_columns = self.matrix_manager.columns.copy()
+                    logger.info(f"📊 ALLE Spalten aus MatrixManager: {len(all_columns)} Spalten")
+                
+                # 2. Hole SICHTBARE Spalten aus GCS (für Dialog-Anzeige)
+                gcs_columns = self._get_visible_columns_from_gcs()
+                logger.info(f"�️ SICHTBARE Spalten aus GCS: {len(gcs_columns)} Spalten")
+                
+                for col_name in gcs_columns:
+                    # Generiere Display-Name: 'familienname_show' → 'Familienname'
+                    display_name = col_name.replace('_show', '').replace('_original', '').replace('_', ' ').title()
+                    visible_columns.append((col_name, display_name))
+                    
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Holen der Spalten: {e}")
+                # Fallback: Verwende aktuell angezeigte Spalten
+                if hasattr(self, 'table') and self.table.columnCount() > 0:
+                    for col_idx in range(self.table.columnCount()):
+                        header = self.table.horizontalHeaderItem(col_idx)
+                        if header:
+                            col_name = header.text().lower().replace(' ', '_') + '_show'
+                            visible_columns.append((col_name, header.text()))
+            
+            if not visible_columns:
+                logger.warning("⚠️ Keine sichtbaren Spalten gefunden")
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Keine Spalten", "Keine sichtbaren Spalten für Filter gefunden!")
+                return
+            
+            logger.info(f"📋 Filter-Dialog öffnet mit {len(visible_columns)} sichtbaren Spalten")
+            logger.info(f"🎯 Filter wird auf {len(all_columns)} ALLE Spalten angewendet")
+            
+            # Dialog anzeigen - zeigt nur sichtbare Spalten, filtert aber auf ALLEN
+            result = show_pdvm_extended_filter_dialog(self, self.view_guid, visible_columns)
+            
+            if result:
+                logger.info("✅ Erweiterter Filter angewendet")
+                self.refresh_table_direct()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei erweiterten Suchparametern: {e}")
+    
+    def _show_settings(self):
+        """Zeige Einstellungen-Dialog"""
+        try:
+            logger.info("⚙️ Öffne Einstellungen...")
+            
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Einstellungen", "Einstellungen-Dialog wird implementiert...")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Einstellungen: {e}")
+    
+    def _show_column_management(self):
+        """Zeige Spalten-Verwaltung"""
+        try:
+            logger.info("📋 Öffne Spalten-Verwaltung...")
+            
+            from column_management_dialog import show_column_management_dialog
+            
+            # Controls-Config verwenden
+            controls_config = getattr(self, 'controls_config', {})
+            
+            result = show_column_management_dialog(
+                parent=self,
+                view_guid=self.view_guid,
+                controls_config=controls_config,
+                context="table"
+            )
+            
+            if result:
+                logger.info("✅ Spalten-Konfiguration geändert")
+                self.refresh_table_direct()
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Spalten-Verwaltung: {e}")
+    
+    def _toggle_expert_mode(self):
+        """Toggle Expert Mode über Menü - LINEARE SPALTEN-PROJEKTION"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                logger.error("❌ GCS nicht verfügbar für Expert Mode Toggle")
+                return
+                
+            # Expert Mode umschalten
+            old_mode = gcs.expert_mode
+            gcs.expert_mode = not old_mode
+            logger.info(f"🎓 Expert Mode: {old_mode} → {gcs.expert_mode}")
+            
+            # Header-Label aktualisieren (zeigt/versteckt Stichtag)
+            self._update_header_label()
+            
+            # 🎯 KRITISCH: Spalten-Projektion neu anwenden
+            self.refresh_table_direct()
+            
+            # Status-Meldung
+            from PyQt5.QtWidgets import QMessageBox
+            status = "aktiviert" if gcs.expert_mode else "deaktiviert"
+            mode_info = "Alle Spalten (inkl. Original-Felder)" if gcs.expert_mode else "Nur konfigurierte Spalten"
+            QMessageBox.information(
+                self,
+                "Expert Mode",
+                f"Expert Mode wurde {status}.\n\nAnzeige: {mode_info}"
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Expert Mode Toggle: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _update_header_label(self):
+        """Aktualisiere Header-Label basierend auf Expert Mode"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                return
+                
+            # Basis-Titel
+            base_title = getattr(self, 'title', f"View: {self.view_guid}")
+            
+            # Expert Mode: Zeige Stichtag im Header
+            if gcs.expert_mode and hasattr(gcs, 'st_inst') and gcs.st_inst:
+                formatted_stichtag = getattr(gcs.st_inst, 'FormTimeStamp', str(gcs.st_inst.PdvmDateTime))
+                title_text = f"{base_title} - 🎓 Expert Mode - Stichtag: {formatted_stichtag}"
+            else:
+                title_text = base_title
+                
+            if hasattr(self, 'header_label') and self.header_label:
+                self.header_label.setText(title_text)
+                logger.info(f"🔧 Header aktualisiert: Expert Mode = {gcs.expert_mode}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Aktualisieren des Headers: {e}")
+    
+
+    
+    def _refresh_data(self):
+        """Daten neu laden"""
+        try:
+            logger.info("🔄 Aktualisiere Daten...")
+            
+            # Matrix neu erstellen
+            self._build_matrix()
+            
+            # Tabelle aktualisieren
+            self.refresh_table_direct()
+            
+            logger.info("✅ Daten aktualisiert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Daten-Refresh: {e}")
+    
+    def _export_data(self):
+        """Daten als CSV exportieren - exportiert aktuell gefilterte/sortierte Daten"""
+        try:
+            logger.info("📤 CSV-Export gestartet...")
+            
+            from PyQt5.QtWidgets import QFileDialog, QMessageBox
+            import csv
+            from datetime import datetime
+            
+            # Hole Matrix-Manager
+            if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+                QMessageBox.warning(self, "Export-Fehler", "Keine Daten zum Exportieren verfügbar")
+                return
+            
+            # Hole gefilterte/sortierte Daten aus SORT_MATRIX
+            export_data = self.matrix_manager.matrix_sort
+            if not export_data:
+                QMessageBox.warning(self, "Export-Fehler", "Keine Daten zum Exportieren (Matrix leer)")
+                return
+            
+            # Hole sichtbare Spalten
+            visible_columns = self._get_visible_columns_from_gcs()
+            if not visible_columns:
+                QMessageBox.warning(self, "Export-Fehler", "Keine sichtbaren Spalten definiert")
+                return
+            
+            # Standard-Dateiname mit Timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"export_{self.view_guid[:8]}_{timestamp}.csv"
+            
+            # Datei-Dialog öffnen
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "CSV-Export speichern",
+                default_filename,
+                "CSV Dateien (*.csv);;Alle Dateien (*.*)"
+            )
+            
+            if not file_path:
+                logger.info("ℹ️ Export vom Benutzer abgebrochen")
+                return
+            
+            # CSV schreiben
+            with open(file_path, 'w', newline='', encoding='utf-8-sig') as csvfile:  # utf-8-sig für Excel-Kompatibilität
+                writer = csv.writer(csvfile, delimiter=';')  # Semikolon für deutsche Excel-Version
+                
+                # Header schreiben (mit schönen Namen aus controls_config)
+                header_row = []
+                for col in visible_columns:
+                    control = self.controls_config.get(col, {})
+                    header_name = control.get('name', col)
+                    header_row.append(header_name)
+                writer.writerow(header_row)
+                
+                # Datenzeilen schreiben
+                for row in export_data:
+                    data_row = []
+                    for col in visible_columns:
+                        value = row.get(col, '')
+                        # Konvertiere zu String, behandle None
+                        data_row.append(str(value) if value is not None else '')
+                    writer.writerow(data_row)
+            
+            # Erfolgs-Meldung
+            row_count = len(export_data)
+            col_count = len(visible_columns)
+            QMessageBox.information(
+                self,
+                "Export erfolgreich",
+                f"✅ {row_count} Zeilen und {col_count} Spalten erfolgreich exportiert!\n\nDatei: {file_path}"
+            )
+            logger.info(f"✅ CSV-Export erfolgreich: {row_count} Zeilen → {file_path}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim CSV-Export: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Export:\n{e}")
+    
+    def _perform_global_search(self):
+        """Führe globale Suche durch"""
+        try:
+            if not hasattr(self, 'search_input'):
+                return
+                
+            search_text = self.search_input.text().strip()
+            logger.info(f"🔍 Globale Suche: '{search_text}'")
+            
+            if not search_text:
+                # Leere Suche = Filter zurücksetzen
+                self._clear_search()
+                return
+            
+            # Verwende LinearFilterExecutionManager für globale Suche
+            from linear_filter_execution_manager import get_linear_filter_manager
+            manager = get_linear_filter_manager(self.view_guid)
+            
+            if manager:
+                # Führe globale Suche durch (LINEARER EINSTIEG)
+                success = manager.execute_global_search_filter(search_text)
+                
+                if success:
+                    logger.info("✅ Globale Suche erfolgreich")
+                    self.refresh_table_direct()
+                else:
+                    logger.warning("⚠️ Globale Suche fehlgeschlagen")
+            else:
+                logger.warning("⚠️ Kein LinearFilterExecutionManager verfügbar")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei globaler Suche: {e}")
+    
+    def _clear_search(self):
+        """Lösche Suchfeld und setze Filter zurück"""
+        try:
+            if hasattr(self, 'search_input'):
+                self.search_input.clear()
+            
+            # Verwende LinearFilterExecutionManager für Filter-Reset
+            from linear_filter_execution_manager import get_linear_filter_manager
+            manager = get_linear_filter_manager(self.view_guid)
+            
+            if manager:
+                manager.reset_all_filters()
+                logger.info("🔄 Filter zurückgesetzt")
+                self.refresh_table_direct()
+            else:
+                logger.warning("⚠️ Kein LinearFilterExecutionManager für Reset verfügbar")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen der Suche: {e}")
+    
+    def _on_search_text_changed(self, text):
+        """Reagiere auf Änderungen im Suchtext"""
+        try:
+            # Live-Suche bei mehr als 2 Zeichen
+            if len(text) >= 3:
+                # Verzögerte Suche implementieren (optional)
+                pass
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Suchtext-Änderung: {e}")
+    
+    def _clear_search(self):
+        """Suche löschen und Filter zurücksetzen"""
+        try:
+            if hasattr(self, 'search_input'):
+                self.search_input.clear()
+            
+            # Filter zurücksetzen
+            from linear_filter_execution_manager import get_linear_filter_manager
+            manager = get_linear_filter_manager(self.view_guid)
+            
+            if manager:
+                manager.reset_all_filters()
+                self.refresh_table_direct()
+            
+            logger.info("🧹 Suche gelöscht und Filter zurückgesetzt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen der Suche: {e}")
+    
+    def _update_row_count_display(self, count):
+        """Aktualisiere Zeilen-Anzahl Display"""
+        try:
+            if hasattr(self, 'lbl_row_count'):
+                self.lbl_row_count.setText(f"{count} Zeilen")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Update der Zeilen-Anzeige: {e}")
+    
+    def _setup_header_click_direct(self):
+        """Header-Click DIREKT in derselben Klasse"""
+        try:
+            if hasattr(self.table, 'horizontalHeader'):
+                header = self.table.horizontalHeader()
+                # DIREKT in derselben Klasse - KEIN Weiterleitung!
+                header.sectionClicked.connect(self._on_header_clicked_direct)
+                logger.info("✅ Header-Click DIREKT in PdvmViewDialog verbunden")
+            else:
+                logger.warning("⚠️ Tabelle hat keinen Header")
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Header-Click Setup: {e}")
+    
+    def refresh_table_direct(self):
+        """Tabelle direkt aktualisieren ohne Display-Klasse"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            from PyQt5.QtWidgets import QTableWidgetItem
+            
+            logger.info("🔧 Starte direkte Tabellen-Aktualisierung...")
+            
+            # Prüfe ob Tabelle existiert
+            if not hasattr(self, 'table') or self.table is None:
+                logger.error("❌ Tabelle nicht verfügbar!")
+                return
+            
+            gcs = get_gcs()
+            
+            # Matrix-Manager für finale Daten verwenden
+            from pdvm_matrix_manager import get_matrix_manager
+            matrix_manager = get_matrix_manager(self.view_guid)
+            
+            if matrix_manager:
+                final_data = matrix_manager.get_final_data()
+                logger.info(f"📊 Matrix-Manager Daten: {len(final_data) if final_data else 0} Zeilen")
+            else:
+                # Fallback: Direkte Matrix verwenden
+                if hasattr(self, 'display_matrix') and self.display_matrix:
+                    final_data = [row for row in self.display_matrix if row.get('display', True)]
+                    logger.info(f"📊 Fallback Daten: {len(final_data)} Zeilen")
+                else:
+                    final_data = []
+                    logger.warning("⚠️ Keine Daten verfügbar!")
+            
+            if not final_data:
+                self.table.setRowCount(0)
+                self.table.setColumnCount(0)
+                if hasattr(self, 'status_label') and self.status_label:
+                    self.status_label.setText("Keine Daten")
+                logger.info("ℹ️ Tabelle geleert - keine Daten")
+                return
+            
+            # Sichtbare Spalten bestimmen
+            visible_columns = self._get_visible_columns_from_gcs()
+            
+            # FALLBACK: Wenn keine sichtbaren Spalten definiert, verwende alle verfügbaren
+            if not visible_columns and final_data:
+                visible_columns = list(final_data[0].keys())[:10]  # Erste 10 Spalten als Fallback
+                logger.warning(f"⚠️ Fallback Spalten verwendet: {len(visible_columns)} Spalten")
+            
+            if not visible_columns:
+                logger.error("❌ Keine Spalten verfügbar!")
+                return
+            
+            # Tabelle dimensionieren
+            self.table.setRowCount(len(final_data))
+            self.table.setColumnCount(len(visible_columns))
+            
+            # 🎯 SPALTEN-HEADER GENERIERUNG mit Expert Mode Support
+            headers = []
+            for col in visible_columns:
+                if hasattr(self, 'controls_config') and self.controls_config:
+                    control = self.controls_config.get(col, {})
+                    base_name = control.get('name', col)
+                    
+                    # Spalten-Typ bestimmen
+                    if control.get('control_type') == 'original':
+                        header_text = f"{base_name} (Orig.)"
+                    else:
+                        header_text = base_name
+                    
+                    # 🎓 EXPERT MODE: Technische Namen hinzufügen
+                    if gcs and gcs.expert_mode:
+                        header_text += f"\n[{col}]"
+                        
+                        # Zusätzliche technische Info für Original-Spalten
+                        if control.get('control_type') == 'original':
+                            field_name = control.get('field_name', '')
+                            group_name = control.get('group_name', '')
+                            if field_name and group_name:
+                                header_text += f"\n({group_name}.{field_name})"
+                else:
+                    # Fallback Header
+                    header_text = col
+                    if gcs and gcs.expert_mode:
+                        header_text += f"\n[{col}]"
+                
+                headers.append(header_text)
+            
+            self.table.setHorizontalHeaderLabels(headers)
+            logger.info(f"🔧 Header gesetzt: Expert Mode = {gcs.expert_mode if gcs else False}")
+            
+            # Debug: Erste 3 Header ausgeben
+            if headers:
+                sample_headers = headers[:3]
+                logger.info(f"📋 Beispiel-Header: {sample_headers}")
+            
+            # Daten einfügen
+            for row_idx, row_data in enumerate(final_data):
+                for col_idx, col_name in enumerate(visible_columns):
+                    value = row_data.get(col_name, '')
+                    # Sichere Item-Erstellung
+                    item = QTableWidgetItem(str(value) if value is not None else "")
+                    self.table.setItem(row_idx, col_idx, item)
+            
+            # Header anpassen
+            self.table.resizeColumnsToContents()
+            
+            # KRITISCH: Tabelle explizit sichtbar machen nach Datenaktualisierung
+            self.table.setVisible(True)
+            self.table.show()
+            self.table.update()
+            logger.info(f"🔧 Tabelle nach Datenaktualisierung sichtbar: {self.table.isVisible()}")
+            
+            # Status aktualisieren
+            if hasattr(self, 'status_label') and self.status_label:
+                self.status_label.setText(f"Zeilen: {len(final_data)}, Spalten: {len(visible_columns)}")
+            
+            logger.info(f"✅ Tabelle direkt aktualisiert: {len(final_data)} Zeilen, {len(visible_columns)} Spalten")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei direkter Tabellen-Aktualisierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _get_visible_columns_from_gcs(self):
+        """
+        🎯 SPALTEN-PROJEKTION: Sichtbare Spalten direkt aus GCS holen
+        
+        LINEARE ARCHITEKTUR:
+        - StandardMode: Nur 'show' Controls mit 'show'=True
+        - ExpertMode: Alle 'show' UND 'original' Controls
+        """
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                logger.warning("⚠️ GCS nicht verfügbar für Spalten-Projektion")
+                return []
+            
+            if not hasattr(self, 'controls_config') or not self.controls_config:
+                logger.warning("⚠️ Controls-Config nicht verfügbar für Spalten-Projektion")
+                return []
+            
+            # 🎓 EXPERT MODE: Zeige alle verfügbaren Spalten
+            if gcs.expert_mode:
+                visible_cols = [key for key in self.controls_config.keys() 
+                               if self.controls_config[key].get('control_type') in ['show', 'original']]
+                logger.info(f"🎓 ExpertMode Projektion: {len(visible_cols)} Spalten")
+                logger.info(f"🔧 Expert-Spalten: {visible_cols[:5]}..." if len(visible_cols) > 5 else f"🔧 Expert-Spalten: {visible_cols}")
+                return visible_cols
+            
+            # 👤 STANDARD MODE: Nur explizit sichtbare 'show' Spalten
+            visible_cols = [key for key in self.controls_config.keys() 
+                           if (self.controls_config[key].get('control_type') == 'show' and 
+                               self.controls_config[key].get('show', False))]
+            logger.info(f"� StandardMode Projektion: {len(visible_cols)} Spalten")
+            logger.info(f"🔧 Standard-Spalten: {visible_cols}")
+            return visible_cols
+        
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Spalten-Projektion: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
+    
+    def _on_header_clicked_direct(self, logical_index):
+        """
+        🎯 DIREKTE Header-Click Behandlung mit Matrix-Manager
+        
+        Args:
+            logical_index: Index der geklickten Spalte
+        """
+        try:
+            # Matrix-Manager über Factory-Funktion holen
+            from pdvm_matrix_manager import get_matrix_manager
+            matrix_manager = get_matrix_manager(self.view_guid)
+            
+            if not matrix_manager:
+                logger.warning("⚠️ Matrix-Manager nicht verfügbar für Sortierung")
+                return
+            
+            # Spalten-Name ermitteln
+            if logical_index < self.table.columnCount():
+                column_name = self.table.horizontalHeaderItem(logical_index).text()
+                
+                # Toggle Sortier-Richtung
+                current_column = getattr(self, '_current_sort_column', None)
+                current_ascending = getattr(self, '_current_sort_ascending', True)
+                
+                if current_column == column_name:
+                    # Gleiche Spalte: Richtung umkehren
+                    ascending = not current_ascending
+                else:
+                    # Neue Spalte: Aufsteigend starten
+                    ascending = True
+                
+                # Sortierung speichern
+                self._current_sort_column = column_name
+                self._current_sort_ascending = ascending
+                
+                logger.info(f"🔄 Header-Click: '{column_name}' ({'asc' if ascending else 'desc'})")
+                
+                # DIREKT an Matrix-Manager weiterleiten
+                matrix_manager.apply_sort(column_name, ascending)
+                
+                # Tabelle aktualisieren
+                self._refresh_table_from_matrix(matrix_manager)
+                
+            else:
+                logger.warning(f"⚠️ Ungültiger Spalten-Index: {logical_index}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Header-Click: {e}")
+    
+    def _refresh_table_from_matrix(self, matrix_manager=None):
+        """
+        Tabelle aus Matrix-Manager-Daten aktualisieren
+        """
+        try:
+            # Matrix-Manager verwenden (Parameter oder Factory)
+            if not matrix_manager:
+                from pdvm_matrix_manager import get_matrix_manager
+                matrix_manager = get_matrix_manager(self.view_guid)
+            
+            if not matrix_manager:
+                logger.warning("⚠️ Kein Matrix-Manager verfügbar")
+                return
+            
+            # Finale Daten aus Matrix-Manager holen
+            final_data = matrix_manager.get_final_data()
+            
+            if not final_data:
+                logger.warning("⚠️ Keine finalen Daten vom Matrix-Manager")
+                return
+            
+            # Tabelle leeren
+            self.table.setRowCount(0)
+            
+            # Neue Daten einfügen
+            self.table.setRowCount(len(final_data))
+            
+            for row_idx, row_data in enumerate(final_data):
+                for col_idx in range(self.table.columnCount()):
+                    header_item = self.table.horizontalHeaderItem(col_idx)
+                    if header_item:
+                        column_name = header_item.text()
+                        value = row_data.get(column_name, '')
+                        from PyQt5.QtWidgets import QTableWidgetItem
+                        self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
+            
+            logger.info(f"✅ Tabelle aktualisiert: {len(final_data)} Zeilen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Tabellen-Aktualisierung: {e}")
 
 
 class PdvmViewDisplay(QWidget):
@@ -1307,6 +2473,7 @@ class PdvmViewDisplay(QWidget):
         self.table = QTableWidget()
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.ExtendedSelection)  # Mehrfach-Auswahl mit Strg/Shift
         
         # Header-Schrift konfigurieren
         header_font = QFont("Segoe UI", 10, QFont.Bold)
@@ -1314,12 +2481,100 @@ class PdvmViewDisplay(QWidget):
         
         layout.addWidget(self.table)
         
-        # SORTIERUNGS-MANAGER nach Tabellen-Erstellung initialisieren
-        self._initialize_sorting_manager()
+        # SORTIERUNGS-MANAGER: Header-Click an view_dialog weiterleiten  
+        self._setup_header_click_forwarding()
         
         # Status
         self.status_label = QLabel()
         layout.addWidget(self.status_label)
+        
+    def _setup_header_click_forwarding(self):
+        """Header-Click von PdvmViewDisplay an PdvmViewDialog weiterleiten"""
+        try:
+            if hasattr(self.table, 'horizontalHeader'):
+                header = self.table.horizontalHeader()
+                # Weiterleitung an view_dialog's Methode
+                header.sectionClicked.connect(self.view_dialog._on_header_clicked_direct)
+                logger.info("✅ Header-Click von Display an Dialog weitergeleitet")
+            else:
+                logger.warning("⚠️ Tabelle hat keinen Header für Click-Weiterleitung")
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Header-Click Weiterleitung: {e}")
+    
+    def keyPressEvent(self, event):
+        """
+        Strg+C Handler - Markierte Zeilen in Zwischenablage kopieren
+        Format: Tab-separierte Spalten, Zeilen durch Newline getrennt
+        """
+        try:
+            from PyQt5.QtGui import QKeySequence
+            from PyQt5.QtWidgets import QApplication
+            
+            # Prüfe ob Strg+C gedrückt wurde
+            if event.matches(QKeySequence.Copy):
+                logger.info("📋 Strg+C gedrückt - Kopiere markierte Zeilen...")
+                
+                # Hole markierte Zeilen
+                selected_ranges = self.table.selectedRanges()
+                if not selected_ranges:
+                    logger.info("ℹ️ Keine Zeilen markiert")
+                    return
+                
+                # Sammle Daten aus allen markierten Bereichen
+                copied_data = []
+                
+                # Header-Zeile hinzufügen
+                headers = []
+                for col in range(self.table.columnCount()):
+                    header_item = self.table.horizontalHeaderItem(col)
+                    if header_item:
+                        # Entferne Zeilenumbrüche aus Header (für ExpertMode)
+                        header_text = header_item.text().replace('\n', ' ')
+                        headers.append(header_text)
+                    else:
+                        headers.append(f"Spalte_{col}")
+                copied_data.append('\t'.join(headers))
+                
+                # Sammle alle markierten Zeilen (ohne Duplikate)
+                selected_rows = set()
+                for selected_range in selected_ranges:
+                    for row in range(selected_range.topRow(), selected_range.bottomRow() + 1):
+                        selected_rows.add(row)
+                
+                # Sortiere Zeilen für konsistente Reihenfolge
+                for row in sorted(selected_rows):
+                    row_data = []
+                    for col in range(self.table.columnCount()):
+                        item = self.table.item(row, col)
+                        if item:
+                            row_data.append(item.text())
+                        else:
+                            row_data.append('')
+                    copied_data.append('\t'.join(row_data))
+                
+                # In Zwischenablage kopieren
+                clipboard_text = '\n'.join(copied_data)
+                QApplication.clipboard().setText(clipboard_text)
+                
+                logger.info(f"✅ {len(selected_rows)} Zeilen in Zwischenablage kopiert")
+                logger.info(f"📊 Daten-Vorschau (erste 200 Zeichen):\n{clipboard_text[:200]}")
+                
+                # Optional: Kurze Bestätigung im Status-Label anzeigen
+                if hasattr(self, 'status_label') and self.status_label:
+                    old_text = self.status_label.text()
+                    self.status_label.setText(f"✅ {len(selected_rows)} Zeilen kopiert")
+                    # Nach 2 Sekunden zurücksetzen
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(2000, lambda: self.status_label.setText(old_text))
+                
+                return
+        
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Kopieren: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Standard-Event-Handling fortsetzen
+        super().keyPressEvent(event)
     
     def _get_title_text(self):
         """Titel-Text mit ExpertMode-spezifischen Ergänzungen - LINEAR"""
@@ -1679,7 +2934,13 @@ class PdvmViewDisplay(QWidget):
             action_sorting.triggered.connect(self._sortierung_verwaltung)
             settings_menu.addAction(action_sorting)
 
-            # 4. ExpertMode (nur für Admins) - LINEAR
+            # 4. CSV-Export
+            settings_menu.addSeparator()
+            action_export = QAction("📤 Daten als CSV exportieren", self)
+            action_export.triggered.connect(self._export_csv)
+            settings_menu.addAction(action_export)
+
+            # 5. ExpertMode (nur für Admins) - LINEAR
             # GCS direkt verwenden
             if gcs and gcs.is_admin:
                 settings_menu.addSeparator()
@@ -1690,7 +2951,7 @@ class PdvmViewDisplay(QWidget):
                 action_expert.triggered.connect(self._toggle_expert_mode)
                 settings_menu.addAction(action_expert)
 
-            # 5. Zurücksetzen
+            # 6. Zurücksetzen
             settings_menu.addSeparator()
             action_reset = QAction("Zurücksetzen", self)
             action_reset.triggered.connect(self._reset_view)
@@ -1806,1083 +3067,21 @@ class PdvmViewDisplay(QWidget):
             logger.error(f"❌ Fehler bei Suchparameter-Verwaltung: {e}")
             QMessageBox.warning(self, "Fehler", f"Suchparameter-Verwaltung Fehler:\n{e}")
     
-    def _toggle_expert_mode(self):
-        """ExpertMode ein/aus schalten - LINEAR"""
+    def _export_csv(self):
+        """CSV-Export - Weiterleitung an view_dialog._export_data()"""
         try:
-            # GCS direkt verwenden
-            if not gcs:
-                QMessageBox.warning(self, "Fehler", "Systemsteuerung nicht verfügbar")
-                return
-
-            new_mode = not gcs.expert_mode
-            gcs.expert_mode = new_mode
-
-            # Menü neu erstellen um Text zu aktualisieren
-            self._create_settings_menu()
-
-            # Titel aktualisieren (wegen Stichtag im ExpertMode)
-            self.header_label.setText(self._get_title_text())
-
-            # Tabelle aktualisieren (wegen geänderten sichtbaren Spalten)
-            self.refresh_table()
-
-            # Filter-Panel aktualisieren (wegen geänderten projizierten Spalten)
-            if hasattr(self, 'filter_panel') and self.filter_panel:
-                self.filter_panel.refresh_column_search_fields()
-                logger.info("✅ Filter-Panel nach Moduswechsel aktualisiert")
-
-            mode_text = "aktiviert" if new_mode else "deaktiviert"
-            logger.info(f"✅ ExpertMode {mode_text}: {new_mode}")
-
+            logger.info("📤 CSV-Export aus Display-Menü gestartet...")
+            
+            # Leite an die Haupt-Export-Methode weiter
+            if hasattr(self.view_dialog, '_export_data'):
+                self.view_dialog._export_data()
+            else:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Export-Fehler", "Export-Funktion nicht verfügbar")
+                logger.error("❌ _export_data Methode nicht in view_dialog gefunden")
+                
         except Exception as e:
-            logger.error(f"❌ Fehler beim Umschalten des ExpertModus: {e}")
-            QMessageBox.warning(self, "Fehler", f"ExpertMode konnte nicht umgeschaltet werden:\n{e}")
+            logger.error(f"❌ Fehler beim CSV-Export (Display): {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Export:\n{e}")
     
-    def _initialize_sorting_manager(self):
-        """Initialisiert den Sortierungs-Manager für die Tabelle"""
-        try:
-            from pdvm_sorting_manager import PdvmSortingManager
-            from pdvm_advanced_sorting_manager import PdvmAdvancedSortingManager
-            
-            # Standard Sorting Manager erstellen
-            self.view_dialog.sorting_manager = PdvmSortingManager(self.view_dialog, gcs)
-            
-            # Erweiterten Sorting Manager erstellen
-            self.view_dialog.advanced_sorting_manager = PdvmAdvancedSortingManager()
-            
-            # Header-Click Sortierung aktivieren
-            self.view_dialog.sorting_manager.setup_table_sorting(self.table)
-            
-            logger.info("✅ Sortierungs-Manager erfolgreich initialisiert")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler bei der Sortierungs-Manager Initialisierung: {e}")
-            # Fallback: Einfache Sortierung ohne Manager
-            self.table.setSortingEnabled(True)
-    
-    def _sortierung_verwaltung(self):
-        """Sortierung & Gruppierung Dialog öffnen"""
-        try:
-            from pdvm_sorting_dialog import PdvmSortingDialog
-            
-            # Prüfe ob Sortierungs-Manager verfügbar ist
-            if not hasattr(self.view_dialog, 'sorting_manager') or not self.view_dialog.sorting_manager:
-                QMessageBox.warning(self, "Fehler", "Sortierungs-Manager nicht verfügbar")
-                return
-                
-            # Öffne Sortierungs-Dialog mit erweiterten Features
-            dialog = PdvmSortingDialog(self.view_dialog.sorting_manager, self)
-            result = dialog.exec_()
-            
-            if result == dialog.Accepted:
-                logger.info("✅ Sortierung & Gruppierung Dialog erfolgreich angewendet")
-                
-                # Tabelle aktualisieren
-                self.refresh_table()
-                
-                # Wenn Gruppierung aktiviert wurde, zeige Info
-                if hasattr(self.view_dialog, 'advanced_sorting_manager') and \
-                   self.view_dialog.advanced_sorting_manager.is_grouped_sorting_active():
-                    QMessageBox.information(self, "Sortierung", 
-                                          "Erweiterte Sortierung mit Gruppierung wurde angewendet!")
-            else:
-                logger.info("ℹ️ Sortierung & Gruppierung Dialog abgebrochen")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler bei Sortierung & Gruppierung: {e}")
-            QMessageBox.warning(self, "Fehler", f"Sortierung & Gruppierung Fehler:\n{e}")
-    
-    def _toggle_filter_panel(self):
-        """Filter-Panel ein/aus blenden"""
-        try:
-            if not hasattr(self, 'filter_panel'):
-                # Filter-Panel erstellen
-                self.filter_panel = PdvmFilterPanel(self.view_dialog, self)
-
-                # Panel in Hauptlayout integrieren
-                main_layout = self.layout()
-
-                if main_layout and isinstance(main_layout, QVBoxLayout):
-                    # Layout-Struktur neu aufbauen
-                    # 1. Header-Layout finden (bleibt oben)
-                    header_layout = None
-                    table_widget = None
-                    status_label = None
-
-                    # Widgets im aktuellen Layout identifizieren
-                    for i in range(main_layout.count()):
-                        item = main_layout.itemAt(i)
-                        if item:
-                            if item.layout():  # Header-Layout (QHBoxLayout)
-                                header_layout = item.layout()
-                            elif item.widget():
-                                widget = item.widget()
-                                if hasattr(widget, 'setAlternatingRowColors'):  # QTableWidget
-                                    table_widget = widget
-                                elif isinstance(widget, QLabel) and widget != self.header_label:
-                                    status_label = widget
-
-                    if table_widget:
-                        # Layout komplett neu strukturieren
-                        # Temporär alle Items entfernen
-                        items_to_restore = []
-                        while main_layout.count() > 0:
-                            item = main_layout.takeAt(0)
-                            if item.layout():
-                                items_to_restore.append(('layout', item.layout()))
-                            elif item.widget():
-                                items_to_restore.append(('widget', item.widget()))
-
-                        # Layout neu aufbauen
-                        # 1. Header-Layout wieder hinzufügen
-                        for item_type, item in items_to_restore:
-                            if item_type == 'layout' and item == header_layout:
-                                main_layout.addLayout(item)
-                                break
-
-                        # 2. Content-Bereich (Filter-Panel + Tabelle)
-                        content_layout = QHBoxLayout()
-
-                        # Filter-Panel links hinzufügen
-                        self.filter_panel.setMaximumWidth(350)
-                        self.filter_panel.setMinimumWidth(300)
-                        content_layout.addWidget(self.filter_panel)
-
-                        # Tabelle rechts hinzufügen (nimmt restlichen Platz)
-                        content_layout.addWidget(table_widget, 1)
-
-                        main_layout.addLayout(content_layout)
-
-                        # 3. Status-Label wieder hinzufügen
-                        for item_type, item in items_to_restore:
-                            if item_type == 'widget' and item == status_label:
-                                main_layout.addWidget(item)
-                                break
-
-                        logger.info("✅ Filter-Panel in Layout integriert - Header bleibt oben")
-
-            # Panel ein-/ausblenden
-            if self.filter_panel.isVisible():
-                self.filter_panel.hide()
-                logger.info("ℹ️ Filter-Panel ausgeblendet")
-            else:
-                self.filter_panel.show()
-                logger.info("ℹ️ Filter-Panel eingeblendet")
-
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Filter-Panel Toggle: {e}")
-            QMessageBox.warning(self, "Fehler", f"Filter-Panel Fehler:\n{e}")
-    
-    def _reset_view(self):
-        """View zurücksetzen - komplett neu initialisieren"""
-        try:
-            # Sicherheitsabfrage
-            reply = QMessageBox.question(self, "Zurücksetzen bestätigen", 
-                                       "Möchten Sie die View-Einstellungen wirklich zurücksetzen?\n\n"
-                                       "Alle benutzerdefinierten Spalten-Einstellungen gehen verloren.",
-                                       QMessageBox.Yes | QMessageBox.No,
-                                       QMessageBox.No)
-            
-            if reply != QMessageBox.Yes:
-                logger.info("ℹ️ View-Reset abgebrochen")
-                return
-            
-            logger.info(f"🔄 Starte View-Reset für {self.view_dialog.view_guid}")
-            
-            # call_daten für Reset vorbereiten - mit reset=True (eleganter Ansatz!)
-            reset_call_daten = self.view_dialog.call_daten.copy()
-            reset_call_daten['reset'] = True  # Reset-Flag setzen
-            # first_call kann False bleiben - reset überspringt Schritt 4
-            
-            # Neue PdvmViewDialog Instanz erstellen (überspringt Schritt 4: Synchronisation)
-            from pdvm_view_dialog import PdvmViewDialog
-            new_dialog = PdvmViewDialog(reset_call_daten, self.view_dialog.parent)
-            
-            # Aktuelles view_dialog mit Standard-Controls aktualisieren
-            self.view_dialog.controls_config = new_dialog.controls_config.copy()
-            self.view_dialog.display_matrix = new_dialog.display_matrix
-            
-            # Original-Matrix für Filter zurücksetzen (wichtig für korrekte Filterung)
-            if hasattr(self.view_dialog, 'original_matrix'):
-                self.view_dialog.original_matrix = self.view_dialog.display_matrix.copy()
-            
-            # Filter-Panel zurücksetzen falls vorhanden
-            if hasattr(self, 'filter_panel') and self.filter_panel:
-                self.filter_panel._reset_search_filters()
-                logger.info("✅ Filter-Panel beim View-Reset zurückgesetzt")
-            
-            # Titel aktualisieren (falls ExpertMode aktiv)
-            self.header_label.setText(self._get_title_text())
-            
-            # Tabelle komplett neu aufbauen
-            self.refresh_table()
-            
-            logger.info("✅ View erfolgreich zurückgesetzt - Standard-Controls persistent gespeichert")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim View-Reset: {e}")
-            QMessageBox.critical(self, "Fehler", f"View konnte nicht zurückgesetzt werden:\n{e}")
-    
-    def _clear_all_filters(self):
-        """PUNKT 4: Alle Filter löschen - alle Zeilen auf display=True und Gesamtsuche leeren"""
-        try:
-            logger.info("🗑️ Alle Filter werden zurückgesetzt...")
-            
-            # 1. Alle Matrix-Zeilen auf display=True setzen
-            if hasattr(self.view_dialog, 'display_matrix') and self.view_dialog.display_matrix:
-                for row in self.view_dialog.display_matrix:
-                    row['display'] = True
-                logger.info(f"✅ {len(self.view_dialog.display_matrix)} Zeilen auf sichtbar gesetzt")
-            
-            # 2. Gesamtsuche-Feld leeren (falls vorhanden)
-            if hasattr(self, 'search_field') and self.search_field:
-                self.search_field.clear()
-                logger.info("✅ Gesamtsuche-Feld geleert")
-            
-            # 3. Normales Suchfeld leeren
-            if hasattr(self, 'search_input') and self.search_input:
-                self.search_input.clear()
-                logger.info("✅ Suchfeld geleert")
-            
-            # 4. Tabelle sofort aktualisieren
-            self.refresh_table()
-            
-            # 5. Status-Update
-            visible_count = len(self.view_dialog.display_matrix) if hasattr(self.view_dialog, 'display_matrix') else 0
-            logger.info(f"✅ Alle Filter zurückgesetzt - {visible_count} Datensätze sichtbar")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Löschen aller Filter: {e}")
-    
-
-class PdvmFilterPanel(QWidget):
-    """
-    Filter-Panel für View-Dialog mit umfassender Suchfunktionalität
-
-    Features:
-    - Suchmodi: Groß-/Kleinschreibung, ganzes Wort, Wortteile
-    - Globales Suchfeld für alle searchable Spalten
-    - Spalten-spezifische Suchfelder
-    - Stellvertreterzeichen-Unterstützung
-    - Positive/negative Suche
-    - Persistente Filter-Einstellungen
-    """
-
-    def __init__(self, view_dialog, parent=None):
-        super().__init__(parent)
-        self.view_dialog = view_dialog
-        self.filter_active = False
-
-        # Filter-Einstellungen laden
-        self._load_filter_settings()
-
-        # UI erstellen
-        self._setup_ui()
-
-        logger.info("✅ Filter-Panel initialisiert")
-
-    def _setup_ui(self):
-        """Erstellt die Filter-UI"""
-        # Hauptlayout für das Panel
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Header
-        header_label = QLabel("🔍 Filter & Suche")
-        header_font = QFont("Segoe UI", 11, QFont.Bold)
-        header_label.setFont(header_font)
-        main_layout.addWidget(header_label)
-        
-        # Scroll-Bereich für den Filter-Inhalt
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setMinimumWidth(280)
-        scroll_area.setMaximumWidth(340)
-        
-        # Container-Widget für den scrollbaren Inhalt
-        scroll_widget = QWidget()
-        content_layout = QVBoxLayout(scroll_widget)
-        content_layout.setSpacing(8)
-        content_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Suchmodi-Gruppe
-        search_modes_group = QGroupBox("Suchmodi")
-        search_modes_layout = QVBoxLayout(search_modes_group)
-        
-        # Groß-/Kleinschreibung
-        self.case_sensitive_radio = QRadioButton("Groß-/Kleinschreibung beachten")
-        self.case_insensitive_radio = QRadioButton("Groß-/Kleinschreibung ignorieren")
-        self.case_insensitive_radio.setChecked(True)  # Standard
-        
-        case_group = QButtonGroup(self)
-        case_group.addButton(self.case_sensitive_radio)
-        case_group.addButton(self.case_insensitive_radio)
-        
-        search_modes_layout.addWidget(self.case_sensitive_radio)
-        search_modes_layout.addWidget(self.case_insensitive_radio)
-        
-        # Wort-Modi
-        self.whole_word_radio = QRadioButton("Ganzes Wort")
-        self.word_parts_radio = QRadioButton("Wortteile")
-        self.word_parts_radio.setChecked(True)  # Standard
-        
-        word_group = QButtonGroup(self)
-        word_group.addButton(self.whole_word_radio)
-        word_group.addButton(self.word_parts_radio)
-        
-        search_modes_layout.addWidget(self.whole_word_radio)
-        search_modes_layout.addWidget(self.word_parts_radio)
-        
-        content_layout.addWidget(search_modes_group)
-        
-        # Globales Suchfeld
-        global_search_group = QGroupBox("Globale Suche")
-        global_search_layout = QVBoxLayout(global_search_group)
-        
-        self.global_search_edit = QLineEdit()
-        self.global_search_edit.setPlaceholderText("Suche in allen Spalten...")
-        self.global_search_edit.textChanged.connect(self._on_global_search_changed)
-        
-        # Positive/Negative Toggle
-        global_controls_layout = QHBoxLayout()
-        self.global_negative_checkbox = QCheckBox("Negativ")
-        self.global_negative_checkbox.setToolTip("Negative Suche: Zeilen ausschließen die den Suchtext enthalten")
-        
-        global_controls_layout.addWidget(self.global_negative_checkbox)
-        global_controls_layout.addStretch()
-        
-        global_search_layout.addWidget(self.global_search_edit)
-        global_search_layout.addLayout(global_controls_layout)
-        
-        content_layout.addWidget(global_search_group)
-        
-        # Spalten-spezifische Suchfelder
-        self._create_column_search_fields(content_layout)
-        
-        # Original-Matrix für Filterung initialisieren
-        if hasattr(self.view_dialog, 'display_matrix') and self.view_dialog.display_matrix:
-            self.view_dialog.original_matrix = self.view_dialog.display_matrix.copy()
-            logger.info("💾 Original-Matrix für Filterung initialisiert")
-        
-        # Buttons
-        buttons_layout = QHBoxLayout()
-        
-        self.apply_button = QPushButton("✅ Anwenden")
-        self.apply_button.clicked.connect(self._apply_filters)
-        
-        self.cancel_button = QPushButton("❌ Abbrechen")
-        self.cancel_button.clicked.connect(self._cancel_filters)
-        
-        self.reset_button = QPushButton("🔄 Zurücksetzen")
-        self.reset_button.clicked.connect(self._reset_filters)
-        
-        buttons_layout.addWidget(self.apply_button)
-        buttons_layout.addWidget(self.cancel_button)
-        buttons_layout.addWidget(self.reset_button)
-        
-        content_layout.addLayout(buttons_layout)
-        
-        # Stretch am Ende für besseres Layout
-        content_layout.addStretch()
-        
-        # Scroll-Bereich konfigurieren
-        scroll_area.setWidget(scroll_widget)
-        main_layout.addWidget(scroll_area)
-        
-        # SUCHFELDER NACH ERSTELLUNG AKTUALISIEREN (wichtig für korrekte Anzeige)
-        self.refresh_column_search_fields()
-        logger.info("✅ Suchfelder nach UI-Erstellung aktualisiert")
-    
-    def refresh_column_search_fields(self):
-        """Aktualisiert die Suchfelder für Spalten - wird aufgerufen wenn sich Spalten ändern"""
-        try:
-            logger.info("🔄 Aktualisiere Suchfelder für Spalten...")
-            
-            # SCHRITT 1: Basis-Columns des View-Dialogs aktualisieren
-            if hasattr(self.view_dialog, '_get_columns_from_controls'):
-                old_basis_columns = getattr(self.view_dialog, 'basis_columns', [])
-                self.view_dialog.basis_columns = self.view_dialog._get_columns_from_controls()
-                
-                # Prüfe ob sich die Basis-Columns geändert haben
-                if len(old_basis_columns) != len(self.view_dialog.basis_columns):
-                    logger.info(f"✅ Basis-Columns des View-Dialogs aktualisiert: {len(old_basis_columns)} → {len(self.view_dialog.basis_columns)} Spalten")
-                elif old_basis_columns != self.view_dialog.basis_columns:
-                    logger.info(f"✅ Basis-Columns des View-Dialogs geändert")
-            
-            # SCHRITT 2: Original-Matrix aktualisieren (für korrekte Filterung nach Spalten-Änderungen)
-            if hasattr(self.view_dialog, 'display_matrix') and self.view_dialog.display_matrix:
-                self.view_dialog.original_matrix = self.view_dialog.display_matrix.copy()
-                logger.info("✅ Original-Matrix für Filterung aktualisiert")
-            
-            # Finde den Spalten-Suchbereich im Layout
-            scroll_widget = None
-            content_layout = None
-            column_search_group = None
-            
-            # Durchsuche das Layout nach dem Spalten-Suchbereich
-            if hasattr(self, 'layout') and self.layout():
-                main_layout = self.layout()
-                if isinstance(main_layout, QVBoxLayout):
-                    # Finde den Scroll-Bereich
-                    for i in range(main_layout.count()):
-                        item = main_layout.itemAt(i)
-                        if item and item.widget() and isinstance(item.widget(), QScrollArea):
-                            scroll_widget = item.widget()
-                            break
-            
-            if scroll_widget and scroll_widget.widget():
-                content_widget = scroll_widget.widget()
-                if hasattr(content_widget, 'layout') and content_widget.layout():
-                    content_layout = content_widget.layout()
-                    
-                    # Finde den Spalten-Suchbereich
-                    for i in range(content_layout.count()):
-                        item = content_layout.itemAt(i)
-                        if item and item.layout():
-                            layout = item.layout()
-                            # Prüfe ob es der Spalten-Suchbereich ist
-                            for j in range(layout.count()):
-                                sub_item = layout.itemAt(j)
-                                if sub_item and sub_item.widget():
-                                    widget = sub_item.widget()
-                                    if isinstance(widget, QGroupBox) and "Spalten-spezifische Suche" in widget.title():
-                                        column_search_group = widget
-                                        break
-                            if column_search_group:
-                                break
-            
-            if column_search_group and hasattr(column_search_group, 'layout'):
-                column_layout = column_search_group.layout()
-                
-                # Entferne alle alten Suchfelder
-                while column_layout.count() > 0:
-                    item = column_layout.takeAt(0)
-                    if item.widget():
-                        item.widget().deleteLater()
-                    elif item.layout():
-                        # Rekursiv Layouts entfernen
-                        sub_layout = item.layout()
-                        while sub_layout.count() > 0:
-                            sub_item = sub_layout.takeAt(0)
-                            if sub_item.widget():
-                                sub_item.widget().deleteLater()
-                
-                # Leere das Suchfelder-Dictionary
-                self.column_search_fields.clear()
-                
-                # Erstelle neue Suchfelder
-                self._create_column_search_fields(column_layout.parent())
-                
-                logger.info("✅ Suchfelder für Spalten aktualisiert")
-                
-                # Erzwinge Layout-Update
-                self.update()
-                if scroll_widget:
-                    scroll_widget.update()
-                    
-            else:
-                logger.warning("⚠️ Konnte Spalten-Suchbereich nicht finden für Aktualisierung")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Aktualisieren der Suchfelder: {e}")
-
-    def _create_column_search_fields(self, parent_layout):
-        """Erstellt Suchfelder für jede searchable Spalte - 1:1 wie in der Tabelle projiziert"""
-        column_search_group = QGroupBox("Spalten-spezifische Suche")
-        column_search_layout = QVBoxLayout(column_search_group)
-
-        self.column_search_fields = {}
-
-        # Spalten 1:1 aus der aktuellen Tabellen-Projektion ermitteln
-        table_columns = self._get_table_projection_columns()
-
-        # Alle Spalten aus der Tabellen-Projektion verwenden
-        all_columns = []
-        for field_name in table_columns:
-            field_config = self.view_dialog.controls_config.get(field_name, {})
-            display_name = field_config.get('name', field_name)
-            # Eine Spalte ist suchbar, wenn sie das searchable Attribut hat
-            # Ganz linear: searchable = true → suchbar, egal ob _show oder _original
-            is_searchable = field_config.get('searchable', False)
-            all_columns.append((field_name, display_name, is_searchable))
-
-        if not all_columns:
-            no_search_label = QLabel("Keine Spalten verfügbar")
-            no_search_label.setStyleSheet("color: #666; font-style: italic;")
-            column_search_layout.addWidget(no_search_label)
-        else:
-            for field_name, display_name, is_searchable in all_columns:
-                # Container für jedes Suchfeld
-                field_layout = QHBoxLayout()
-
-                # Label
-                label = QLabel(f"{display_name}:")
-                label.setMinimumWidth(100)
-                if not is_searchable:
-                    label.setStyleSheet("color: #999;")  # Ausgrauen für nicht-suchebare Spalten
-                field_layout.addWidget(label)
-
-                # Suchfeld
-                search_edit = QLineEdit()
-                search_edit.setPlaceholderText(f"Suche in {display_name}...")
-                if not is_searchable:
-                    search_edit.setEnabled(False)  # Deaktivieren für nicht-suchebare Spalten
-                    search_edit.setStyleSheet("color: #999; background-color: #f5f5f5;")  # Ausgrauen
-                else:
-                    search_edit.textChanged.connect(lambda text, fn=field_name: self._on_column_search_changed(fn, text))
-                field_layout.addWidget(search_edit)
-
-                # Negative Checkbox
-                negative_checkbox = QCheckBox("Neg.")
-                negative_checkbox.setToolTip("Negative Suche für diese Spalte")
-                if not is_searchable:
-                    negative_checkbox.setEnabled(False)  # Deaktivieren für nicht-suchebare Spalten
-                field_layout.addWidget(negative_checkbox)
-
-                column_search_layout.addLayout(field_layout)
-                self.column_search_fields[field_name] = {
-                    'edit': search_edit,
-                    'negative': negative_checkbox
-                }
-
-        parent_layout.addWidget(column_search_group)
-
-    def _get_table_projection_columns(self):
-        """SUCH-PANEL-PROJEKTION DIREKT AUS GCS (NEUE EINFACHE ARCHITEKTUR)"""
-        try:
-            # View-GUID für Projektion
-            view_guid = getattr(self.view_dialog, 'view_guid', None)
-            if not view_guid:
-                logger.error("❌ Keine View-GUID verfügbar für Such-Panel")
-                return []
-
-            # GCS direkt verwenden für Such-Panel
-            if not gcs:
-                logger.error("❌ GCS nicht verfügbar")
-                return []
-                
-            # DIREKTE PROJEKTION aus GCS für Such-Panel - Live-Berechnung aus Controls
-            # STATISCHE PROJEKTION für Search je nach Expert Mode
-            if gcs.expert_mode:
-                projection = gcs.get_projection_table(view_guid, 'search_expert')
-            else:
-                projection = gcs.get_projection_table(view_guid, 'search_standard')
-            if projection:
-                mode_info = "Expert" if gcs.expert_mode else "Standard"
-                logger.debug(f"✅ Such-Projektion ({mode_info}) live berechnet: {len(projection)} Spalten")
-                return projection
-            else:
-                logger.warning(f"⚠️ Keine Such-Projektion verfügbar für View {view_guid}")
-                return []
-
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Laden der Such-Projektion aus GCS: {e}")
-            return []
-
-    def _load_filter_settings(self):
-        """Lädt persistente Filter-Einstellungen"""
-        try:
-            # GCS direkt verwenden
-            if gcs:
-                # Filter-Einstellungen aus GCS laden
-                filter_settings = gcs.db.get_static_value(self.view_dialog.view_guid, 'searchparameter')
-                if filter_settings:
-                    self.filter_settings = filter_settings
-                    logger.info("✅ Filter-Einstellungen geladen")
-                else:
-                    self.filter_settings = self._get_default_settings()
-                    logger.info("ℹ️ Standard-Filter-Einstellungen verwendet")
-            else:
-                self.filter_settings = self._get_default_settings()
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Laden der Filter-Einstellungen: {e}")
-            self.filter_settings = self._get_default_settings()
-
-    def _get_default_settings(self):
-        """Gibt Standard-Filter-Einstellungen zurück"""
-        return {
-            'case_sensitive': False,
-            'whole_word': False,
-            'global_search': '',
-            'global_negative': False,
-            'column_searches': {}
-        }
-
-    def _save_filter_settings(self):
-        """Speichert Filter-Einstellungen persistent"""
-        try:
-            # GCS direkt verwenden
-            if gcs:
-                # Aktuelle Einstellungen sammeln
-                settings = {
-                    'case_sensitive': self.case_sensitive_radio.isChecked(),
-                    'whole_word': self.whole_word_radio.isChecked(),
-                    'global_search': self.global_search_edit.text(),
-                    'global_negative': self.global_negative_checkbox.isChecked(),
-                    'column_searches': {}
-                }
-
-                # Spalten-spezifische Suchen
-                for field_name, field_data in self.column_search_fields.items():
-                    settings['column_searches'][field_name] = {
-                        'text': field_data['edit'].text(),
-                        'negative': field_data['negative'].isChecked()
-                    }
-
-                # In GCS speichern
-                gcs.db.set_value(self.view_dialog.view_guid, 'searchparameter', settings)
-                gcs.db.save_all_values()
-
-                logger.info("💾 Filter-Einstellungen gespeichert")
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern der Filter-Einstellungen: {e}")
-
-    def _on_global_search_changed(self, text):
-        """Handler für globale Suchfeld-Änderungen - LINEARES FILTER-SYSTEM"""
-        if hasattr(self, 'view_dialog') and self.view_dialog:
-            self.view_dialog.apply_filter_string(text)
-            logger.info(f"🔍 Globale Suche angewendet: '{text}'")
-
-    def _on_column_search_changed(self, field_name, text):
-        """Handler für Spalten-spezifische Suchfeld-Änderungen"""
-        # Automatische Filter-Anwendung (optional)
-        pass
-
-    def _apply_filters(self):
-        """Filter anwenden"""
-        try:
-            # Filter-Einstellungen sammeln
-            filter_config = {
-                'case_sensitive': self.case_sensitive_radio.isChecked(),
-                'whole_word': self.whole_word_radio.isChecked(),
-                'global_search': self.global_search_edit.text().strip(),
-                'global_negative': self.global_negative_checkbox.isChecked(),
-                'column_filters': {}
-            }
-
-            # Spalten-spezifische Filter
-            for field_name, field_data in self.column_search_fields.items():
-                search_text = field_data['edit'].text().strip()
-                if search_text:
-                    filter_config['column_filters'][field_name] = {
-                        'text': search_text,
-                        'negative': field_data['negative'].isChecked()
-                    }
-
-            # Filter anwenden (hier würde die eigentliche Filter-Logik implementiert)
-            self._apply_search_filters(filter_config)
-
-            # Einstellungen speichern
-            self._save_filter_settings()
-
-            # Filter als aktiv markieren
-            self.filter_active = True
-
-            logger.info("✅ Filter angewendet")
-
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Anwenden der Filter: {e}")
-            QMessageBox.warning(self, "Filter-Fehler", f"Filter konnten nicht angewendet werden:\n{e}")
-
-    def _cancel_filters(self):
-        """Filter abbrechen - Panel ausblenden"""
-        # Panel ausblenden
-        self.hide()
-        logger.info("ℹ️ Filter-Panel ausgeblendet")
-
-    def _reset_filters(self):
-        """Filter zurücksetzen"""
-        try:
-            # Sicherheitsabfrage
-            reply = QMessageBox.question(self, "Filter zurücksetzen",
-                                       "Möchten Sie alle Filter zurücksetzen?",
-                                       QMessageBox.Yes | QMessageBox.No,
-                                       QMessageBox.No)
-
-            if reply != QMessageBox.Yes:
-                return
-
-            # Alle Felder zurücksetzen
-            self.case_insensitive_radio.setChecked(True)
-            self.word_parts_radio.setChecked(True)
-            self.global_search_edit.clear()
-            self.global_negative_checkbox.setChecked(False)
-
-            for field_data in self.column_search_fields.values():
-                field_data['edit'].clear()
-                field_data['negative'].setChecked(False)
-
-            # Filter zurücksetzen (hier würde die eigentliche Reset-Logik implementiert)
-            self._reset_search_filters()
-
-            # Einstellungen speichern
-            self._save_filter_settings()
-
-            # Filter als inaktiv markieren
-            self.filter_active = False
-
-            logger.info("🔄 Filter zurückgesetzt")
-
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Zurücksetzen der Filter: {e}")
-
-    def _apply_search_filters(self, filter_config):
-        """Wendet die Suchfilter auf die Daten an"""
-        # Hier würde die eigentliche Filter-Logik implementiert werden
-        # Für jetzt: Einfache Implementierung mit Wildcard-Support
-
-        # Original-Matrix initialisieren/sichern, falls noch nicht geschehen
-        if not hasattr(self.view_dialog, 'original_matrix') or not self.view_dialog.original_matrix:
-            self.view_dialog.original_matrix = self.view_dialog.display_matrix.copy()
-            logger.info("💾 Original-Matrix für Filterung gesichert")
-
-        original_matrix = self.view_dialog.original_matrix
-    def _apply_search_filters(self, filter_config):
-        """
-        NEUE LINEARE FILTERUNG: Einheitlicher Filterstring-Ansatz
-        """
-        try:
-            # Hole Filterstring vom SearchParameterDialog
-            filter_string = ""
-            if hasattr(self, 'search_dialog') and hasattr(self.search_dialog, 'result_filter_string'):
-                filter_string = self.search_dialog.result_filter_string
-            
-            logger.info(f"🎯 Anwenden einheitlicher Filterstring: '{filter_string}'")
-            
-            # ✅ KORRIGIERT: Verwende das view_dialog linear filter system
-            if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                success = self.view_dialog.linear_filter.apply_filter_unified(filter_string)
-                if success:
-                    logger.info("✅ SearchParameter Filter erfolgreich über lineares System angewendet")
-                else:
-                    logger.error("❌ SearchParameter Filter über lineares System fehlgeschlagen")
-            else:
-                logger.error("❌ Kein linear_filter in view_dialog verfügbar")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler bei einheitlicher Filterung: {e}")
-
-    def apply_filter_string(self, filter_string: str):
-        """🎯 NEUE UNIFIED LINEAR FILTER-METHODE für Filter-Panel
-        
-        Args:
-            filter_string (str): Filterstring für alle Filter-Arten
-        """
-        try:
-            logger.info("🎯 === PDVM FILTER PANEL - UNIFIED LINEAR FILTER ===")
-            
-            # Filter-Integration über view_dialog holen
-            if (hasattr(self.view_dialog, 'linear_filter') and 
-                self.view_dialog.linear_filter):
-                
-                # EINHEITLICHE LINEARE FILTER-ANWENDUNG über Dialog
-                success = self.view_dialog.linear_filter.apply_filter_unified(filter_string)
-                
-                if success:
-                    logger.info("✅ Filter-Panel unified linear Filter erfolgreich")
-                else:
-                    logger.error("❌ Filter-Panel unified linear Filter fehlgeschlagen")
-            else:
-                logger.error("❌ Kein Linear Filter über view_dialog verfügbar")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler in Filter-Panel unified linear Filter: {e}")
-            return
-            
-            logger.info(f"🔍 Anwenden Filterstring: {filter_string}")
-            
-            # Parse Filterstring
-            filter_parts = filter_string.split("||")
-            visible_count = 0
-            total_count = self.table.rowCount()
-            
-            # Durch alle Tabellenzeilen iterieren
-            for row_index in range(total_count):
-                row_matches = self._row_matches_filter_string(row_index, filter_parts)
-                
-                # Zeile anzeigen/verstecken
-                self.table.setRowHidden(row_index, not row_matches)
-                if row_matches:
-                    visible_count += 1
-            
-            # Status-Update
-            if hasattr(self, 'search_status'):
-                if visible_count == 0:
-                    self.search_status.setText(f"⚠️ Keine Treffer für Filter")
-                    self.search_status.setStyleSheet("QLabel { color: #d32f2f; }")
-                else:
-                    self.search_status.setText(f"🔍 {visible_count} von {total_count} Zeilen (gefiltert)")
-                    self.search_status.setStyleSheet("QLabel { color: #388e3c; }")
-            
-            logger.info(f"✅ Filter angewendet: {visible_count} von {total_count} Zeilen sichtbar")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Anwenden des Filterstrings: {e}")
-            # Verwende das neue lineare System über view_dialog
-            if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                self.view_dialog.linear_filter.clear_all_filters()
-
-    def _row_matches_filter_string(self, row_index, filter_parts):
-        """
-        Prüft ob eine Tabellenzeile dem Filterstring entspricht
-        
-        Args:
-            row_index (int): Index der Tabellenzeile
-            filter_parts (list): Liste der Filter-Teile
-            
-        Returns:
-            bool: True wenn Zeile den Filtern entspricht
-        """
-        try:
-            # Alle Filter müssen erfüllt sein (AND-Verknüpfung)
-            for filter_part in filter_parts:
-                if not self._row_matches_single_filter(row_index, filter_part):
-                    return False
-            
-            return True  # Alle Filter erfüllt
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Prüfen der Zeile {row_index}: {e}")
-            return False
-
-    def _row_matches_single_filter(self, row_index, filter_part):
-        """
-        Prüft ob eine Zeile einem einzelnen Filter entspricht
-        
-        Args:
-            row_index (int): Index der Tabellenzeile
-            filter_part (str): Einzelner Filter im Format "feld:wert" oder "EXTENDED:feld:bedingungen"
-            
-        Returns:
-            bool: True wenn Zeile dem Filter entspricht
-        """
-        try:
-            if ":" not in filter_part:
-                return True  # Ungültiger Filter - ignorieren
-            
-            if filter_part.startswith("EXTENDED:"):
-                # Erweiterte Filter
-                return self._row_matches_extended_filter(row_index, filter_part)
-            else:
-                # Einfache Filter
-                return self._row_matches_simple_filter(row_index, filter_part)
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Prüfen einzelner Filter: {e}")
-            return False
-
-    def _row_matches_simple_filter(self, row_index, filter_part):
-        """Prüft einfachen Filter: 'feldname:wert'"""
-        try:
-            field_name, search_value = filter_part.split(":", 1)
-            
-            # Finde passende Spalte
-            column_index = self._get_column_index_for_field(field_name)
-            if column_index is None:
-                logger.warning(f"⚠️ Spalte für Feld '{field_name}' nicht gefunden")
-                return True  # Unbekannte Felder ignorieren
-            
-            # Zellwert holen
-            item = self.table.item(row_index, column_index)
-            cell_value = item.text() if item else ""
-            
-            # Einfache Contains-Suche (case-insensitive)
-            return search_value.lower() in cell_value.lower()
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler bei einfachem Filter: {e}")
-            return False
-
-    def _row_matches_extended_filter(self, row_index, filter_part):
-        """Prüft erweiterten Filter: 'EXTENDED:feldname:bedingungen'"""
-        try:
-            # Für jetzt: Erweiterte Filter über bestehende Engine
-            from extended_filter_engine import extended_filter_engine
-            
-            # Zeilen-Daten extrahieren
-            from extended_filter_engine import extended_filter_engine
-            row_data = extended_filter_engine._extract_row_data_from_table(self.table, row_index)
-            if row_data is None:
-                return False
-            
-            # Erweiterte Bedingungen prüfen
-            return extended_filter_engine._row_matches_extended_conditions(row_data, {})
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler bei erweitertem Filter: {e}")
-            return False
-
-    def _apply_normal_search_filters(self, filter_config):
-        """
-        Normale Filterlogik für Suchfelder (ohne Extended Filter)
-        """
-        try:
-            logger.info("🔍 Anwenden normale Such-Filter...")
-            
-            # Sammle alle aktiven normalen Suchfilter
-            active_filters = {}
-            for field_key, widget_data in self.search_dialog.filter_widgets.items():
-                widget = widget_data.get('widget')
-                if widget and widget.text().strip():
-                    active_filters[field_key] = {
-                        'text': widget.text().strip(),
-                        'negative': False  # Normale Suche ist nicht negativ
-                    }
-            
-            if not active_filters:
-                # Verwende das neue lineare System über view_dialog
-                if hasattr(self.view_dialog, 'linear_filter') and self.view_dialog.linear_filter:
-                    self.view_dialog.linear_filter.clear_all_filters()
-                return
-            
-            logger.info(f"🔍 Aktive normale Filter: {list(active_filters.keys())}")
-            
-            # Alle Zeilen durchgehen und filtern
-            visible_count = 0
-            total_rows = self.table.rowCount()
-            
-            for row_index in range(total_rows):
-                # Zeile ist sichtbar wenn alle Filter zutreffen
-                row_matches = True
-                
-                for field_key, filter_data in active_filters.items():
-                    # Zellwert aus Tabelle extrahieren
-                    column_index = self._get_column_index_for_field(field_key)
-                    if column_index is None:
-                        continue
-                        
-                    item = self.table.item(row_index, column_index)
-                    cell_value = item.text() if item else ""
-                    
-                    search_text = filter_data['text']
-                    
-                    # Einfache Contains-Suche (case-insensitive)
-                    if not search_text.lower() in cell_value.lower():
-                        row_matches = False
-                        break
-                
-                # Zeile anzeigen/verstecken
-                self.table.setRowHidden(row_index, not row_matches)
-                if row_matches:
-                    visible_count += 1
-            
-            logger.info(f"✅ Normale Filterung: {visible_count}/{total_rows} Zeilen sichtbar")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler bei normaler Filterung: {e}")
-            self._show_all_rows()
-    
-    def _get_column_index_for_field(self, field_key):
-        """Findet Column-Index für Feld-Schlüssel"""
-        try:
-            # Vereinfachte Logik: Feld-Namen matchen
-            for col in range(self.table.columnCount()):
-                header = self.table.horizontalHeaderItem(col)
-                if header and header.text().lower().replace(" ", "_") == field_key:
-                    return col
-            return None
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Finden Column-Index für '{field_key}': {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"⚠️ Fehler bei linearem Filter-System: {e} - alle Zeilen anzeigen")
-            self._show_all_rows()
-
-    def _check_global_search(self, row, filter_config):
-        """Prüft globale Suche für eine Zeile"""
-        search_text = filter_config['global_search']
-        case_sensitive = filter_config['case_sensitive']
-        whole_word = filter_config['whole_word']
-
-        # Alle searchable Spalten durchsuchen
-        for field_name in self.column_search_fields.keys():
-            if field_name in row:
-                cell_value = str(row[field_name])
-                if self._matches_search(cell_value, search_text, case_sensitive, whole_word):
-                    return True
-
-        return False
-
-    def _check_column_search(self, row, field_name, column_filter, filter_config):
-        """Prüft Spalten-spezifische Suche"""
-        if field_name not in row:
-            return not column_filter['negative']  # Wenn Feld nicht vorhanden, bei negativer Suche True
-
-        cell_value = str(row[field_name])
-        search_text = column_filter['text']
-        negative = column_filter['negative']
-        case_sensitive = filter_config['case_sensitive']
-        whole_word = filter_config['whole_word']
-
-        matches = self._matches_search(cell_value, search_text, case_sensitive, whole_word)
-
-        return matches if not negative else not matches
-
-    def _matches_search(self, text, search_pattern, case_sensitive, whole_word):
-        """Prüft ob Text dem Suchmuster entspricht"""
-        if not text or not search_pattern:
-            return False
-
-        # Groß-/Kleinschreibung
-        if not case_sensitive:
-            text = text.lower()
-            search_pattern = search_pattern.lower()
-
-        # Wildcard-Support
-        search_pattern = self._convert_wildcards(search_pattern)
-
-        import re
-
-        if whole_word:
-            # Ganzes Wort
-            pattern = r'\b' + re.escape(search_pattern) + r'\b'
-        else:
-            # Wortteile
-            pattern = search_pattern
-
-        try:
-            return bool(re.search(pattern, text, re.IGNORECASE if not case_sensitive else 0))
-        except re.error:
-            # Fallback bei Regex-Fehlern
-            return search_pattern in text
-
-    def _convert_wildcards(self, pattern):
-        """Konvertiert Wildcard-Symbole zu Regex"""
-        # % → .*
-        # ? → .
-        # Escape special regex chars
-        pattern = re.escape(pattern)
-        pattern = pattern.replace(r'\%', '.*')  # % für beliebig viele Zeichen
-        pattern = pattern.replace(r'\?', '.')   # ? für ein Zeichen
-        return pattern
-
-    def _reset_search_filters(self):
-        """Setzt alle Suchfilter zurück"""
-        # Original-Matrix wiederherstellen
-        if hasattr(self.view_dialog, 'original_matrix'):
-            self.view_dialog.display_matrix = self.view_dialog.original_matrix.copy()
-        else:
-            # Fallback: Matrix neu erstellen
-            self.view_dialog._create_display_matrix()
-
-        # UI-Elemente zurücksetzen
-        self.case_insensitive_radio.setChecked(True)
-        self.word_parts_radio.setChecked(True)
-        self.global_search_edit.clear()
-        self.global_negative_checkbox.setChecked(False)
-        
-        # Spalten-spezifische Suchfelder zurücksetzen
-        for field_data in self.column_search_fields.values():
-            field_data['edit'].clear()
-            field_data['negative'].setChecked(False)
-
-        # Tabelle aktualisieren
-        if hasattr(self.view_dialog, 'refresh_table'):
-            self.view_dialog.refresh_table()
-
-        # Filter als inaktiv markieren
-        self.filter_active = False
-
-        logger.info("🔄 Suchfilter zurückgesetzt")

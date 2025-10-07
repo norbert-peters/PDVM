@@ -1119,422 +1119,267 @@ class MainAppComplete(QMainWindow):
 
     def test_sortier_projektionen_diagnose(self):
         """
-        🔧 INTEGRIERTE DIAGNOSE: Systematische Analyse der Sortierungs-Projektionen
+        🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST
         
-        Diese Testmethode kann direkt aus der laufenden Anwendung über einen Menüpunkt aufgerufen werden,
-        da GCS hier bereits vollständig initialisiert ist.
+        Direkt im laufenden System - testet die 3 Debug-Matrizen:
+        1. BASIS_MATRIX (beim Start/Stichtag)
+        2. FILTERED_MATRIX (beim Filter) 
+        3. SORTED_MATRIX (beim Sort)
         
-        Analysiert die drei kritischen Fragen:
-        1. Wird die Projektionstabelle korrekt erstellt?
-        2. Kommt die richtige Projektionstabelle im SortierDialog an?
-        3. Wenn bis hier alles richtig, warum werden diese nicht angezeigt?
+        Aufruf über Menü im System - zeigt Live-Debug der Matrix-Pipeline
         """
-        logger.info("🔧 INTEGRIERTE DIAGNOSE: Starte Sortierungs-Projektionen Test...")
+        logger.info("🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST gestartet...")
         
         try:
-            # Testdaten - verwende GÜLTIGE View-GUID
-            test_view_guid = "0d10a0d0-b1a5-4544-b284-e8a09ca979b5"  # Gültige View mit Controls
-            projection_type = "sort_standard"
-            
-            logger.info(f"🔧 DEBUG: Starte Test mit View-GUID: {test_view_guid}")
-            
             self.clear_content_layout()
             
-            # Ergebnis-Sammlung für Anzeige
             ergebnisse = [
-                "🔧 DIAGNOSE: Sortierungs-Projektionen Analyse",
+                "🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST",
                 "=" * 50,
                 "",
-                f"Test-Parameter:",
-                f"  • View-GUID: {test_view_guid}",
-                f"  • Projection-Type: {projection_type}",
-                f"  • User-GUID: {gcs.user_guid}",
+                "Teste die 3 Matrix-Debug-Ausgaben direkt im System:",
+                "• BASIS_MATRIX → beim Start/Stichtag",
+                "• FILTERED_MATRIX → beim Filter", 
+                "• SORTED_MATRIX → beim Sort",
                 "",
-                "FRAGE 1: Wird die Projektionstabelle korrekt erstellt?",
+                "SCHRITT 1: Clean Matrix-Manager erstellen",
                 "-" * 50
             ]
             
-            # FRAGE 1: Projektionstabelle-Erstellung prüfen
-            logger.info("🔧 DEBUG: Starte FRAGE 1 - Projektionstabelle-Erstellung")
+            # SCHRITT 1: Clean Matrix-Manager erstellen
             try:
-                # ✅ KORRIGIERT: Verwende die richtige GCS-Methode
-                columns = gcs.get_projection_table(test_view_guid, projection_type)
-                logger.info(f"🔧 DEBUG: Columns erhalten: {type(columns)}, Länge: {len(columns) if columns else 'None'}")
+                from clean_matrix_manager import get_clean_matrix_manager, reset_matrix_managers
                 
-                if columns and len(columns) > 0:
-                    ergebnisse.extend([
-                        f"✅ ERFOLG: Projektionstabelle wurde erstellt",
-                        f"   Anzahl Spalten: {len(columns)}",
-                        f"   Erste 3 Spalten: {columns[:3] if isinstance(columns, list) else 'Nicht-List-Format'}",
-                        f"   Datentyp: {type(columns)}",
-                        ""
-                    ])
-                    
-                    # Detailanalyse der Spalten-Struktur
-                    if isinstance(columns, list):
-                        ergebnisse.append("   Spalten-Details:")
-                        for i, key in enumerate(columns[:5]):  # Erste 5 Spalten
-                            ergebnisse.append(f"   [{i+1}] {key}")
-                    else:
-                        ergebnisse.append(f"   ⚠️ Unerwarteter Datentyp: {type(columns)}")
-                        ergebnisse.append(f"   Inhalt: {str(columns)[:200]}...")
-                        
-                else:
-                    ergebnisse.extend([
-                        f"❌ FEHLER: Projektionstabelle ist leer oder None",
-                        f"   Rückgabe: {columns}",
-                        f"   Typ: {type(columns)}",
-                        ""
-                    ])
-                    
-            except Exception as e:
+                # Reset für sauberen Test
+                reset_matrix_managers()
+                
+                test_view_guid = "test_debug_view_12345"
+                clean_manager = get_clean_matrix_manager(test_view_guid)
+                
                 ergebnisse.extend([
-                    f"❌ FEHLER: Exception beim Laden der Projektionstabelle",
-                    f"   Error: {str(e)}",
-                    f"   Type: {type(e).__name__}",
+                    f"✅ Clean Matrix-Manager erstellt für: {test_view_guid}",
+                    f"   Manager-Typ: {type(clean_manager).__name__}",
+                    f"   View-GUID: {clean_manager.view_guid}",
                     ""
                 ])
-                columns = None
+                
+            except Exception as e:
+                ergebnisse.extend([
+                    f"❌ FEHLER beim Clean Matrix-Manager erstellen:",
+                    f"   Error: {str(e)}",
+                    ""
+                ])
+                self._show_label(ergebnisse, small=True, clear_content=True, max_height=500)
+                return
             
-            # FRAGE 2: Sortier-Dialog Test (nur wenn Spalten vorhanden)
-            logger.info("🔧 DEBUG: Starte FRAGE 2 - Dialog-Test")
+            # SCHRITT 2: Test-Daten mit Debug-Spalten erstellen
             ergebnisse.extend([
-                "FRAGE 2: Kommt die richtige Projektionstabelle im SortierDialog an?",
+                "SCHRITT 2: Test-Daten mit Debug-Spalten erstellen",
                 "-" * 50
             ])
             
-            if columns:
-                logger.info("🔧 DEBUG: Columns vorhanden, erstelle Dialog")
-                try:
-                    # Dialog-Instanz erstellen (ohne show() aufzurufen)
-                    from pdvm_sorting_dialog import PdvmSortingDialog
-                    
-                    logger.info("🔧 DEBUG: Importiere PdvmSortingDialog")
-                    
-                    # ✅ KORRIGIERT: Dialog braucht sorting_manager, nicht view_guid
-                    # Erstelle vollständigen Mock-SortingManager für Test
-                    class MockSortingManager:
-                        def __init__(self, view_guid):
-                            self.view_dialog = MockViewDialog(view_guid)
-                            # Erweiterte Attribute für vollständige Dialog-Funktionalität
-                            self.current_sort_column = None
-                            self.current_sort_direction = 'asc'
-                            
-                        def get_current_sorting(self):
-                            return []
-                            
-                        def apply_sorting(self, table, column_key, direction):
-                            logger.info(f"🔄 Standard Sortierung angewendet: {column_key} {direction}")
-                            return True
-                            
-                        def clear_sorting(self, table):
-                            logger.info("🔄 Sortierung gelöscht")
-                            return True
-                            
-                        def apply_advanced_sorting(self, engine, group_config):
-                            """NEUE erweiterte Sortierung mit Gruppierung"""
-                            try:
-                                logger.info("🚀 ERWEITERTE SORTIERUNG getestet!")
-                                logger.info(f"📊 Sortier-Ebenen: {len(engine.sort_levels)}")
-                                
-                                for i, level in enumerate(engine.sort_levels):
-                                    level_type = "🏷️ GRUPPIERUNG" if level.is_group_level else "🔄 SORTIERUNG"
-                                    logger.info(f"   {i+1}. {level_type}: {level.display_name} ({level.direction})")
-                                
-                                if group_config.enabled:
-                                    logger.info(f"🏷️ Gruppierung aktiviert:")
-                                    logger.info(f"   📊 Summen anzeigen: {group_config.show_sums}")
-                                    logger.info(f"   📁 Kollabierbar: {group_config.collapsible}")
-                                    logger.info(f"   🔢 Summen-Spalten: {group_config.sum_columns}")
-                                
-                                # Demonstriere erweiterte Sortierung mit Test-Daten
-                                test_data = [
-                                    {'Name': 'Alice', 'Abteilung': 'IT', 'Gehalt': 50000},
-                                    {'Name': 'Bob', 'Abteilung': 'Sales', 'Gehalt': 45000},
-                                    {'Name': 'Charlie', 'Abteilung': 'IT', 'Gehalt': 60000},
-                                    {'Name': 'Diana', 'Abteilung': 'Sales', 'Gehalt': 48000},
-                                ]
-                                
-                                # Daten mit Engine verarbeiten
-                                result = engine.process_data(test_data)
-                                
-                                logger.info(f"✅ DEMO-Verarbeitung erfolgreich: {len(result)} Zeilen (gruppiert)")
-                                
-                                # Zeige Beispiel-Ergebnis
-                                for i, row in enumerate(result[:8]):  # Erste 8 Zeilen
-                                    row_type = row.get('_pdvm_row_type', 'normal')
-                                    if row_type == 'group_header':
-                                        logger.info(f"   📋 GRUPPE: {row.get('Name', 'Header')}")
-                                    elif row_type == 'group_sum':
-                                        logger.info(f"   📊 SUMME: {row.get('Gehalt', '')}")
-                                    else:
-                                        name = row.get('Name', '')
-                                        gehalt = row.get('Gehalt', '')
-                                        logger.info(f"   👤 PERSON: {name} - {gehalt}")
-                                
-                                return True
-                                
-                            except Exception as e:
-                                logger.error(f"❌ Fehler bei erweiterter Sortierung: {e}")
-                                return False
-                    
-                    class MockViewDialog:
-                        def __init__(self, view_guid):
-                            self.view_guid = view_guid
-                            # Mock controls_config für Display-Namen
-                            self.controls_config = {}
-                    
-                    mock_manager = MockSortingManager(test_view_guid)
-                    
-                    test_dialog = PdvmSortingDialog(
-                        sorting_manager=mock_manager,
-                        parent=self
-                    )
-                    
-                    logger.info("🔧 DEBUG: Dialog erfolgreich erstellt")
-                    
-                    # ✅ KORRIGIERT: Prüfe das Widget direkt, nicht ein available_columns Attribut
-                    from PyQt5.QtCore import Qt  # Import für Qt.UserRole
-                    widget = getattr(test_dialog, 'available_list', None)
-                    
-                    if widget:
-                        dialog_columns_count = widget.count() if hasattr(widget, 'count') else 0
-                        logger.info(f"🔧 DEBUG: Widget gefunden - Item-Count: {dialog_columns_count}")
-                        
-                        # Extrahiere tatsächliche Spalten-Liste für Vergleich
-                        dialog_columns = []
-                        for i in range(dialog_columns_count):
-                            item = widget.item(i)
-                            if item:
-                                column_key = item.data(Qt.UserRole) or item.text()
-                                dialog_columns.append(column_key)
-                        
-                        logger.info(f"🔧 DEBUG: Dialog-Columns: {len(dialog_columns)} Spalten: {dialog_columns[:3] if dialog_columns else 'Keine'}")
-                    else:
-                        dialog_columns = None
-                        logger.info("🔧 DEBUG: Kein available_list gefunden")
-                    
-                    if dialog_columns:
-                        ergebnisse.extend([
-                            f"✅ ERFOLG: Dialog hat Spalten erhalten",
-                            f"   Anzahl Dialog-Spalten: {len(dialog_columns)}",
-                            f"   Dialog-Spalten-Typ: {type(dialog_columns)}",
-                            ""
-                        ])
-                        
-                        # Vergleich: GCS-Spalten vs Dialog-Spalten
-                        if isinstance(columns, list) and isinstance(dialog_columns, list):
-                            gcs_set = set(columns)
-                            dialog_set = set(dialog_columns)
-                            
-                            if gcs_set == dialog_set:
-                                ergebnisse.append("✅ PERFEKT: GCS-Spalten = Dialog-Spalten")
-                            else:
-                                ergebnisse.extend([
-                                    f"⚠️ DIFFERENZ: GCS ≠ Dialog",
-                                    f"   Nur in GCS: {gcs_set - dialog_set}",
-                                    f"   Nur in Dialog: {dialog_set - gcs_set}"
-                                ])
-                    else:
-                        ergebnisse.extend([
-                            f"❌ FEHLER: Dialog hat keine Spalten erhalten",
-                            f"   Dialog available_columns: {dialog_columns}",
-                            ""
-                        ])
-                    
-                    # FRAGE 3: Widget-Anzeige prüfen
-                    logger.info("🔧 DEBUG: Starte FRAGE 3 - Widget-Analyse")
-                    ergebnisse.extend([
-                        "",
-                        "FRAGE 3: Warum werden Spalten nicht angezeigt?",
-                        "-" * 50
-                    ])
-                    
-                    # Prüfe verfügbare Spalten-Widget
-                    if hasattr(test_dialog, 'available_list'):
-                        widget = test_dialog.available_list
-                        item_count = widget.count() if hasattr(widget, 'count') else 'Unbekannt'
-                        
-                        ergebnisse.extend([
-                            f"📋 Widget-Analyse:",
-                            f"   Widget-Typ: {type(widget).__name__}",
-                            f"   Item-Count: {item_count}",
-                            ""
-                        ])
-                        
-                        # Prüfe einzelne Items im Widget
-                        if hasattr(widget, 'count') and widget.count() > 0:
-                            ergebnisse.append("   Widget-Items:")
-                            for i in range(min(widget.count(), 5)):  # Erste 5 Items
-                                try:
-                                    item = widget.item(i)
-                                    text = item.text() if item else 'None'
-                                    ergebnisse.append(f"   [{i}] {text}")
-                                except:
-                                    ergebnisse.append(f"   [{i}] <Fehler beim Abrufen>")
-                        else:
-                            ergebnisse.append("   ❌ Widget ist leer oder hat keine Items")
-                    else:
-                        ergebnisse.append("❌ FEHLER: available_list nicht gefunden")
-                    
-                    # Aufräumen
-                    test_dialog.deleteLater()
-                    
-                except Exception as e:
-                    logger.error(f"🔧 DEBUG: FEHLER bei Dialog-Erstellung: {e}")
-                    logger.error(f"🔧 DEBUG: Exception-Typ: {type(e).__name__}")
-                    import traceback
-                    logger.error(f"🔧 DEBUG: Traceback: {traceback.format_exc()}")
-                    ergebnisse.extend([
-                        f"❌ FEHLER: Exception beim Dialog-Test",
-                        f"   Error: {str(e)}",
-                        f"   Type: {type(e).__name__}",
-                        ""
-                    ])
-            else:
-                logger.info("🔧 DEBUG: Keine Columns - überspringe Dialog-Test")
-                ergebnisse.append("❌ ÜBERSPRUNGEN: Keine Spalten für Dialog-Test verfügbar")
-            
-            # 🎯 NEUE FRAGE 4: sortByOriginal Pipeline Test
-            logger.info("🔧 DEBUG: Starte FRAGE 4 - Pipeline sortByOriginal Test")
-            ergebnisse.extend([
-                "",
-                "FRAGE 4: Funktioniert sortByOriginal in der neuen Pipeline?",
-                "-" * 50
-            ])
-            
-            try:
-                # Teste Pipeline-Integration
-                from pdvm_data_processing_pipeline import PdvmDataProcessingPipeline, ProcessingOptions
-                from pdvm_pipeline_integration_manager import PdvmPipelineIntegrationManager
-                
-                # Test-Daten mit _original Spalten
-                test_data = [
-                    {'familienname': 'Mueller', 'familienname_original': 'Müller', 'vorname': 'Anna'},
-                    {'familienname': 'Schmidt', 'familienname_original': 'Schmidt', 'vorname': 'Peter'},
-                    {'familienname': 'Lauer', 'familienname_original': 'Lauer', 'vorname': 'Maria'}
-                ]
-                
-                # Test Controls Config mit sortByOriginal
-                test_controls = {
-                    'familienname': {
-                        'key': 'familienname',
-                        'display_name': 'Familienname',
-                        'table_column': True,
-                        'sortByOriginal': True  # 🎯 Das ist der entscheidende Test!
-                    },
-                    'familienname_original': {
-                        'key': 'familienname_original',
-                        'display_name': 'Familienname Original',
-                        'table_column': False
-                    },
-                    'vorname': {
-                        'key': 'vorname',
-                        'display_name': 'Vorname',
-                        'table_column': True,
-                        'sortByOriginal': False
-                    }
+            # Test-Daten mit den kritischen Debug-Spalten
+            test_data = [
+                {
+                    'uid_original': 'test-uid-001',
+                    'vorname_original': 'Anna-Maria',
+                    'vorname_show': 'Anna-Maria',
+                    'geburtsdatum_original': '1985123.0',
+                    'geburtsdatum_show': '03.05.1985',
+                    'familienname': 'Mueller',
+                    'strasse': 'Teststraße 1'
+                },
+                {
+                    'uid_original': 'test-uid-002', 
+                    'vorname_original': 'Peter-Klaus',
+                    'vorname_show': 'Peter-Klaus',
+                    'geburtsdatum_original': '1990067.0',
+                    'geburtsdatum_show': '08.03.1990',
+                    'familienname': 'Schmidt',
+                    'strasse': 'Teststraße 2'
+                },
+                {
+                    'uid_original': 'test-uid-003',
+                    'vorname_original': 'Maria-Elisabeth', 
+                    'vorname_show': 'Maria-Elisabeth',
+                    'geburtsdatum_original': '1975298.0',
+                    'geburtsdatum_show': '25.10.1975',
+                    'familienname': 'Lauer',
+                    'strasse': 'Teststraße 3'
                 }
+            ]
+            
+            test_columns = list(test_data[0].keys())
+            
+            ergebnisse.extend([
+                f"✅ Test-Daten erstellt: {len(test_data)} Zeilen",
+                f"   Spalten: {len(test_columns)} → {test_columns[:3]}...",
+                f"   Debug-Spalten enthalten: uid_original, vorname_original, vorname_show",
+                ""
+            ])
+            
+            # SCHRITT 3: BASIS_MATRIX Test
+            ergebnisse.extend([
+                "SCHRITT 3: BASIS_MATRIX Test (Start/Stichtag)",
+                "-" * 50,
+                "→ Erwarte: DEBUG BASIS_MATRIX im Log mit 3 Zeilen Test-Daten",
+                ""
+            ])
+            
+            try:
+                # BASIS_MATRIX setzen → sollte DEBUG-Ausgabe erzeugen
+                clean_manager.set_basis_data(test_data, test_columns)
                 
-                # Mock ViewDialog für Pipeline
-                class MockViewDialog:
-                    def __init__(self):
-                        self.controls_config = test_controls
-                        self.view_guid = "test_pipeline_view"
-                
-                mock_view = MockViewDialog()
-                
-                # Pipeline initialisieren
-                pipeline = PdvmDataProcessingPipeline(mock_view)
-                pipeline.set_basis_matrix(test_data)
-                
-                # sortByOriginal Detection testen
-                has_sort_by_original = pipeline._has_sort_by_original()
                 ergebnisse.extend([
-                    f"✅ Pipeline erstellt und BasisMatrix gesetzt: {len(test_data)} Zeilen",
-                    f"🎯 sortByOriginal Detection: {has_sort_by_original}",
+                    f"✅ BASIS_MATRIX gesetzt → Debug-Ausgabe im Log",
+                    f"   Zeilen: {len(clean_manager.basis_matrix)}",
+                    f"   Spalten: {len(clean_manager.columns)}",
                     ""
                 ])
                 
-                # Sortierung mit sortByOriginal testen
-                options = ProcessingOptions(
-                    sort_column='familienname',  # Sichtbare Spalte
-                    sort_direction='asc'
-                )
+            except Exception as e:
+                ergebnisse.extend([
+                    f"❌ FEHLER bei BASIS_MATRIX:",
+                    f"   Error: {str(e)}",
+                    ""
+                ])
+            
+            # SCHRITT 4: FILTERED_MATRIX Test
+            ergebnisse.extend([
+                "SCHRITT 4: FILTERED_MATRIX Test (Filter-Änderung)",
+                "-" * 50,
+                "→ Erwarte: DEBUG FILTERED_MATRIX im Log (linear!)",
+                ""
+            ])
+            
+            try:
+                # Filter anwenden → sollte nur FILTERED_MATRIX Debug erzeugen
+                clean_manager.apply_filter()
                 
-                # Prüfen welche Spalte tatsächlich für Sortierung verwendet wird
-                actual_sort_col = pipeline._get_actual_sort_column('familienname', options)
+                ergebnisse.extend([
+                    f"✅ FILTERED_MATRIX angewendet → Debug-Ausgabe im Log",
+                    f"   Gefilterte Zeilen: {len(clean_manager.filtered_matrix)}",
+                    ""
+                ])
                 
-                if actual_sort_col == 'familienname_original':
+            except Exception as e:
+                ergebnisse.extend([
+                    f"❌ FEHLER bei FILTERED_MATRIX:",
+                    f"   Error: {str(e)}",
+                    ""
+                ])
+            
+            # SCHRITT 5: SORTED_MATRIX Test
+            ergebnisse.extend([
+                "SCHRITT 5: SORTED_MATRIX Test (Sort-Änderung)",
+                "-" * 50,
+                "→ Erwarte: DEBUG SORTED_MATRIX im Log (linear!)",
+                ""
+            ])
+            
+            try:
+                # Sortierung anwenden → sollte nur SORTED_MATRIX Debug erzeugen
+                clean_manager.apply_sort('vorname_original', True)
+                
+                ergebnisse.extend([
+                    f"✅ SORTED_MATRIX angewendet → Debug-Ausgabe im Log",
+                    f"   Sortierte Zeilen: {len(clean_manager.sorted_matrix)}",
+                    f"   Sort-Spalte: vorname_original (aufsteigend)",
+                    ""
+                ])
+                
+            except Exception as e:
+                ergebnisse.extend([
+                    f"❌ FEHLER bei SORTED_MATRIX:",
+                    f"   Error: {str(e)}",
+                    ""
+                ])
+            
+            # SCHRITT 6: Status und finale Daten
+            ergebnisse.extend([
+                "SCHRITT 6: Matrix-Status und finale Daten",
+                "-" * 50
+            ])
+            
+            try:
+                status = clean_manager.get_status()
+                final_data = clean_manager.get_final_data()
+                
+                ergebnisse.extend([
+                    f"📊 Matrix-Status:",
+                    f"   View-GUID: {status['view_guid']}",
+                    f"   BASIS: {status['basis']['rows']} Zeilen, {status['basis']['columns']} Spalten",
+                    f"   FILTERED: {status['filtered']['rows']} Zeilen", 
+                    f"   SORTED: {status['sorted']['rows']} Zeilen",
+                    f"   Erste Spalten: {status['columns']}",
+                    "",
+                    f"🎯 Finale Daten: {len(final_data)} Zeilen für View-Anzeige",
+                    ""
+                ])
+                
+                # Zeige erste sortierte Zeile als Beispiel
+                if final_data:
+                    first_row = final_data[0]
                     ergebnisse.extend([
-                        f"🎉 sortByOriginal funktioniert korrekt!",
-                        f"   Sortier-Spalte: {actual_sort_col}",
-                        f"   Angefordert: familienname → Verwendet: familienname_original",
-                        ""
-                    ])
-                    
-                    # Vollständige Pipeline-Verarbeitung testen
-                    result = pipeline.apply_processing(options)
-                    ergebnisse.extend([
-                        f"✅ Pipeline-Verarbeitung erfolgreich: {len(result)} Zeilen",
-                        f"📊 Pipeline löst das _original Spalten Problem!",
-                        ""
-                    ])
-                    
-                else:
-                    ergebnisse.extend([
-                        f"⚠️ sortByOriginal Problem nicht gelöst",
-                        f"   Erwartet: familienname_original",
-                        f"   Erhalten: {actual_sort_col}",
+                        f"📋 Erste sortierte Zeile (Beispiel):",
+                        f"   vorname_original: {first_row.get('vorname_original', 'N/A')}",
+                        f"   vorname_show: {first_row.get('vorname_show', 'N/A')}",
+                        f"   geburtsdatum_original: {first_row.get('geburtsdatum_original', 'N/A')}",
+                        f"   geburtsdatum_show: {first_row.get('geburtsdatum_show', 'N/A')}",
                         ""
                     ])
                 
             except Exception as e:
                 ergebnisse.extend([
-                    f"❌ FEHLER: Pipeline-Test fehlgeschlagen",
+                    f"❌ FEHLER bei Status-Abfrage:",
                     f"   Error: {str(e)}",
-                    f"   Type: {type(e).__name__}",
                     ""
                 ])
-                logger.error(f"🔧 Pipeline-Test Fehler: {e}")
-                import traceback
-                logger.error(f"🔧 Pipeline-Test Traceback: {traceback.format_exc()}")
             
             # ZUSAMMENFASSUNG
             ergebnisse.extend([
-                "",
-                "ZUSAMMENFASSUNG & EMPFEHLUNGEN:",
+                "ERWARTETE LOG-AUSGABEN:",
                 "=" * 50,
                 "",
-                "Nächste Schritte basierend auf den Ergebnissen:",
-                "• Falls FRAGE 1 ❌: GCS get_projection_table() System prüfen",
-                "• Falls FRAGE 2 ❌: Dialog get_projection_table() Integration prüfen", 
-                "• Falls FRAGE 3 ❌: Widget-Populierung im Dialog prüfen",
-                "• Falls FRAGE 4 ✅: Pipeline in ViewDialog integrieren für Produktion",
-                "• Falls FRAGE 4 ❌: Pipeline-Konfiguration oder Implementation prüfen",
+                "Im main.log sollten jetzt erscheinen:",
                 "",
-                "🎯 Pipeline Integration Status:",
-                "   ✅ Pipeline-Module erstellt und getestet",
-                "   ✅ sortByOriginal Logic implementiert",
-                "   ✅ ViewDialog Pipeline-Support hinzugefügt",
-                "   🔧 Bereit für Produktiv-Integration",
+                "1. DEBUG BASIS_MATRIX (3 Zeilen):",
+                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
+                "   📄 Zeile 1: test-uid-001 | Anna-Maria | Anna-Maria | ...",
+                "   📄 Zeile 2: test-uid-002 | Peter-Klaus | Peter-Klaus | ...",
+                "   📄 Zeile 3: test-uid-003 | Maria-Elisabeth | Maria-Elisabeth | ...",
                 "",
-                "🔧 Für detailliertere Analyse siehe main.log"
+                "2. DEBUG FILTERED_MATRIX (3 Zeilen):",
+                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
+                "   📄 Zeile 1: [gefilterte Daten]",
+                "   📄 Zeile 2: [gefilterte Daten]", 
+                "   📄 Zeile 3: [gefilterte Daten]",
+                "",
+                "3. DEBUG SORTED_MATRIX (3 Zeilen, sortiert nach vorname_original):",
+                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
+                "   📄 Zeile 1: [sortierte Daten]",
+                "   📄 Zeile 2: [sortierte Daten]",
+                "   📄 Zeile 3: [sortierte Daten]",
+                "",
+                "🎯 LINEAR: Jede Matrix nur bei ihrer Änderung geloggt!",
+                "",
+                "📋 Prüfen Sie das main.log für die Debug-Ausgaben!",
+                "🔧 Falls keine Debug-Ausgaben → Clean Matrix-Manager Problem",
+                "✅ Falls alle 3 Debug-Ausgaben da → Matrix-System funktioniert!"
             ])
             
-            # Ergebnisse anzeigen mit ScrollArea für lange Diagnose-Texte
-            logger.info(f"🔧 DEBUG: Zeige Ergebnisse an: {len(ergebnisse)} Zeilen")
-            self._show_label(ergebnisse, small=True, clear_content=True, max_height=500)
+            # Ergebnisse anzeigen
+            self._show_label(ergebnisse, small=True, clear_content=True, max_height=600)
             
-            logger.info("✅ INTEGRIERTE DIAGNOSE: Sortierungs-Projektionen Test abgeschlossen")
+            logger.info("✅ CLEAN MATRIX-MANAGER SYSTEM-TEST abgeschlossen - prüfen Sie main.log!")
             
         except Exception as e:
-            logger.error(f"❌ Kritischer Fehler in der integrierten Diagnose: {e}")
+            logger.error(f"❌ Kritischer Fehler im Clean Matrix-Manager System-Test: {e}")
             import traceback
             logger.error(traceback.format_exc())
             
             self._show_label([
-                "❌ KRITISCHER FEHLER in der Diagnose",
+                "❌ KRITISCHER FEHLER im Clean Matrix-Manager Test",
                 "",
                 f"Error: {str(e)}",
                 "",

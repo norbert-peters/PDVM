@@ -217,6 +217,19 @@ class PdvmModernViewWidget(QWidget):
             if hasattr(self.data_manager, 'stichtag'):
                 self.stichtag = self.data_manager.stichtag
             logger.info(f"✅ Data-Manager initialisiert: {self.data_manager.get_table_info()}")
+            
+            # Sorting Persistence Manager initialisieren
+            try:
+                from pdvm_sorting_persistence_manager import PdvmSortingPersistenceManager
+                self.sorting_persistence = PdvmSortingPersistenceManager(self, self.view_guid)
+                logger.info("✅ Sorting Persistence Manager initialisiert")
+            except ImportError:
+                logger.warning("⚠️ Sorting Persistence Manager nicht verfügbar")
+                self.sorting_persistence = None
+            except Exception as e:
+                logger.error(f"❌ Fehler beim Initialisieren des Sorting Persistence Managers: {e}")
+                self.sorting_persistence = None
+                
         except Exception as e:
             logger.error(f"❌ Fehler beim Initialisieren des Data-Managers: {e}")
             raise
@@ -458,6 +471,22 @@ class PdvmModernViewWidget(QWidget):
             # - column_widths = current_view_settings.get("column_widths", {})
             
             logger.info(f"✅ View-Einstellungen für {self.view_guid} geladen")
+            
+            # Sortierungseinstellungen laden (falls Sorting Persistence Manager verfügbar)
+            if hasattr(self, 'sorting_persistence') and self.sorting_persistence:
+                try:
+                    self.sorting_persistence._load_saved_sorting()
+                    if self.sorting_persistence.current_sort_column:
+                        # Übernehme gespeicherte Sortierung
+                        sort_direction = Qt.AscendingOrder if self.sorting_persistence.current_sort_direction == 'asc' else Qt.DescendingOrder
+                        # Finde die Spalten-Index
+                        if self.sorting_persistence.current_sort_column in self.visible_column_names:
+                            sort_index = self.visible_column_names.index(self.sorting_persistence.current_sort_column)
+                            self.current_sort_column = sort_index
+                            self.current_sort_order = sort_direction
+                            logger.info(f"✅ Gespeicherte Sortierung geladen: {self.sorting_persistence.current_sort_column} ({self.sorting_persistence.current_sort_direction})")
+                except Exception as e:
+                    logger.error(f"❌ Fehler beim Laden der Sortierungseinstellungen: {e}")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden der View-Einstellungen: {e}")
@@ -3275,6 +3304,18 @@ class PdvmModernViewWidget(QWidget):
         else:
             self.current_sort_column = logical_index
             self.current_sort_order = Qt.AscendingOrder
+        
+        # Sortierung persistieren
+        if logical_index < len(self.visible_column_names):
+            column_name = self.visible_column_names[logical_index]
+            direction_key = "asc" if self.current_sort_order == Qt.AscendingOrder else "desc"
+            
+            if hasattr(self, 'sorting_persistence') and self.sorting_persistence:
+                try:
+                    self.sorting_persistence.save_sort_settings(column_name, direction_key)
+                    logger.info(f"✅ Header-Sortierung gespeichert: {column_name} ({direction_key})")
+                except Exception as e:
+                    logger.error(f"❌ Fehler beim Speichern der Header-Sortierung: {e}")
         
         self._apply_filters()
 
