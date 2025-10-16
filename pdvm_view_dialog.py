@@ -22,6 +22,9 @@ from PyQt5.QtGui import QFont, QIcon
 from global_gcs import gcs
 from pdvm_central_systemsteuerung import get_gcs
 
+# V3 Filter-System
+from schnellsuche_manager import SchnellsucheManager
+
 import logging
 import time
 import json
@@ -313,6 +316,7 @@ class PdvmViewDialog(QWidget):
             logger.info(f"🔄 SCHRITT 4: ÜBERSPRUNGEN - Reset-Modus aktiviert")
         
         # SCHRITT 5: Controls in GCS speichern - ViewDaten-Änderungen werden immer beachtet
+        # Alte DB (Kompatibilität)
         gcs.db.set_value(
             gruppe=self.view_guid, 
             feld='controls', 
@@ -320,9 +324,27 @@ class PdvmViewDialog(QWidget):
         )
         gcs.db.save_all_values()
         
+        # SCHRITT 5b: Controls auch in Systemsteuerung-DB speichern (für Projektions-Tabellen)
+        import json
+        for control_key, control_config in all_controls.items():
+            try:
+                control_json = json.dumps(control_config, ensure_ascii=False)
+                gcs._db.set_value(self.view_guid, control_key, control_json)
+            except Exception as e:
+                logger.warning(f"⚠️ Fehler beim Speichern von {control_key} in Systemsteuerung-DB: {e}")
+        
+        logger.info(f"✅ SCHRITT 5: Controls in beide DBs gespeichert: {len(all_controls)} total")
+        
         self.controls_config = all_controls
-        logger.info(f"✅ SCHRITT 5: Controls in GCS gespeichert: {len(all_controls)} total")
         logger.info(f"🎉 KORREKT: ViewDaten bilden die Basis, Benutzer-Werte werden übernommen!")
+        
+        # SCHRITT 5c: Projektions-Tabellen in GCS aufbauen (für Sortierung benötigt)
+        try:
+            logger.info("🔄 Baue Projektions-Tabellen für Sortierung auf...")
+            gcs.rebuild_projection_tables(self.view_guid)
+            logger.info("✅ Projektions-Tabellen erfolgreich aufgebaut")
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Aufbau der Projektions-Tabellen: {e}")
         
         # SCHRITT 6: Basis-Spalten aus Controls ableiten (wie View-Manager)
         self.basis_columns = self._get_columns_from_controls()
@@ -790,22 +812,38 @@ class PdvmViewDialog(QWidget):
         self._load_and_apply_persistent_filters()
     
     def _load_and_apply_persistent_filters(self):
-        """Lade persistente Suchparameter und wende sie an"""
+        """V3: Lade persistente Filter mit SchnellsucheManager"""
         try:
-            if not gcs:
+            if not hasattr(self, 'search_input'):
                 return
             
-            # GCS Key für persistente Speicherung der Suchparameter
-            gcs_filters_key = f"search_parameters_{self.view_guid}"
-            saved_filters, _ = gcs.db.get_value(self.view_guid, gcs_filters_key)
+            # V3: SchnellsucheManager verwenden (braucht matrix_manager)
+            if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+                logger.info("ℹ️ Matrix Manager nicht verfügbar")
+                return
             
-            if saved_filters:
-                logger.info(f"🔄 Lade {len(saved_filters)} persistente Suchparameter")
-                # TODO: Persistente Filter mit neuem linearen System wiederherstellen
-                logger.info("📋 Persistente Filter-Wiederherstellung - TODO für lineares System")
+            # Manager erstellen
+            schnellsuche_manager = SchnellsucheManager(
+                view_guid=self.view_guid,
+                matrix_manager=self.matrix_manager
+            )
+            
+            # UI-Daten laden (NUR wenn s_source == 'schnell')
+            search_text = schnellsuche_manager.load_schnellsuche_ui()
+            
+            if search_text:
+                self.search_input.setText(search_text)
+                logger.info(f"🔄 V3: Schnellsuche in UI wiederhergestellt: '{search_text}'")
+            else:
+                self.search_input.clear()
+                logger.info(f"ℹ️ V3: Schnellsuche-Feld leer (anderer Filter aktiv)")
+            
+            # HINWEIS: Einfach/Komplex-Filter werden in ihren Dialogen geladen
+            # Pipeline lädt s_string AUTONOM beim rebuild_pipeline()
+            logger.info("✅ V3: Persistente Filter-UI aktualisiert")
             
         except Exception as e:
-            logger.warning(f"⚠️ Fehler beim Laden persistenter Suchparameter: {e}")
+            logger.warning(f"⚠️ Fehler beim Laden persistenter Filter-UI: {e}")
     
     def apply_filter_string(self, filter_string: str):
         """🎯 NEUE UNIFIED LINEAR FILTER-METHODE - ersetzt alles alte
@@ -1449,7 +1487,7 @@ class PdvmViewDialog(QWidget):
                     background-color: #f8f9fa;
                 }
             """)
-            self.search_input.textChanged.connect(self._on_search_text_changed)
+            # V3: KEIN textChanged Event - nur bei ENTER oder Button-Klick!
             self.search_input.returnPressed.connect(self._perform_global_search)
             search_layout.addWidget(self.search_input)
             
@@ -1533,14 +1571,32 @@ class PdvmViewDialog(QWidget):
             
             menu.addSeparator()
             
-            expert_action = QAction("🔧 Expert Mode", self)
-            expert_action.setCheckable(True)
+            # Sortierung & Gruppierung
+            sorting_action = QAction("📊 Sortierung & Gruppierung", self)
+            sorting_action.triggered.connect(self._show_sorting_dialog)
+            menu.addAction(sorting_action)
+            
+            # Alle Spalten sortierbar machen
+            enable_sort_action = QAction("🔧 Alle Spalten sortierbar machen", self)
+            enable_sort_action.triggered.connect(self._enable_all_columns_sortable)
+            menu.addAction(enable_sort_action)
+            
+            menu.addSeparator()
+            
+            # Expert Mode nur für Admin-Benutzer anzeigen
             from pdvm_central_systemsteuerung import get_gcs
             gcs = get_gcs()
             if gcs:
-                expert_action.setChecked(gcs.expert_mode)
-            expert_action.triggered.connect(self._toggle_expert_mode)
-            menu.addAction(expert_action)
+                user_mode = gcs.mode  # 'user' oder 'admin'
+                if user_mode == 'admin':
+                    expert_action = QAction("🔧 Expert Mode", self)
+                    expert_action.setCheckable(True)
+                    expert_action.setChecked(gcs.expert_mode)
+                    expert_action.triggered.connect(self._toggle_expert_mode)
+                    menu.addAction(expert_action)
+                    logger.debug(f"✅ Expert Mode Menüpunkt für Admin angezeigt (mode={user_mode})")
+                else:
+                    logger.debug(f"ℹ️ Expert Mode Menüpunkt ausgeblendet für mode={user_mode}")
             
             menu.addSeparator()
             
@@ -1570,22 +1626,49 @@ class PdvmViewDialog(QWidget):
             logger.error(f"❌ Fehler bei Live-Suche: {e}")
     
     def _reset_search(self):
-        """Suche zurücksetzen"""
+        """
+        V3: Suche zurücksetzen über ZENTRALEN FilterResetManager
+        Verwendet: self.matrix_manager (NICHT self.controller!)
+        """
         try:
+            # 1. Suchfeld leeren
+            if not hasattr(self, 'search_input'):
+                error_msg = "FEHLER: Suchfeld nicht initialisiert!\n\nSuche-Reset kann nicht ausgeführt werden."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Suche-Reset Fehler", error_msg)
+                return
+                
             self.search_input.clear()
             
-            # Filter-Reset über LinearFilterExecutionManager
-            from linear_filter_execution_manager import get_linear_filter_manager
-            manager = get_linear_filter_manager(self.view_guid)
-            if manager:
-                manager.reset_all_filters()
-                logger.info("🔄 Alle Filter zurückgesetzt")
+            # 2. Matrix Manager prüfen
+            if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+                error_msg = "FEHLER: Matrix Manager nicht verfügbar!\n\nFilter-Reset kann nicht ausgeführt werden."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Filter-Reset Fehler", error_msg)
+                return
             
-            # Tabelle aktualisieren
+            # 3. V3: ZENTRALER FilterResetManager für ALLE Filter-Typen
+            from filter_reset_manager import get_filter_reset_manager
+            
+            reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
+            
+            # 4. ALLE Filter löschen (schnell + einfach + komplex)
+            success = reset_manager.reset_all_filters()
+            
+            if success:
+                logger.info("✅ V3 ALLE Filter zurückgesetzt - Suchfeld geleert, DB bereinigt")
+            else:
+                error_msg = "WARNUNG: Filter-Reset konnte nicht vollständig ausgeführt werden.\n\nBitte Log-Datei prüfen."
+                logger.warning(f"⚠️ {error_msg}")
+                QMessageBox.warning(self, "Filter-Reset Warnung", error_msg)
+            
+            # 5. Tabelle aktualisieren
             self.refresh_table_direct()
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Zurücksetzen der Suche: {e}")
+            error_msg = f"KRITISCHER FEHLER beim Suche-Reset:\n\n{str(e)}"
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            QMessageBox.critical(self, "Suche-Reset Fehler", error_msg)
     
     def _create_toolbar(self, layout):
         """Erstelle Toolbar mit allen wichtigen Funktionen"""
@@ -1701,7 +1784,7 @@ class PdvmViewDialog(QWidget):
             self.search_input = QLineEdit()
             self.search_input.setPlaceholderText("Globale Suche - Suchbegriff eingeben...")
             self.search_input.returnPressed.connect(self._perform_global_search)
-            self.search_input.textChanged.connect(self._on_search_text_changed)
+            # V3: KEIN textChanged Event mehr - nur bei ENTER oder Lupe-Klick!
             search_layout.addWidget(self.search_input)
             
             # Such-Buttons
@@ -1797,6 +1880,218 @@ class PdvmViewDialog(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler bei erweiterten Suchparametern: {e}")
     
+    def _show_sorting_dialog(self):
+        """📊 Zeige Sortierung & Gruppierung Dialog"""
+        try:
+            from advanced_sort_dialog import AdvancedSortDialog
+            from PyQt5.QtWidgets import QDialog
+            
+            logger.info("📊 Öffne Sortierung & Gruppierung Dialog...")
+            
+            # Controls-Config holen
+            controls_config = getattr(self, 'controls_config', {})
+            if not controls_config:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Fehler", "Keine Controls-Konfiguration verfügbar")
+                return
+            
+            # Dialog öffnen
+            dialog = AdvancedSortDialog(self.view_guid, controls_config, self)
+            result = dialog.exec_()
+            
+            if result == QDialog.Accepted:
+                # Sortier-Konfiguration holen
+                sort_config = dialog.get_sort_config()
+                sum_columns = dialog.get_sum_columns()
+                
+                logger.info(f"📊 Sortier-Konfiguration: {sort_config}")
+                logger.info(f"Σ Summierungs-Spalten: {sum_columns}")
+                
+                # Sortierung anwenden
+                self._apply_sorting_config(sort_config, sum_columns)
+                
+                logger.info("✅ Sortierung angewendet")
+            else:
+                logger.info("ℹ️ Sortierungs-Dialog abgebrochen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Sortierung & Gruppierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Fehler", f"Sortierungs-Dialog Fehler:\n{e}")
+    
+    def _apply_sorting_config(self, sort_config: list, sum_columns: list):
+        """Wendet Sortierungs-Konfiguration an"""
+        try:
+            from sort_manager import get_sort_manager
+            from pdvm_matrix_manager import get_matrix_manager
+            
+            # Matrix-Manager holen
+            matrix_manager = get_matrix_manager(self.view_guid)
+            if not matrix_manager:
+                logger.error("❌ Matrix-Manager nicht verfügbar")
+                return
+            
+            # Sort-Manager holen
+            sort_manager = get_sort_manager(self.view_guid)
+            sort_manager.set_controls_config(self.controls_config)
+            
+            # Filter-Matrix holen (Input für Sortierung)
+            filter_matrix = matrix_manager.get_filter_data()
+            
+            if not filter_matrix:
+                logger.warning("⚠️ Keine Filter-Matrix verfügbar")
+                return
+            
+            # Erweiterte Sortierung durchführen
+            sorted_matrix = sort_manager.advanced_sort(filter_matrix, sort_config, sum_columns)
+            
+            # Sort-Matrix in Matrix-Manager setzen
+            matrix_manager.set_sort_data(sorted_matrix)
+            
+            # Tabelle aktualisieren
+            self.refresh_table_direct()
+            
+            logger.info(f"✅ Sortierung angewandt: {len(sorted_matrix)} Zeilen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden der Sortierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _enable_all_columns_sortable(self):
+        """🔧 Setzt alle Spalten als sortierbar"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            from PyQt5.QtWidgets import QMessageBox
+            import json
+            
+            logger.info("🔧 Aktiviere Sortierung für alle Spalten...")
+            
+            # GCS holen
+            gcs = get_gcs()
+            if not gcs:
+                QMessageBox.warning(self, "Fehler", "GCS nicht verfügbar")
+                return
+            
+            # Benutzer bestätigen lassen
+            reply = QMessageBox.question(
+                self,
+                "Alle Spalten sortierbar machen?",
+                "Möchten Sie alle Spalten dieser View als sortierbar markieren?\n\n"
+                "Dies setzt für alle Controls:\n"
+                "• sortable = true\n"
+                "• sortDirection = 'asc' (oder 'desc' für Datum/Alter)\n"
+                "• sortByOriginal = true (nur für Datumsfelder)\n\n"
+                "Die Änderungen werden sofort gespeichert.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                logger.info("ℹ️ Benutzer hat Aktion abgebrochen")
+                return
+            
+            # Projektions-Tabelle holen ODER aus controls_config ableiten
+            projection_table = gcs.get_projection_table(self.view_guid, "table")
+            
+            # FALLBACK: Wenn keine Projektions-Tabelle existiert, verwende controls_config
+            if not projection_table:
+                logger.warning("⚠️ Keine Projektions-Tabelle gefunden - verwende controls_config als Fallback")
+                
+                if hasattr(self, 'controls_config') and self.controls_config:
+                    # Verwende alle Keys aus controls_config
+                    projection_table = list(self.controls_config.keys())
+                    logger.info(f"✅ Fallback: {len(projection_table)} Controls aus controls_config geladen")
+                else:
+                    QMessageBox.warning(self, "Fehler", "Keine Projektions-Tabelle und keine Controls-Config gefunden")
+                    return
+            
+            logger.info(f"🚀 Aktiviere Sortierung für {len(projection_table)} Controls...")
+            
+            updated_count = 0
+            error_count = 0
+            
+            # Durchlaufe alle Controls
+            for control_key in projection_table:
+                try:
+                    # Hole Control-JSON
+                    control_data = gcs._db.get_value(self.view_guid, control_key)
+                    
+                    if not control_data or len(control_data) != 2:
+                        continue
+                    
+                    control_json, _ = control_data
+                    
+                    if not control_json:
+                        continue
+                    
+                    # Parse JSON
+                    control = json.loads(control_json)
+                    
+                    # Stelle sicher, dass ui-Dict existiert
+                    if 'ui' not in control:
+                        control['ui'] = {}
+                    
+                    # Bestimme Default-Werte
+                    if 'datum' in control_key.lower() or 'alter' in control_key.lower():
+                        default_direction = 'desc'
+                    else:
+                        default_direction = 'asc'
+                    
+                    default_by_original = (
+                        'geburtsdatum_show' in control_key and 
+                        control_key.endswith('_show')
+                    )
+                    
+                    # Aktualisiere Sortier-Einstellungen
+                    control['ui']['sortable'] = True
+                    control['ui']['sortDirection'] = control['ui'].get('sortDirection', default_direction)
+                    control['ui']['sortByOriginal'] = control['ui'].get('sortByOriginal', default_by_original)
+                    
+                    # Speichere zurück
+                    updated_json = json.dumps(control, ensure_ascii=False)
+                    gcs._db.set_value(self.view_guid, control_key, updated_json)
+                    
+                    updated_count += 1
+                    logger.info(f"✅ {control_key}: sortable=true")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Fehler bei {control_key}: {e}")
+                    error_count += 1
+            
+            # Rebuild Projektions-Tabellen
+            logger.info("🔄 Rebuild Projektions-Tabellen...")
+            gcs.rebuild_projection_tables(self.view_guid)
+            
+            # Controls-Config neu laden
+            if hasattr(self, 'controls_config'):
+                for control_key in projection_table:
+                    control_data = gcs._db.get_value(self.view_guid, control_key)
+                    if control_data and len(control_data) == 2:
+                        control_json, _ = control_data
+                        if control_json:
+                            self.controls_config[control_key] = json.loads(control_json)
+            
+            # Erfolgs-Meldung
+            message = f"✅ Update abgeschlossen!\n\n"
+            message += f"• {updated_count} Controls aktualisiert\n"
+            if error_count > 0:
+                message += f"• {error_count} Fehler aufgetreten\n"
+            message += f"\nAlle Spalten sind jetzt sortierbar."
+            
+            QMessageBox.information(self, "Sortierbar-Update", message)
+            
+            logger.info(f"🎉 Sortierbar-Update abgeschlossen: {updated_count} erfolgreich, {error_count} Fehler")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei _enable_all_columns_sortable: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Sortierbar-Update:\n{e}")
+    
     def _show_settings(self):
         """Zeige Einstellungen-Dialog"""
         try:
@@ -1818,34 +2113,50 @@ class PdvmViewDialog(QWidget):
             # Controls-Config verwenden
             controls_config = getattr(self, 'controls_config', {})
             
+            # KORREKTUR: Parameter heißt 'current_mode' nicht 'context'
             result = show_column_management_dialog(
                 parent=self,
                 view_guid=self.view_guid,
                 controls_config=controls_config,
-                context="table"
+                current_mode="table"
             )
             
             if result:
                 logger.info("✅ Spalten-Konfiguration geändert")
+                # Refresh mit neuer Spalten-Konfiguration
                 self.refresh_table_direct()
                 
         except Exception as e:
             logger.error(f"❌ Fehler bei Spalten-Verwaltung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _toggle_expert_mode(self):
-        """Toggle Expert Mode über Menü - LINEARE SPALTEN-PROJEKTION"""
+        """Toggle Expert Mode über Menü - NUR für mode='admin' - LINEARE SPALTEN-PROJEKTION"""
         try:
             from pdvm_central_systemsteuerung import get_gcs
+            from PyQt5.QtWidgets import QMessageBox
             gcs = get_gcs()
             
             if not gcs:
                 logger.error("❌ GCS nicht verfügbar für Expert Mode Toggle")
                 return
+            
+            # Prüfe ob Benutzer Admin ist
+            user_mode = gcs.mode
+            if user_mode != 'admin':
+                logger.warning(f"⚠️ Expert Mode Toggle verweigert - Benutzer ist kein Admin (mode={user_mode})")
+                QMessageBox.warning(
+                    self,
+                    "Zugriff verweigert",
+                    "Expert Mode kann nur von Administratoren aktiviert werden."
+                )
+                return
                 
             # Expert Mode umschalten
             old_mode = gcs.expert_mode
             gcs.expert_mode = not old_mode
-            logger.info(f"🎓 Expert Mode: {old_mode} → {gcs.expert_mode}")
+            logger.info(f"🎓 Expert Mode: {old_mode} → {gcs.expert_mode} (Admin-Benutzer)")
             
             # Header-Label aktualisieren (zeigt/versteckt Stichtag)
             self._update_header_label()
@@ -1854,7 +2165,6 @@ class PdvmViewDialog(QWidget):
             self.refresh_table_direct()
             
             # Status-Meldung
-            from PyQt5.QtWidgets import QMessageBox
             status = "aktiviert" if gcs.expert_mode else "deaktiviert"
             mode_info = "Alle Spalten (inkl. Original-Felder)" if gcs.expert_mode else "Nur konfigurierte Spalten"
             QMessageBox.information(
@@ -1991,86 +2301,111 @@ class PdvmViewDialog(QWidget):
             QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Export:\n{e}")
     
     def _perform_global_search(self):
-        """Führe globale Suche durch"""
+        """
+        V3 SCHNELLSUCHE: Führe Schnellsuche durch mit SchnellsucheManager
+        
+        - NUR bei KLICK auf Lupe ausgeführt (nicht bei jedem Buchstaben!)
+        - SchnellsucheManager speichert AUTONOM: Parameter + s_string + s_source
+        - GCS: save_all_values() für Persistierung
+        - Matrix Manager: apply_filter() mit filter_source='schnell'
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        
         try:
             if not hasattr(self, 'search_input'):
+                error_msg = "FEHLER: Suchfeld nicht initialisiert!"
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Schnellsuche Fehler", error_msg)
                 return
                 
             search_text = self.search_input.text().strip()
-            logger.info(f"🔍 Globale Suche: '{search_text}'")
+            logger.info(f"🔍 V3 SCHNELLSUCHE: '{search_text}'")
             
             if not search_text:
                 # Leere Suche = Filter zurücksetzen
                 self._clear_search()
                 return
             
-            # Verwende LinearFilterExecutionManager für globale Suche
-            from linear_filter_execution_manager import get_linear_filter_manager
-            manager = get_linear_filter_manager(self.view_guid)
+            # V3: Verwende SchnellsucheManager
+            from schnellsuche_manager import SchnellsucheManager
             
-            if manager:
-                # Führe globale Suche durch (LINEARER EINSTIEG)
-                success = manager.execute_global_search_filter(search_text)
-                
-                if success:
-                    logger.info("✅ Globale Suche erfolgreich")
-                    self.refresh_table_direct()
-                else:
-                    logger.warning("⚠️ Globale Suche fehlgeschlagen")
+            # Matrix Manager DIREKT von self holen (nicht von Controller!)
+            if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+                error_msg = "FEHLER: Matrix Manager nicht verfügbar!\n\nDie Schnellsuche kann nicht ausgeführt werden."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Schnellsuche Fehler", error_msg)
+                return
+            
+            matrix_manager = self.matrix_manager
+            
+            # SchnellsucheManager erstellen und ausführen
+            manager = SchnellsucheManager(
+                view_guid=self.view_guid,
+                matrix_manager=matrix_manager
+            )
+            
+            success = manager.execute_schnellsuche(search_text)
+            
+            if success:
+                logger.info("✅ V3 Schnellsuche erfolgreich - PERSISTENT!")
+                self.refresh_table_direct()
             else:
-                logger.warning("⚠️ Kein LinearFilterExecutionManager verfügbar")
+                error_msg = f"FEHLER: Schnellsuche konnte nicht ausgeführt werden!\n\nSuchtext: '{search_text}'\n\nBitte Log-Datei prüfen."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.warning(self, "Schnellsuche Fehler", error_msg)
                 
         except Exception as e:
-            logger.error(f"❌ Fehler bei globaler Suche: {e}")
+            error_msg = f"KRITISCHER FEHLER bei Schnellsuche:\n\n{str(e)}\n\nBitte Log-Datei prüfen!"
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            QMessageBox.critical(self, "Schnellsuche Fehler", error_msg)
+    
+    # V3: _on_search_text_changed ENTFERNT
+    # Schnellsuche wird NUR bei ENTER oder Lupe-Klick ausgeführt (nicht bei jedem Buchstaben!)
+    
+    # V3: ALTE _clear_search ENTFERNT (nutzte LinearFilterExecutionManager)
     
     def _clear_search(self):
-        """Lösche Suchfeld und setze Filter zurück"""
+        """
+        V3 FILTER-RESET: Lösche ALLE Filter über ZENTRALEN FilterResetManager
+        
+        - Löscht s_string, s_source und ALLE Filter-Parameter (schnell/einfach/komplex)
+        - Ruft save_all_values() auf für Persistierung
+        - Matrix Manager: apply_filter(None) für kompletten Reset
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        
         try:
             if hasattr(self, 'search_input'):
                 self.search_input.clear()
             
-            # Verwende LinearFilterExecutionManager für Filter-Reset
-            from linear_filter_execution_manager import get_linear_filter_manager
-            manager = get_linear_filter_manager(self.view_guid)
+            # Matrix Manager DIREKT von self holen (nicht von Controller!)
+            if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
+                error_msg = "FEHLER: Matrix Manager nicht verfügbar!\n\nDer Filter kann nicht zurückgesetzt werden."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Filter-Reset Fehler", error_msg)
+                return
             
-            if manager:
-                manager.reset_all_filters()
-                logger.info("🔄 Filter zurückgesetzt")
-                self.refresh_table_direct()
+            # V3: ZENTRALER FilterResetManager für ALLE Filter-Typen
+            from filter_reset_manager import get_filter_reset_manager
+            
+            reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
+            
+            # ALLE Filter löschen (schnell + einfach + komplex)
+            success = reset_manager.reset_all_filters()
+            
+            if success:
+                logger.info("🧹 V3 ALLE Filter gelöscht - PERSISTENT!")
             else:
-                logger.warning("⚠️ Kein LinearFilterExecutionManager für Reset verfügbar")
-                
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Löschen der Suche: {e}")
-    
-    def _on_search_text_changed(self, text):
-        """Reagiere auf Änderungen im Suchtext"""
-        try:
-            # Live-Suche bei mehr als 2 Zeichen
-            if len(text) >= 3:
-                # Verzögerte Suche implementieren (optional)
-                pass
-        except Exception as e:
-            logger.error(f"❌ Fehler bei Suchtext-Änderung: {e}")
-    
-    def _clear_search(self):
-        """Suche löschen und Filter zurücksetzen"""
-        try:
-            if hasattr(self, 'search_input'):
-                self.search_input.clear()
+                error_msg = "WARNUNG: Filter-Reset konnte nicht vollständig ausgeführt werden.\n\nBitte Log-Datei prüfen."
+                logger.warning(f"⚠️ {error_msg}")
+                QMessageBox.warning(self, "Filter-Reset Warnung", error_msg)
             
-            # Filter zurücksetzen
-            from linear_filter_execution_manager import get_linear_filter_manager
-            manager = get_linear_filter_manager(self.view_guid)
-            
-            if manager:
-                manager.reset_all_filters()
-                self.refresh_table_direct()
-            
-            logger.info("🧹 Suche gelöscht und Filter zurückgesetzt")
+            self.refresh_table_direct()
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Löschen der Suche: {e}")
+            error_msg = f"KRITISCHER FEHLER beim Filter-Reset:\n\n{str(e)}\n\nBitte Log-Datei prüfen!"
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            QMessageBox.critical(self, "Filter-Reset Fehler", error_msg)
     
     def _update_row_count_display(self, count):
         """Aktualisiere Zeilen-Anzahl Display"""
@@ -2182,17 +2517,50 @@ class PdvmViewDialog(QWidget):
             self.table.setHorizontalHeaderLabels(headers)
             logger.info(f"🔧 Header gesetzt: Expert Mode = {gcs.expert_mode if gcs else False}")
             
+            # 🏷️ HEADER-TOOLTIPS: Control-Keys in Spaltenköpfen
+            for col_idx, col_name in enumerate(visible_columns):
+                # Tooltip mit Control-Key erstellen
+                tooltip = f"Control-Key: {col_name}"
+                
+                # Zusätzliche technische Info im Tooltip
+                if hasattr(self, 'controls_config') and self.controls_config:
+                    control = self.controls_config.get(col_name, {})
+                    control_type = control.get('control_type', '')
+                    field_name = control.get('field_name', '')
+                    group_name = control.get('group_name', '')
+                    
+                    if control_type:
+                        tooltip += f"\nTyp: {control_type}"
+                    if field_name and group_name:
+                        tooltip += f"\nFeld: {group_name}.{field_name}"
+                
+                # Tooltip auf Header-Item setzen
+                header_item = self.table.horizontalHeaderItem(col_idx)
+                if header_item:
+                    header_item.setToolTip(tooltip)
+                    logger.debug(f"🏷️ Header-Tooltip gesetzt für Spalte {col_idx}: {col_name}")
+            
             # Debug: Erste 3 Header ausgeben
             if headers:
                 sample_headers = headers[:3]
                 logger.info(f"📋 Beispiel-Header: {sample_headers}")
             
-            # Daten einfügen
+            # 📊 DATEN EINFÜGEN mit Abdatum-Tooltips
             for row_idx, row_data in enumerate(final_data):
                 for col_idx, col_name in enumerate(visible_columns):
                     value = row_data.get(col_name, '')
                     # Sichere Item-Erstellung
                     item = QTableWidgetItem(str(value) if value is not None else "")
+                    
+                    # 🏷️ ZELLEN-TOOLTIP: Abdatum aus Matrix-Ebene
+                    abdatum_key = f"{col_name}_formatiertes_abdatum"
+                    abdatum = row_data.get(abdatum_key, '')
+                    
+                    if abdatum:
+                        tooltip = f"Abdatum: {abdatum}"
+                        item.setToolTip(tooltip)
+                        logger.debug(f"🏷️ Zellen-Tooltip gesetzt für [{row_idx},{col_idx}]: {abdatum}")
+                    
                     self.table.setItem(row_idx, col_idx, item)
             
             # Header anpassen
@@ -2217,11 +2585,13 @@ class PdvmViewDialog(QWidget):
     
     def _get_visible_columns_from_gcs(self):
         """
-        🎯 SPALTEN-PROJEKTION: Sichtbare Spalten direkt aus GCS holen
+        🎯 SPALTEN-PROJEKTION: Sichtbare Spalten aus Projektions-Tabellen holen
         
-        LINEARE ARCHITEKTUR:
-        - StandardMode: Nur 'show' Controls mit 'show'=True
-        - ExpertMode: Alle 'show' UND 'original' Controls
+        LINEARE ARCHITEKTUR V3:
+        - Verwendet fertige Projektions-Tabellen aus GCS (bereits sortiert!)
+        - StandardMode: table_standard Projektion
+        - ExpertMode: table_expert Projektion
+        - Keine manuelle Filterung mehr - alles in Projektion vorbereitet
         """
         try:
             from pdvm_central_systemsteuerung import get_gcs
@@ -2231,25 +2601,26 @@ class PdvmViewDialog(QWidget):
                 logger.warning("⚠️ GCS nicht verfügbar für Spalten-Projektion")
                 return []
             
-            if not hasattr(self, 'controls_config') or not self.controls_config:
-                logger.warning("⚠️ Controls-Config nicht verfügbar für Spalten-Projektion")
+            if not hasattr(self, 'view_guid') or not self.view_guid:
+                logger.warning("⚠️ View-GUID nicht verfügbar für Projektion")
                 return []
             
-            # 🎓 EXPERT MODE: Zeige alle verfügbaren Spalten
+            # 🎯 PROJEKTION AUS GCS HOLEN (bereits sortiert nach display_order!)
             if gcs.expert_mode:
-                visible_cols = [key for key in self.controls_config.keys() 
-                               if self.controls_config[key].get('control_type') in ['show', 'original']]
-                logger.info(f"🎓 ExpertMode Projektion: {len(visible_cols)} Spalten")
-                logger.info(f"🔧 Expert-Spalten: {visible_cols[:5]}..." if len(visible_cols) > 5 else f"🔧 Expert-Spalten: {visible_cols}")
-                return visible_cols
+                projection = gcs.get_projection_table(self.view_guid, 'table_expert')
+                logger.info(f"🎓 ExpertMode Projektion geladen: {len(projection)} Spalten")
+            else:
+                projection = gcs.get_projection_table(self.view_guid, 'table_standard')
+                logger.info(f"👤 StandardMode Projektion geladen: {len(projection)} Spalten")
             
-            # 👤 STANDARD MODE: Nur explizit sichtbare 'show' Spalten
-            visible_cols = [key for key in self.controls_config.keys() 
-                           if (self.controls_config[key].get('control_type') == 'show' and 
-                               self.controls_config[key].get('show', False))]
-            logger.info(f"� StandardMode Projektion: {len(visible_cols)} Spalten")
-            logger.info(f"🔧 Standard-Spalten: {visible_cols}")
-            return visible_cols
+            if not projection:
+                logger.warning(f"⚠️ Keine Projektion gefunden - Rebuild notwendig")
+                gcs.rebuild_projection_tables(self.view_guid)
+                projection = gcs.get_projection_table(self.view_guid, 
+                                                    'table_expert' if gcs.expert_mode else 'table_standard')
+            
+            logger.info(f"✅ Spalten-Projektion: {projection[:5]}..." if len(projection) > 5 else f"✅ Spalten-Projektion: {projection}")
+            return projection
         
         except Exception as e:
             logger.error(f"❌ Fehler bei Spalten-Projektion: {e}")
@@ -2259,7 +2630,12 @@ class PdvmViewDialog(QWidget):
     
     def _on_header_clicked_direct(self, logical_index):
         """
-        🎯 DIREKTE Header-Click Behandlung mit Matrix-Manager
+        🎯 EINFACHE SORTIERUNG: Header-Click mit SortManager
+        
+        LINEARE ARCHITEKTUR:
+        - Verwendet SortManager für Sortierung
+        - Beachtet sortDirection und sortByOriginal
+        - Persistiert neue Richtung in GCS
         
         Args:
             logical_index: Index der geklickten Spalte
@@ -2273,38 +2649,45 @@ class PdvmViewDialog(QWidget):
                 logger.warning("⚠️ Matrix-Manager nicht verfügbar für Sortierung")
                 return
             
-            # Spalten-Name ermitteln
-            if logical_index < self.table.columnCount():
-                column_name = self.table.horizontalHeaderItem(logical_index).text()
-                
-                # Toggle Sortier-Richtung
-                current_column = getattr(self, '_current_sort_column', None)
-                current_ascending = getattr(self, '_current_sort_ascending', True)
-                
-                if current_column == column_name:
-                    # Gleiche Spalte: Richtung umkehren
-                    ascending = not current_ascending
-                else:
-                    # Neue Spalte: Aufsteigend starten
-                    ascending = True
-                
-                # Sortierung speichern
-                self._current_sort_column = column_name
-                self._current_sort_ascending = ascending
-                
-                logger.info(f"🔄 Header-Click: '{column_name}' ({'asc' if ascending else 'desc'})")
-                
-                # DIREKT an Matrix-Manager weiterleiten
-                matrix_manager.apply_sort(column_name, ascending)
-                
-                # Tabelle aktualisieren
-                self._refresh_table_from_matrix(matrix_manager)
-                
-            else:
+            # Sichtbare Spalten holen
+            visible_columns = self._get_visible_columns_from_gcs()
+            
+            if logical_index >= len(visible_columns):
                 logger.warning(f"⚠️ Ungültiger Spalten-Index: {logical_index}")
+                return
+            
+            # Column-Key aus Index ermitteln
+            column_key = visible_columns[logical_index]
+            
+            logger.info(f"🔄 Header-Click auf Spalte {logical_index}: {column_key}")
+            
+            # Sort-Manager holen
+            from sort_manager import get_sort_manager
+            sort_manager = get_sort_manager(self.view_guid)
+            sort_manager.set_controls_config(self.controls_config)
+            
+            # Filter-Matrix holen (Input für Sortierung)
+            filter_matrix = matrix_manager.get_filter_data()
+            
+            if not filter_matrix:
+                logger.warning("⚠️ Keine Filter-Matrix verfügbar")
+                return
+            
+            # Einfache Sortierung durchführen (toggle_direction=True)
+            sorted_matrix = sort_manager.simple_sort(filter_matrix, column_key, toggle_direction=True)
+            
+            # Sort-Matrix in Matrix-Manager setzen
+            matrix_manager.set_sort_data(sorted_matrix)
+            
+            # Tabelle aktualisieren
+            self.refresh_table_direct()
+            
+            logger.info(f"✅ Einfache Sortierung angewandt: {column_key}")
                 
         except Exception as e:
-            logger.error(f"❌ Fehler bei Header-Click: {e}")
+            logger.error(f"❌ Fehler bei Header-Click Sortierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _refresh_table_from_matrix(self, matrix_manager=None):
         """
@@ -2390,6 +2773,9 @@ class PdvmViewDisplay(QWidget):
         
         # Menü erstellen
         self._create_settings_menu()
+        
+        # Header-Click Handler für einfache Sortierung
+        self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         
         header_layout.addWidget(self.settings_button)
         
@@ -2603,6 +2989,10 @@ class PdvmViewDisplay(QWidget):
     
     def refresh_table(self):
         """Tabelle aktualisieren - LINEARES FILTER-SYSTEM: Nur Zeilen mit display=True anzeigen"""
+        # GCS für ExpertMode und andere Features laden
+        from pdvm_central_systemsteuerung import get_gcs
+        gcs = get_gcs()
+        
         matrix = self.view_dialog.display_matrix
         
         if not matrix:
@@ -2750,13 +3140,16 @@ class PdvmViewDisplay(QWidget):
                 return []
                 
             # STATISCHE PROJEKTION aus GCS - je nach Expert Mode
+            # Projektionen werden aus der SORT_MATRIX des PdvmMatrixManagers angewendet
             if gcs.expert_mode:
                 projection = gcs.get_projection_table(view_guid, 'table_expert')
             else:
                 projection = gcs.get_projection_table(view_guid, 'table_standard')
+            
             if projection:
                 mode_info = "Expert" if gcs.expert_mode else "Standard"
-                logger.debug(f"✅ Tabellen-Projektion ({mode_info}) live berechnet: {len(projection)} Spalten")
+                logger.debug(f"✅ Tabellen-Projektion ({mode_info}) für SORT_MATRIX: {len(projection)} Spalten")
+                logger.debug(f"📋 Projektions-Spalten: {projection[:5]}..." if len(projection) > 5 else f"📋 Projektions-Spalten: {projection}")
                 return projection
             else:
                 logger.warning(f"⚠️ Keine Tabellen-Projektion verfügbar für View {view_guid}")
@@ -2912,6 +3305,10 @@ class PdvmViewDisplay(QWidget):
     def _create_settings_menu(self):
         """Erstelle Settings-Dropdown-Menü - LINEAR"""
         try:
+            # GCS für ExpertMode-Prüfung laden
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
             settings_menu = QMenu(self)
 
             # Debug: Prüfe ob Methoden in self existieren (nicht in self.view_dialog)
@@ -2930,9 +3327,15 @@ class PdvmViewDisplay(QWidget):
             settings_menu.addAction(action_search)
 
             # 3. Sortierung & Gruppierung (NEU!)
-            action_sorting = QAction("Sortierung & Gruppierung", self)
+            settings_menu.addSeparator()
+            action_sorting = QAction("📊 Sortierung & Gruppierung", self)
             action_sorting.triggered.connect(self._sortierung_verwaltung)
             settings_menu.addAction(action_sorting)
+            
+            # 3b. Alle Spalten sortierbar machen (Einmal-Aktion)
+            action_enable_sort = QAction("🔧 Alle Spalten sortierbar machen", self)
+            action_enable_sort.triggered.connect(self._enable_all_sortable)
+            settings_menu.addAction(action_enable_sort)
 
             # 4. CSV-Export
             settings_menu.addSeparator()
@@ -3016,8 +3419,19 @@ class PdvmViewDisplay(QWidget):
             if hasattr(self, 'filter_panel') and self.filter_panel:
                 current_filters = self.filter_panel.get_current_filters()
             
-            # Modal-Dialog öffnen mit controls_config direkt übergeben
-            dialog = SearchParameterDialog(self, view_guid, self.view_dialog.controls_config, current_filters)
+            # Matrix Manager für V3 Filter-Manager holen (DIREKT von view_dialog!)
+            matrix_manager = None
+            if hasattr(self.view_dialog, 'matrix_manager') and self.view_dialog.matrix_manager:
+                matrix_manager = self.view_dialog.matrix_manager
+                logger.info(f"✅ Matrix Manager für SearchParameterDialog geholt")
+            else:
+                error_msg = "FEHLER: Matrix Manager nicht verfügbar!\n\nDer Suchparameter-Dialog kann nicht geöffnet werden."
+                logger.error(f"❌ {error_msg}")
+                QMessageBox.critical(self, "Suchparameter Fehler", error_msg)
+                return
+            
+            # Modal-Dialog öffnen mit controls_config direkt übergeben (V3: MIT matrix_manager!)
+            dialog = SearchParameterDialog(self, view_guid, self.view_dialog.controls_config, current_filters, matrix_manager)
             
             # PUNKT 3: Gesamtsuche-Feld leeren BEVOR Dialog geöffnet wird
             if hasattr(self, 'search_field') and self.search_field:
@@ -3066,6 +3480,299 @@ class PdvmViewDisplay(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler bei Suchparameter-Verwaltung: {e}")
             QMessageBox.warning(self, "Fehler", f"Suchparameter-Verwaltung Fehler:\n{e}")
+    
+    def _sortierung_verwaltung(self):
+        """🎓 Erweiterte Sortierung mit Gruppierung und Summierung"""
+        try:
+            from advanced_sort_dialog import AdvancedSortDialog
+            
+            # View-GUID für Persistierung
+            view_guid = getattr(self.view_dialog, 'view_guid', None)
+            if not view_guid:
+                QMessageBox.warning(self, "Fehler", "Keine View-GUID verfügbar für Sortierung")
+                return
+            
+            # Controls-Config holen
+            controls_config = getattr(self.view_dialog, 'controls_config', {})
+            if not controls_config:
+                QMessageBox.warning(self, "Fehler", "Keine Controls-Konfiguration verfügbar")
+                return
+            
+            # Modal-Dialog öffnen
+            dialog = AdvancedSortDialog(view_guid, controls_config, self)
+            result = dialog.exec_()
+            
+            if result == QDialog.Accepted:
+                # Sortier-Konfiguration holen
+                sort_config = dialog.get_sort_config()
+                sum_columns = dialog.get_sum_columns()
+                
+                logger.info(f"📊 Sortier-Konfiguration: {sort_config}")
+                logger.info(f"Σ Summierungs-Spalten: {sum_columns}")
+                
+                # Erweiterte Sortierung anwenden
+                self._apply_advanced_sort(sort_config, sum_columns)
+                
+                logger.info("✅ Erweiterte Sortierung angewendet")
+            else:
+                logger.info("ℹ️ Sortierungs-Dialog abgebrochen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Sortierungs-Verwaltung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            QMessageBox.warning(self, "Fehler", f"Sortierungs-Verwaltung Fehler:\n{e}")
+    
+    def _apply_advanced_sort(self, sort_config: list, sum_columns: list):
+        """
+        Wendet erweiterte Sortierung auf View an
+        
+        Args:
+            sort_config: Sortier-Konfiguration
+            sum_columns: Spalten für Summierung
+        """
+        try:
+            from sort_manager import get_sort_manager
+            from pdvm_matrix_manager import get_matrix_manager
+            
+            # View-GUID holen
+            view_guid = getattr(self.view_dialog, 'view_guid', None)
+            if not view_guid:
+                logger.error("❌ Keine View-GUID verfügbar")
+                return
+            
+            # Matrix-Manager holen
+            matrix_manager = get_matrix_manager(view_guid)
+            if not matrix_manager:
+                logger.error("❌ Matrix-Manager nicht verfügbar")
+                return
+            
+            # Sort-Manager holen
+            sort_manager = get_sort_manager(view_guid)
+            sort_manager.set_controls_config(self.view_dialog.controls_config)
+            
+            # Filter-Matrix holen (Input für Sortierung)
+            filter_matrix = matrix_manager.get_filter_data()
+            
+            if not filter_matrix:
+                logger.warning("⚠️ Keine Filter-Matrix verfügbar")
+                return
+            
+            # Erweiterte Sortierung durchführen
+            sorted_matrix = sort_manager.advanced_sort(filter_matrix, sort_config, sum_columns)
+            
+            # Sort-Matrix in Matrix-Manager setzen
+            matrix_manager.set_sort_data(sorted_matrix)
+            
+            # Tabelle aktualisieren
+            self.refresh_table()
+            
+            logger.info(f"✅ Erweiterte Sortierung angewandt: {len(sorted_matrix)} Zeilen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden der erweiterten Sortierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _enable_all_sortable(self):
+        """
+        🔧 Setzt alle Spalten als sortierbar
+        
+        Einmal-Aktion die alle Controls in der Projektion als sortierbar markiert.
+        Setzt auch sinnvolle Default-Werte für sortDirection und sortByOriginal.
+        """
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            import json
+            
+            # View-GUID holen
+            view_guid = getattr(self.view_dialog, 'view_guid', None)
+            if not view_guid:
+                QMessageBox.warning(self, "Fehler", "Keine View-GUID verfügbar")
+                return
+            
+            # GCS holen
+            gcs = get_gcs()
+            if not gcs:
+                QMessageBox.warning(self, "Fehler", "GCS nicht verfügbar")
+                return
+            
+            # Benutzer bestätigen lassen
+            reply = QMessageBox.question(
+                self,
+                "Alle Spalten sortierbar machen?",
+                "Möchten Sie alle Spalten dieser View als sortierbar markieren?\n\n"
+                "Dies setzt für alle Controls:\n"
+                "• sortable = true\n"
+                "• sortDirection = 'asc' (oder 'desc' für Datum/Alter)\n"
+                "• sortByOriginal = true (nur für Datumsfelder)\n\n"
+                "Die Änderungen werden sofort gespeichert.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                logger.info("ℹ️ Benutzer hat Aktion abgebrochen")
+                return
+            
+            # Projektions-Tabelle holen (alle sichtbaren Controls)
+            projection_table = gcs.get_projection_table(view_guid, "table")
+            
+            if not projection_table:
+                QMessageBox.warning(self, "Fehler", "Keine Projektions-Tabelle gefunden")
+                return
+            
+            logger.info(f"🚀 Starte Sortierbar-Update für {len(projection_table)} Controls...")
+            
+            updated_count = 0
+            error_count = 0
+            
+            # Durchlaufe alle Controls in der Projektion
+            for control_key in projection_table:
+                try:
+                    # Hole Control-JSON aus Systemsteuerung-DB
+                    control_data = gcs._db.get_value(view_guid, control_key)
+                    
+                    if not control_data or len(control_data) != 2:
+                        logger.warning(f"⚠️ Keine Control-Daten gefunden für: {control_key}")
+                        continue
+                    
+                    control_json, _ = control_data
+                    
+                    if not control_json:
+                        logger.warning(f"⚠️ Control-JSON ist leer für: {control_key}")
+                        continue
+                    
+                    # Parse JSON
+                    control = json.loads(control_json)
+                    
+                    # Stelle sicher, dass ui-Dict existiert
+                    if 'ui' not in control:
+                        control['ui'] = {}
+                    
+                    # Bestimme sinnvolle Defaults basierend auf Control-Typ
+                    control_type = control.get('type', 'string')
+                    
+                    # Default-Richtung
+                    if 'datum' in control_key.lower() or 'alter' in control_key.lower():
+                        default_direction = 'desc'  # Neueste zuerst
+                    else:
+                        default_direction = 'asc'  # Alphabetisch
+                    
+                    # sortByOriginal nur für Datumsfelder mit _show Suffix
+                    default_by_original = (
+                        'geburtsdatum_show' in control_key and 
+                        control_key.endswith('_show')
+                    )
+                    
+                    # Aktualisiere Sortier-Einstellungen
+                    control['ui']['sortable'] = True
+                    control['ui']['sortDirection'] = control['ui'].get('sortDirection', default_direction)
+                    control['ui']['sortByOriginal'] = control['ui'].get('sortByOriginal', default_by_original)
+                    
+                    # Speichere zurück als JSON
+                    updated_json = json.dumps(control, ensure_ascii=False)
+                    gcs._db.set_value(view_guid, control_key, updated_json)
+                    
+                    updated_count += 1
+                    logger.info(f"✅ {control_key}: sortable=true, direction={control['ui']['sortDirection']}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Fehler bei {control_key}: {e}")
+                    error_count += 1
+            
+            # Rebuild Projektions-Tabellen nach Änderungen
+            logger.info("🔄 Rebuild Projektions-Tabellen...")
+            gcs.rebuild_projection_tables(view_guid)
+            
+            # Controls-Config in View neu laden
+            if hasattr(self.view_dialog, 'controls_config'):
+                # Controls neu laden
+                for control_key in projection_table:
+                    control_data = gcs._db.get_value(view_guid, control_key)
+                    if control_data and len(control_data) == 2:
+                        control_json, _ = control_data
+                        if control_json:
+                            self.view_dialog.controls_config[control_key] = json.loads(control_json)
+            
+            # Erfolgs-Meldung
+            message = f"✅ Update abgeschlossen!\n\n"
+            message += f"• {updated_count} Controls aktualisiert\n"
+            if error_count > 0:
+                message += f"• {error_count} Fehler aufgetreten\n"
+            message += f"\nAlle Spalten sind jetzt sortierbar."
+            
+            QMessageBox.information(self, "Sortierbar-Update", message)
+            
+            logger.info(f"🎉 Sortierbar-Update abgeschlossen: {updated_count} erfolgreich, {error_count} Fehler")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei _enable_all_sortable: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Sortierbar-Update:\n{e}")
+    
+    def _on_header_clicked(self, logical_index: int):
+        """
+        🎯 EINFACHE SORTIERUNG: Header-Click Handler für PdvmViewDisplay
+        
+        Args:
+            logical_index: Index der geklickten Spalte
+        """
+        try:
+            from sort_manager import get_sort_manager
+            from pdvm_matrix_manager import get_matrix_manager
+            
+            # View-GUID holen
+            view_guid = getattr(self.view_dialog, 'view_guid', None)
+            if not view_guid:
+                logger.error("❌ Keine View-GUID verfügbar für Sortierung")
+                return
+            
+            # Sichtbare Spalten holen
+            visible_columns = self._get_visible_columns_from_gcs()
+            
+            if logical_index >= len(visible_columns):
+                logger.warning(f"⚠️ Ungültiger Spalten-Index: {logical_index}")
+                return
+            
+            # Column-Key aus Index ermitteln
+            column_key = visible_columns[logical_index]
+            
+            logger.info(f"🔄 Header-Click auf Spalte {logical_index}: {column_key}")
+            
+            # Matrix-Manager holen
+            matrix_manager = get_matrix_manager(view_guid)
+            if not matrix_manager:
+                logger.error("❌ Matrix-Manager nicht verfügbar")
+                return
+            
+            # Sort-Manager holen
+            sort_manager = get_sort_manager(view_guid)
+            sort_manager.set_controls_config(self.view_dialog.controls_config)
+            
+            # Filter-Matrix holen (Input für Sortierung)
+            filter_matrix = matrix_manager.get_filter_data()
+            
+            if not filter_matrix:
+                logger.warning("⚠️ Keine Filter-Matrix verfügbar")
+                return
+            
+            # Einfache Sortierung durchführen (toggle_direction=True)
+            sorted_matrix = sort_manager.simple_sort(filter_matrix, column_key, toggle_direction=True)
+            
+            # Sort-Matrix in Matrix-Manager setzen
+            matrix_manager.set_sort_data(sorted_matrix)
+            
+            # Tabelle aktualisieren
+            self.refresh_table()
+            
+            logger.info(f"✅ Einfache Sortierung angewandt: {column_key}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Header-Click Sortierung: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _export_csv(self):
         """CSV-Export - Weiterleitung an view_dialog._export_data()"""

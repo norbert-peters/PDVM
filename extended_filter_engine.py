@@ -8,7 +8,7 @@ Position 1: FIRST/AND/OR | Position 2: IS/NOT | Position 3: Operator | Position 
 
 import logging
 import re
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class ExtendedFilterEngine:
 
     def save_field_conditions(self, field_key: str, conditions: List):
         """
-        Speichere erweiterte Bedingungen für ein Feld persistent - KORRIGIERT: in anwendungsdaten
+        Speichere erweiterte Bedingungen für ein Feld persistent - V2: mit search_string
         
         Args:
             field_key: Spaltenname ohne field_ prefix
@@ -180,18 +180,116 @@ class ExtendedFilterEngine:
             
             # KORREKT: Zurück in anwendungsdaten speichern
             gcs._app_db.set_value(self.view_guid, field_key, current_data)
+            
+            # V2: s_string + s_source für Pipeline speichern (ZUSAMMEN!)
+            search_string = self._build_search_string_from_conditions(field_key, conditions)
+            gcs._app_db.set_value(self.view_guid, 's_string', search_string)
+            gcs._app_db.set_value(self.view_guid, 's_source', 'komplex')
+            
+            # WICHTIG: Alles in einer Transaktion speichern
             gcs._app_db.save_all_values()
             
-            logger.info(f"💾 APP-DB erweiterte Bedingungen gespeichert: {field_key} = {{'simple_search': '{current_data['simple_search']}', 'conditions': {len(current_data['conditions'])} items}}")
+            logger.info(f"💾 V2: Erweiterte Bedingungen + s_string gespeichert: {field_key} = {len(current_data['conditions'])} Bedingungen")
+            logger.info(f"🔍 s_string: {search_string} (s_source='komplex')")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern erweiterter Bedingungen für '{field_key}': {e}")
+    
+    def _build_search_string_from_conditions(self, field_key: str, conditions: List) -> Optional[str]:
+        """
+        V2: Erstelle search_string aus ALLEN erweiterten Bedingungen für Pipeline
+        
+        WICHTIG: Baut search_string für ALLE aktiven Filter (nicht nur das aktuelle Feld),
+        da mehrere Felder gleichzeitig erweiterte Filter haben können.
+        
+        Format: "EXTENDED:field1:summary1||EXTENDED:field2:summary2"
+        Summary Format pro Feld: "condition1||condition2||condition3"
+        
+        Args:
+            field_key: Aktuell bearbeitetes Feld (wird in extended_conditions aktualisiert)
+            conditions: Liste von SearchCondition Objekten oder Dicts für field_key
+            
+        Returns:
+            search_string für ALLE aktiven erweiterten Filter oder None
+        """
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            # Aktuelles Feld temporär in extended_conditions aktualisieren
+            if conditions:
+                self.extended_conditions[field_key] = conditions
+            elif field_key in self.extended_conditions:
+                del self.extended_conditions[field_key]
+            
+            # ALLE aktiven erweiterten Filter durchgehen
+            all_field_strings = []
+            
+            for fname, field_conditions in self.extended_conditions.items():
+                if not field_conditions:
+                    continue
+                
+                # Bedingungen zu Summary-Strings konvertieren
+                condition_strings = []
+                for condition in field_conditions:
+                    # SearchCondition Objekt oder Dict
+                    if hasattr(condition, 'to_dict'):
+                        cond_dict = condition.to_dict()
+                    else:
+                        cond_dict = condition
+                    
+                    # Format: "position|is_not|operator|value"
+                    position = cond_dict.get('position', 'AND')
+                    is_not = cond_dict.get('is_not', False)
+                    operator = cond_dict.get('operator', 'enthält')
+                    value = cond_dict.get('value', '')
+                    
+                    cond_str = f"{position}|{'NOT' if is_not else 'IS'}|{operator}|{value}"
+                    condition_strings.append(cond_str)
+                
+                # Alle Bedingungen dieses Feldes mit || verbinden
+                summary = "||".join(condition_strings)
+                
+                # EXTENDED Format für dieses Feld
+                field_string = f"EXTENDED:{fname}:{summary}"
+                all_field_strings.append(field_string)
+            
+            # Alle Felder mit || verbinden
+            if all_field_strings:
+                search_string = "||".join(all_field_strings)
+                logger.info(f"🔧 V2 search_string gebaut für {len(all_field_strings)} Felder: {search_string[:100]}...")
+                return search_string
+            else:
+                logger.info("🔧 Keine erweiterten Filter aktiv → search_string = None")
+                return None
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen search_string: {e}")
+            return None
             
     def clear_field_conditions(self, field_key: str):
-        """Lösche erweiterte Bedingungen für ein Feld"""
-        if field_key in self.extended_conditions:
-            del self.extended_conditions[field_key]
-            logger.info(f"🗑️ Erweiterte Bedingungen für '{field_key}' gelöscht")
+        """V2: Lösche erweiterte Bedingungen für ein Feld + aktualisiere search_string"""
+        try:
+            if field_key in self.extended_conditions:
+                del self.extended_conditions[field_key]
+                logger.info(f"🗑️ Erweiterte Bedingungen für '{field_key}' gelöscht")
+                
+                # V2: search_string aktualisieren (ohne das gelöschte Feld)
+                from pdvm_central_systemsteuerung import get_gcs
+                gcs = get_gcs()
+                
+                if gcs and hasattr(gcs, '_app_db') and gcs._app_db and self.view_guid:
+                    # Persistente Daten löschen
+                    gcs._app_db.set_value(self.view_guid, field_key, None)
+                    
+                    # search_string neu bauen (ohne das gelöschte Feld)
+                    search_string = self._build_search_string_from_conditions(field_key, [])
+                    gcs._app_db.set_value(self.view_guid, 'search_string', search_string)
+                    gcs._app_db.save_all_values()
+                    
+                    logger.info(f"💾 V2: search_string aktualisiert nach Löschen von '{field_key}'")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen der Bedingungen: {e}")
             
     def has_conditions(self, field_key: str = None) -> bool:
         """

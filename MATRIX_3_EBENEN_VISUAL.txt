@@ -1,0 +1,226 @@
+# 3-EBENEN MATRIX - VISUELLE ÜBERSICHT
+
+## ASCII-Diagramm: Datenfluss
+
+```
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                      PDVM 3-EBENEN MATRIX-ARCHITEKTUR                            ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  1️⃣  DATENBANK-EBENE (PdvmCentralDatenbank)                                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       │ get_value(gruppe, feld, stichtag)
+                                       ↓
+                              ┌──────────────────┐
+                              │ (wert, abdatum)  │
+                              │ Tupel-Rückgabe   │
+                              └──────────────────┘
+                                       │
+                                       ↓
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  2️⃣  MATRIX-EBENE (Python Dictionary pro Row)                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+      ┌───────────────────────────────────────────────────────────────────┐
+      │  row_data = {                                                      │
+      │                                                                     │
+      │    ┌─────────────────────────────────────────────────────────┐   │
+      │    │  🗄️  EBENE 1: Rohdatum-Wert                             │   │
+      │    │  'geburtsdatum_original': 1980001.0                     │   │
+      │    │  'familienname_original': 'Müller'                      │   │
+      │    └─────────────────────────────────────────────────────────┘   │
+      │                              │                                     │
+      │                              ↓                                     │
+      │    ┌─────────────────────────────────────────────────────────┐   │
+      │    │  📅 EBENE 2: AB-Datum (roh aus DB)                      │   │
+      │    │  'geburtsdatum_original_abdatum': 2024310.12500         │   │
+      │    │  'familienname_original_abdatum': 2024305.08000         │   │
+      │    └─────────────────────────────────────────────────────────┘   │
+      │                              │                                     │
+      │                              ↓                                     │
+      │                        _format_abdatum()                          │
+      │                         (pdvm_DateTime)                           │
+      │                              │                                     │
+      │                              ↓                                     │
+      │    ┌─────────────────────────────────────────────────────────┐   │
+      │    │  🎨 EBENE 3: Formatiertes AB-Datum (länderspez.)        │   │
+      │    │  'geburtsdatum_original_formatiertes_abdatum':          │   │
+      │    │    "05.11.2024 03:00:00"  (DEU-Format)                  │   │
+      │    │  'familienname_original_formatiertes_abdatum':          │   │
+      │    │    "01.11.2024 01:55:12"  (DEU-Format)                  │   │
+      │    └─────────────────────────────────────────────────────────┘   │
+      │                                                                     │
+      │  }                                                                  │
+      └───────────────────────────────────────────────────────────────────┘
+
+                                       │
+                                       ↓
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  3️⃣  UI-EBENE (TableWidget mit Tooltips)                                        │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+      ┌────────────────────────────────────────────────────────────┐
+      │  Tabellen-Zelle:                                            │
+      │  ┌──────────────────────────────────────────────────────┐  │
+      │  │  Angezeigter Wert: "Müller"                          │  │
+      │  │                                                       │  │
+      │  │  [Maus-Hover]                                        │  │
+      │  │  ↓                                                    │  │
+      │  │  💬 Tooltip: "abdatum: 01.11.2024 01:55:12"         │  │
+      │  │     (verwendet EBENE 3: formatiertes_abdatum)       │  │
+      │  └──────────────────────────────────────────────────────┘  │
+      └────────────────────────────────────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                      SHOW-SPALTEN: KOPIER-MECHANISMUS                            ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+ORIGINAL-Spalte (_original)                    SHOW-Spalte (_show)
+┌─────────────────────────────┐               ┌─────────────────────────────┐
+│ familienname_original       │               │ familienname_show           │
+│ ├─ Wert: "Müller"           │  ═══════════> │ ├─ Wert: "Müller"           │
+│ ├─ abdatum: 2024305.08000   │  KOMPLETT     │ ├─ abdatum: 2024305.08000   │
+│ └─ formatiert: "01.11.24.." │  KOPIEREN     │ └─ formatiert: "01.11.24.." │
+└─────────────────────────────┘  (3 Ebenen)   └─────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                    LÄNDERSPEZIFISCHE FORMATIERUNG                                 ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+Raw AB-Datum: 2024310.12500
+         │
+         ├─────────> pdvm_DateTime (DEU) ──> "05.11.2024 03:00:00"
+         │
+         ├─────────> pdvm_DateTime (ENG) ──> "05/11/2024 03:00:00"
+         │
+         └─────────> pdvm_DateTime (USA) ──> "11/05/2024 03:00:00"
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                         KRITISCHE REGELN                                          ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+ ✅ KORREKT                                ❌ FALSCH
+ ────────────────────────────────────────────────────────────────────────────────
+ • Alle 3 Ebenen zusammen befüllen        • Nur EBENE 1 setzen
+ • Formatierung bei Erstellung            • Nachträgliche Formatierung
+ • Show kopiert alle 3 Ebenen             • Show kopiert nur Wert
+ • _format_abdatum() bei Matrix-Build     • Formatierung beim Rendern
+ • Einheitliches Pattern überall          • Unterschiedliche Patterns
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                      PRAKTISCHES CODE-BEISPIEL                                    ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+# ❌ FALSCH - Nur 1 Ebene:
+row_data['geburtsdatum_original'] = wert
+
+# ✅ KORREKT - Alle 3 Ebenen:
+result = instance.get_value(gruppe, feld, gcs.st_inst.PdvmDateTime)
+wert, abdatum = result[0], result[1] if isinstance(result, tuple) else (result, None)
+
+row_data['geburtsdatum_original'] = wert                                    # EBENE 1
+row_data['geburtsdatum_original_abdatum'] = abdatum                         # EBENE 2
+row_data['geburtsdatum_original_formatiertes_abdatum'] = self._format_abdatum(abdatum)  # EBENE 3
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                         MEMORY-STRUKTUR                                           ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+Matrix (List of Dicts):
+[
+  {  # ROW 0
+    'uid_original': '54073c2c-...',
+    'geburtsdatum_original': 1980001.0,                        # 8 Bytes (float)
+    'geburtsdatum_original_abdatum': 2024310.12500,            # 8 Bytes (float)
+    'geburtsdatum_original_formatiertes_abdatum': "05.11...",  # ~20 Bytes (str)
+    'familienname_original': 'Müller',                         # ~10 Bytes (str)
+    'familienname_original_abdatum': 2024305.08000,            # 8 Bytes (float)
+    'familienname_original_formatiertes_abdatum': "01.11...",  # ~20 Bytes (str)
+    ...
+  },
+  {  # ROW 1
+    ...
+  }
+]
+
+Pro Feld: ~46 Bytes (3 Keys)
+Pro 100 Felder: ~4.6 KB
+Pro 1000 Rows mit 100 Feldern: ~4.6 MB
+
+💡 VORTEIL: Keine Neu-Berechnung, maximale Performance!
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                    DATEIEN & DOKUMENTATION                                        ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝
+
+📋 Dokumentation:
+   • MATRIX_3_EBENEN_STRUKTUR.md          - Vollständige Dokumentation
+   • matrix_3_ebenen_example.py            - Praktische Code-Beispiele
+   • MATRIX_3_EBENEN_VISUAL.txt            - Diese Datei (Visualisierung)
+
+🔧 Implementierung:
+   • pdvm_view_matrix_manager.py           - Matrix-Pipeline-Manager
+   • pdvm_view_dialog.py                   - Original-Logik (BasisMatrix)
+   • pdvm_view_daten_manager.py            - Daten-Layer mit Matrix-Export
+
+🎨 Formatierung:
+   • pd_datetime.py                        - Pdvm_DateTime Klasse
+   • └─ FormTimeStamp Property             - Länderspezifische Ausgabe
+   • └─ __setFormCountry()                 - Länder-Konfiguration
+
+🖥️ UI-Integration:
+   • pdvm_view_widget.py                   - TableWidget mit Tooltips
+   • pdvm_view_ui.py                       - UI-Layout und Matrix-Binding
+
+
+```
+
+## Schnellreferenz: Wichtigste Patterns
+
+### Pattern 1: Matrix-Row erstellen
+```python
+# Alle 3 Ebenen befüllen
+row_data[key] = wert
+row_data[f"{key}_abdatum"] = abdatum
+row_data[f"{key}_formatiertes_abdatum"] = self._format_abdatum(abdatum)
+```
+
+### Pattern 2: Show-Spalten kopieren
+```python
+# Alle 3 Ebenen kopieren
+row_data[show_key] = row_data[original_key]
+row_data[f"{show_key}_abdatum"] = row_data[f"{original_key}_abdatum"]
+row_data[f"{show_key}_formatiertes_abdatum"] = row_data[f"{original_key}_formatiertes_abdatum"]
+```
+
+### Pattern 3: Formatierung
+```python
+def _format_abdatum(self, abdatum_value):
+    if abdatum_value is None:
+        return None
+    if float(abdatum_value) == 1001.0:
+        return "01.01.0001 (Default)"
+    
+    dt = self.gcs.temp_dt_inst
+    dt.PdvmDateTime = float(abdatum_value)
+    return dt.FormTimeStamp
+```
+
+### Pattern 4: UI-Tooltip
+```python
+# EBENE 3 für Tooltip verwenden
+formatted_abdatum = row_data.get(f"{col_key}_formatiertes_abdatum")
+if formatted_abdatum:
+    item.setToolTip(f"abdatum: {formatted_abdatum}")
+```
+
+---
+**© PDVM-System v0.9 | 3-Ebenen Matrix-Architektur**

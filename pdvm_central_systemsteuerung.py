@@ -11,11 +11,39 @@ Robuste Architektur mit:
 """
 
 import logging
-from typing import Dict
+from typing import Dict, Union
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_central_datenbank import PdvmCentralDatenbank
 
 logger = logging.getLogger(__name__)
+
+# ========================================
+# PROJECTION TABLE ARRAY KONSTANTEN
+# ========================================
+# Array-Positionen für Projektions-Tabellen (0-9)
+TABLE_INDEX_VIEW = 0           # View-Darstellung (ProjectionMatrix)
+TABLE_INDEX_CHANGE = 1         # Spalten verwalten Dialog
+TABLE_INDEX_FILTER = 2         # Filter Dialog
+TABLE_INDEX_SORT = 3           # Sort Dialog (NEU!)
+TABLE_INDEX_RESERVED = 4       # Reserviert für zukünftige Features
+
+EXPERT_MODE_OFFSET = 5         # Expert Mode = Standard + 5
+
+# Legacy-Mapping für Abwärtskompatibilität
+_LEGACY_INDEX_MAP = {
+    'table_standard': 0,
+    'table_expert': 5,
+    'change_standard': 1,
+    'change_expert': 6,
+    'filter_standard': 2,
+    'filter_expert': 7,
+    'sort_standard': 3,
+    'sort_expert': 8,
+    # Alte Namen (Kompatibilität)
+    'search_standard': 2,
+    'search_expert': 7,
+}
+# ========================================
 
 class PdvmCentralSystemsteuerung:
     """Zentrale Systemsteuerung mit robuster Architektur"""
@@ -30,8 +58,9 @@ class PdvmCentralSystemsteuerung:
         self._dropdown_cache = {}  # Cache für geladene Dropdowns: {dropdown_name: {language: {key: value}}}
         self._initialized = False
 
-        # PROJEKTIONS-TABELLEN MATRIX: Statische Tabellen für Views
-        # Struktur: {view_guid: {projection_type: [spalten_liste]}}
+        # PROJEKTIONS-TABELLEN ARRAY: 10-Positionen pro View
+        # Struktur: {view_guid: [10 Listen]} - Positionen 0-4 Standard, 5-9 Expert
+        # 0/5: View, 1/6: Change, 2/7: Filter, 3/8: Sort, 4/9: Reserviert
         self._projection_tables = {}
 
         if not user_guid:
@@ -396,13 +425,21 @@ class PdvmCentralSystemsteuerung:
     
     @property
     def mode(self):
-        """Mode aus Benutzerdaten (Parameter Gruppe)"""
+        """Mode aus Benutzerdaten (Parameter Gruppe) - 'user' oder 'admin'"""
         self._ensure_initialized()
         try:
             # Hole mode aus Parameter Gruppe der Benutzerdaten
             parameter_data = self._user_data.get('Parameter', {})
-            return parameter_data.get('mode', 'user')
+            mode_value = parameter_data.get('mode', 'user')
+            
+            # Validiere Wert: nur 'user' oder 'admin' erlaubt
+            if mode_value not in ['user', 'admin']:
+                logger.warning(f"⚠️ Ungültiger mode Wert '{mode_value}', verwende 'user' als Fallback")
+                return 'user'
+            
+            return mode_value
         except (KeyError, AttributeError, TypeError):
+            logger.warning("⚠️ mode nicht gefunden in Benutzerdaten, verwende 'user' als Fallback")
             return 'user'
     
     @property
@@ -555,16 +592,18 @@ class PdvmCentralSystemsteuerung:
     # EINFACHE PROJEKTIONS-ARCHITEKTUR
     # ==========================================
 
-    def get_projection_table(self, view_guid: str, projection_type: str = "table"):
+    def get_projection_table(self, view_guid: str, index_or_name: Union[int, str] = 0):
         """
-        ✅ STATISCHES PROJEKTIONS-TABELLEN SYSTEM
+        ✅ ARRAY-BASIERTES PROJEKTIONS-TABELLEN SYSTEM
         
-        Gibt die vorberechneten Projektions-Listen zurück. Diese werden nur 
-        beim Speichern der Controls neu aufgebaut, ansonsten statisch verwendet.
+        Gibt die vorberechneten Projektions-Listen zurück aus dem 10-Positionen Array.
+        Diese werden nur beim Speichern der Controls neu aufgebaut, ansonsten statisch verwendet.
 
         Args:
             view_guid: GUID der View
-            projection_type: "table", "change_spalten", "search_spalten", etc.
+            index_or_name: Integer (0-9) für Array-Zugriff ODER String für Legacy-Kompatibilität
+                          0/5: View, 1/6: Change, 2/7: Filter, 3/8: Sort, 4/9: Reserviert
+                          Expert Mode = Standard + 5
 
         Returns:
             list: Statische Liste der Spalten-Keys für den entsprechenden Zweck
@@ -575,25 +614,54 @@ class PdvmCentralSystemsteuerung:
                 logger.info(f"🔧 Erstelle initiale Projektions-Tabellen für View {view_guid}")
                 self._build_projection_tables(view_guid)
             
-            # Hole die entsprechende Projektion
-            view_projections = self._projection_tables.get(view_guid, {})
-            projection = view_projections.get(projection_type, [])
+            # Legacy-Kompatibilität: String → Integer-Index
+            if isinstance(index_or_name, str):
+                index = _LEGACY_INDEX_MAP.get(index_or_name)
+                if index is None:
+                    logger.warning(f"⚠️ Unbekannter Projektions-Name: {index_or_name}")
+                    return []
+                logger.debug(f"🔄 Legacy-String '{index_or_name}' → Index {index}")
+            else:
+                index = index_or_name
+            
+            # Validiere Index
+            if not (0 <= index < 10):
+                logger.error(f"❌ Ungültiger Projektions-Index: {index} (muss 0-9 sein)")
+                return []
+            
+            # Hole Array für View
+            view_tables = self._projection_tables.get(view_guid)
+            if not view_tables or len(view_tables) != 10:
+                logger.warning(f"⚠️ Projektions-Array für {view_guid} nicht vollständig")
+                return []
+            
+            # Array-Zugriff
+            projection = view_tables[index]
             
             if projection:
-                logger.debug(f"✅ Statische Projektion '{projection_type}' für {view_guid}: {len(projection)} Spalten")
+                logger.debug(f"✅ Projektion Index {index} für {view_guid}: {len(projection)} Spalten")
                 return projection.copy()  # Kopie für Unveränderlichkeit
             else:
-                logger.warning(f"⚠️ Keine Projektion '{projection_type}' für View {view_guid} gefunden")
+                logger.warning(f"⚠️ Leere Projektion an Index {index} für View {view_guid}")
                 return []
                 
         except Exception as e:
-            logger.error(f"❌ Fehler bei get_projection_table({view_guid}, {projection_type}): {e}")
+            logger.error(f"❌ Fehler bei get_projection_table({view_guid}, {index_or_name}): {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
     
     def _build_projection_tables(self, view_guid: str):
         """
-        Baut die 6 statischen Projektions-Tabellen für eine View auf.
+        Baut das 10-Positionen Array für statische Projektions-Tabellen auf.
         Wird nur aufgerufen nach Controls-Speicherung oder bei erster Verwendung.
+        
+        Array-Struktur:
+        - 0/5: View (table_standard/expert)
+        - 1/6: Change (change_standard/expert) - Spalten verwalten
+        - 2/7: Filter (filter_standard/expert)
+        - 3/8: Sort (sort_standard/expert) - NEU!
+        - 4/9: Reserviert
         
         Args:
             view_guid: GUID der View
@@ -602,25 +670,14 @@ class PdvmCentralSystemsteuerung:
             # Controls aus Datenbank laden
             controls, _ = self.db.get_value(view_guid, "controls")
             if not controls:
-                logger.warning(f"⚠️ Keine Controls für View {view_guid} - erstelle leere Projektionen")
-                self._projection_tables[view_guid] = {
-                    'table_standard': [],
-                    'table_expert': [],
-                    'search_standard': [],
-                    'search_expert': [],
-                    'change_standard': [],
-                    'change_expert': [],
-                    'sort_standard': [],
-                    'sort_expert': []
-                }
+                logger.warning(f"⚠️ Keine Controls für View {view_guid} - erstelle leeres Array")
+                self._projection_tables[view_guid] = [[] for _ in range(10)]  # 10 leere Listen
                 return
             
-            logger.info(f"🏗️ Baue Projektions-Tabellen für View {view_guid} mit {len(controls)} Controls")
+            logger.info(f"🏗️ Baue Projektions-Array für View {view_guid} mit {len(controls)} Controls")
             
             # Analysiere alle Controls
             dummy_controls = []
-            visible_controls = []
-            hidden_controls = []
             all_controls = []
             non_expert_controls = []  # Spalten die NICHT expert_mode=True haben
             
@@ -639,7 +696,9 @@ class PdvmCentralSystemsteuerung:
                         'display_order': control_data.get('display_order', 999),
                         'expert_order': control_data.get('expert_order', 999),
                         'show': control_data.get('show', False),
-                        'expert_mode': control_data.get('expert_mode', False)  # Expert Mode Flag
+                        'expert_mode': control_data.get('expert_mode', False),
+                        'sortable': control_data.get('sortable', False),
+                        'filterable': control_data.get('filterable', False)
                     }
                     
                     all_controls.append(control_info)
@@ -647,66 +706,78 @@ class PdvmCentralSystemsteuerung:
                     # Prüfe Expert Mode Flag - nur Spalten die NICHT expert_mode=True sind
                     if not control_data.get('expert_mode', False):
                         non_expert_controls.append(control_info)
-                    
-                    if control_data.get('show', False):
-                        visible_controls.append(control_key)
-                    else:
-                        hidden_controls.append(control_key)
             
-            # Sortiere nach entsprechenden Orders
-            all_controls_display = sorted(all_controls, key=lambda x: x['display_order'])
-            all_controls_expert = sorted(all_controls, key=lambda x: (x['expert_order'], x['display_order']))
-            visible_controls_display = sorted([c for c in all_controls if c['show']], key=lambda x: x['display_order'])
-            non_expert_controls_display = sorted(non_expert_controls, key=lambda x: x['display_order'])
-            non_expert_controls_expert = sorted(non_expert_controls, key=lambda x: (x['expert_order'], x['display_order']))
+            # Sortiere Listen nach Order
+            all_controls_by_display = sorted(all_controls, key=lambda x: x['display_order'])
+            all_controls_by_expert = sorted(all_controls, key=lambda x: x['expert_order'])
+            visible_by_display = sorted([c for c in all_controls if c['show']], key=lambda x: x['display_order'])
+            visible_by_expert = sorted([c for c in all_controls if c['show']], key=lambda x: x['expert_order'])
+            non_expert_by_display = sorted(non_expert_controls, key=lambda x: x['display_order'])
+            non_expert_by_expert = sorted(non_expert_controls, key=lambda x: x['expert_order'])
             
-            # LINEARES SYSTEM: 8 Projektions-Tabellen (4 Bereiche × 2 Modi)
-            projections = {
-                # VIEW-Bereich: Darstellung in der Tabelle
-                'table_standard': [c['key'] for c in visible_controls_display],        # Nur sichtbare, display_order
-                'table_expert': [c['key'] for c in all_controls_display],              # Alle Spalten, display_order
-                
-                # SEARCH-Bereich: Verfügbare Suchspalten  
-                'search_standard': [c['key'] for c in visible_controls_display],      # Nur sichtbare, display_order
-                'search_expert': [c['key'] for c in all_controls_display],            # Alle Spalten, display_order
-                
-                # CHANGE-Bereich: Verwaltbare Spalten in Spaltenverwaltung
-                'change_standard': [c['key'] for c in non_expert_controls_display],   # Nur non-expert, display_order
-                'change_expert': [c['key'] for c in all_controls_expert],             # Alle Spalten, expert_order
-                
-                # SORT-Bereich: Sortierbare Spalten im Sortier-Dialog
-                'sort_standard': [c['key'] for c in visible_controls_display],        # Nur sichtbare, display_order
-                'sort_expert': [c['key'] for c in all_controls_expert]                # Alle Spalten, expert_order
-            }
+            # ARRAY-SYSTEM: 10 Projektions-Tabellen
+            # Positionen 0-4: Standard Mode | Positionen 5-9: Expert Mode (+5)
+            tables = [None] * 10
             
-            # Speichere in Matrix
-            self._projection_tables[view_guid] = projections
+            # STANDARD MODE (0-4)
+            # Position 0: View - Nur sichtbare Spalten (show=true)
+            tables[0] = [c['key'] for c in visible_by_display]
             
-            logger.info(f"✅ LINEARES Projektions-Tabellen für {view_guid} erstellt:")
-            logger.info(f"  📊 Table Standard: {len(projections['table_standard'])} Spalten (nur sichtbare)")
-            logger.info(f"  📊 Table Expert: {len(projections['table_expert'])} Spalten (alle)")
-            logger.info(f"  🔍 Search Standard: {len(projections['search_standard'])} Spalten (nur sichtbare)") 
-            logger.info(f"  🔍 Search Expert: {len(projections['search_expert'])} Spalten (alle)")
-            logger.info(f"  🔧 Change Standard: {len(projections['change_standard'])} Spalten (nur non-expert)")
-            logger.info(f"  🔧 Change Expert: {len(projections['change_expert'])} Spalten (alle)")
-            logger.info(f"  🔄 Sort Standard: {len(projections['sort_standard'])} Spalten (nur sichtbare)")
-            logger.info(f"  🔄 Sort Expert: {len(projections['sort_expert'])} Spalten (alle)")
+            # Position 1: Change - Spalten verwalten (nicht expert_mode)
+            tables[1] = [c['key'] for c in non_expert_by_display]
+            
+            # Position 2: Filter - ALLE sichtbaren Spalten (wie View)
+            # Grund: Benutzer sollen alle sichtbaren Felder filtern können
+            tables[2] = [c['key'] for c in visible_by_display]
+            
+            # Position 3: Sort - ALLE sichtbaren Spalten (wie View)
+            # Grund: Alle sichtbaren Spalten sollten sortierbar sein
+            tables[3] = [c['key'] for c in visible_by_display]
+            
+            # Position 4: Reserviert
+            tables[4] = []
+            
+            # EXPERT MODE (5-9 = Standard + 5)
+            # Position 5: View - Alle Controls (außer dummy)
+            tables[5] = [c['key'] for c in all_controls_by_expert]
+            
+            # Position 6: Change - Alle Controls (außer dummy)
+            tables[6] = [c['key'] for c in all_controls_by_expert]
+            
+            # Position 7: Filter - ALLE Controls (wie View Expert)
+            # Grund: Im Expert Mode sollte man alle Felder filtern können
+            tables[7] = [c['key'] for c in all_controls_by_expert]
+            
+            # Position 8: Sort - ALLE Controls aus Change Expert
+            # Grund: Alle verwaltbaren Spalten sollten sortierbar sein
+            tables[8] = [c['key'] for c in all_controls_by_expert]
+            
+            # Position 9: Reserviert
+            tables[9] = []
+            
+            # Speichere Array
+            self._projection_tables[view_guid] = tables
+            
+            logger.info(f"✅ ARRAY-BASIERTE Projektions-Tabellen für {view_guid} erstellt:")
+            logger.info(f"  [0] 📊 View Standard: {len(tables[0])} Spalten (show=true, display_order)")
+            logger.info(f"  [1] � Change Standard: {len(tables[1])} Spalten (nicht expert_mode, display_order)")
+            logger.info(f"  [2] 🔍 Filter Standard: {len(tables[2])} Spalten (sichtbar + filterbar)")
+            logger.info(f"  [3] 🔄 Sort Standard: {len(tables[3])} Spalten (aus Change, nur sortierbar) ⭐ NEU")
+            logger.info(f"  [4] ⏸️  Reserviert: {len(tables[4])} Spalten")
+            logger.info(f"  [5] 📊 View Expert: {len(tables[5])} Spalten (alle außer dummy, expert_order)")
+            logger.info(f"  [6] 🔧 Change Expert: {len(tables[6])} Spalten (alle außer dummy, expert_order)")
+            logger.info(f"  [7] � Filter Expert: {len(tables[7])} Spalten (alle filterbar)")
+            logger.info(f"  [8] 🔄 Sort Expert: {len(tables[8])} Spalten (aus Change, nur sortierbar) ⭐ NEU")
+            logger.info(f"  [9] ⏸️  Reserviert: {len(tables[9])} Spalten")
             logger.info(f"  ❌ Dummy Controls: {len(dummy_controls)} (ausgeschlossen)")
             logger.info(f"  📋 Non-Expert Controls: {len(non_expert_controls)} (für Change Standard)")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Aufbau der Projektions-Tabellen für {view_guid}: {e}")
-            # Fallback: Leere Projektionen (LINEARES SYSTEM)
-            self._projection_tables[view_guid] = {
-                'table_standard': [],
-                'table_expert': [],
-                'search_standard': [],
-                'search_expert': [],
-                'change_standard': [],
-                'change_expert': [],
-                'sort_standard': [],
-                'sort_expert': []
-            }
+            import traceback
+            logger.error(traceback.format_exc())
+            # Fallback: 10 leere Listen
+            self._projection_tables[view_guid] = [[] for _ in range(10)]
     
     def rebuild_projection_tables(self, view_guid: str):
         """

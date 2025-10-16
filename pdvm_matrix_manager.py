@@ -939,6 +939,25 @@ class PdvmMatrixManager:
         """
         return self.matrix_sort.copy() if self.matrix_sort else []
     
+    def get_filter_data(self) -> List[Dict]:
+        """
+        🎯 Filter-Daten holen (Input für Sortierung)
+        
+        Returns:
+            Liste der gefilterten Datenzeilen (matrix_filter)
+        """
+        return self.matrix_filter.copy() if self.matrix_filter else []
+    
+    def set_sort_data(self, sorted_matrix: List[Dict]):
+        """
+        🎯 Sort-Daten setzen (Output von Sortierung)
+        
+        Args:
+            sorted_matrix: Sortierte Matrix-Daten
+        """
+        self.matrix_sort = sorted_matrix.copy() if sorted_matrix else []
+        logger.info(f"✅ Sort-Matrix gesetzt: {len(self.matrix_sort)} Zeilen")
+    
     def get_available_columns(self) -> set:
         """
         Verfügbare Spalten abrufen

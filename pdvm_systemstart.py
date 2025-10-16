@@ -304,7 +304,7 @@ class MainAppComplete(QMainWindow):
         1. save() auf Picker → Änderungen landen direkt in finale GCS-Instanz  
         2. Persistierung über finale GCS
         3. Display-Update
-        4. Optionale View-Aktualisierung
+        4. Controller-basierte View-Aktualisierung (NEUE ARCHITEKTUR)
         """
         try:
             logger.info("🔄 Vollständige Stichtag-Refresh gestartet...")
@@ -327,20 +327,35 @@ class MainAppComplete(QMainWindow):
             # 3. Display aktualisieren (finale GCS)
             self._update_complete_stichtag_display()
             
-            # 4. Optionale View-Aktualisierung falls vorhanden
-            if hasattr(self, 'current_view_widget') and self.current_view_widget:
-                if hasattr(self.current_view_widget, 'reload'):
-                    logger.info("🔄 Aktualisiere aktuelle View nach Stichtag-Änderung...")
-                    self.current_view_widget.reload()
-                    logger.info("✅ View erfolgreich nach Stichtag-Refresh aktualisiert")
+            # 4. View-Aktualisierung über CONTROLLER (NEUE ARCHITEKTUR)
+            # ✅ Stichtag ist bereits in GCS persistent → refresh() reicht!
+            if hasattr(self, 'current_view_controller') and self.current_view_controller:
+                logger.info("🔄 Aktualisiere aktuelle View nach Stichtag-Änderung...")
+                
+                if hasattr(self.current_view_controller, 'refresh'):
+                    # refresh() holt sich den aktuellen Stichtag automatisch aus GCS
+                    self.current_view_controller.refresh()
+                    logger.info(f"✅ View erfolgreich aktualisiert (Stichtag aus GCS: {gcs.stichtag})")
                 else:
-                    logger.warning("⚠️ Aktuelle View hat keine reload()-Methode")
+                    logger.warning("⚠️ Controller hat keine refresh()-Methode")
                 
                 logger.info("✅ Vollständige Stichtag-Balken erfolgreich aktualisiert")
+            
+            # Fallback: Alte Widget-basierte Aktualisierung (für Kompatibilität)
+            elif hasattr(self, 'current_view_widget') and self.current_view_widget:
+                if hasattr(self.current_view_widget, 'reload'):
+                    logger.info("🔄 Fallback: Aktualisiere View über Widget (alte Architektur)...")
+                    self.current_view_widget.reload()
+                    logger.info("✅ View erfolgreich nach Stichtag-Refresh aktualisiert (Widget-Fallback)")
+                else:
+                    logger.warning("⚠️ Aktuelle View hat keine reload()-Methode")
             else:
-                logger.warning("⚠️ Vollständige Stichtag-Balken-Komponenten nicht verfügbar für Update")
+                logger.warning("⚠️ Keine View geladen für Stichtag-Aktualisierung")
+                
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren des vollständigen Stichtag-Balkens: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _check_and_create_demo_menu(self, menu_id):
         """
@@ -793,6 +808,7 @@ class MainAppComplete(QMainWindow):
             # call_daten für neuen Dialog vorbereiten - ALLE ERFORDERLICHEN Daten
             call_daten = {
                 "view_guid": view_guid,
+                "frame_guid": frame_guid,  # Für View-Neustart bei Reset!
                 "title": "Persönliche Daten",  # Immer einen Titel setzen!
                 "first_call": True,  # Initialer Aufruf
             }
@@ -828,6 +844,156 @@ class MainAppComplete(QMainWindow):
             logger.error(traceback.format_exc())
             # Benutzerfreundliche Fehlermeldung anzeigen
             self.show_text(f"❌ Fehler beim Laden der View:\n\n{str(e)}")
+
+    def test_pdvm_view(self, frame_guid, title=None):
+        """
+        🧪 TEST-METHODE für SAUBERE ARCHITEKTUR-MIGRATION
+        
+        Bereitet die Migration vor zu:
+        - PdvmViewController (Controller/Logic) 
+        - PdvmViewUI (Display/Darstellung)
+        - PdvmViewManager (Daten/Matrix)
+        
+        Aktuell: Ruft die alte PdvmViewDialog auf (wie pdvm_modern_view)
+        TODO Migration: Schrittweise auf neue Architektur umstellen
+        
+        Args:
+            frame_guid: GUID der Frame-Daten
+            title: Optional - Titel für die View
+            
+        Aufruf aus Menü:
+            main_app.test_pdvm_view("frame-guid-hier", "Test View")
+        """
+        logger.info("🧪 === TEST PDVM VIEW - ARCHITEKTUR-MIGRATION ===")
+        logger.info(f"📋 Frame-GUID: {frame_guid}")
+        logger.info(f"📋 Titel: {title or 'Auto'}")
+        
+        if not frame_guid:
+            logger.error("❌ Keine frame_guid übergeben!")
+            self.show_text([
+                "❌ TEST FEHLER: Keine Frame-GUID",
+                "",
+                "Bitte frame_guid als Parameter übergeben:",
+                "test_pdvm_view('frame-guid-hier', 'Titel')"
+            ], small=True)
+            return
+
+        try:
+            # === SCHRITT 1: Frame-Daten laden ===
+            logger.info("📂 SCHRITT 1: Frame-Daten laden...")
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            
+            framedaten_db = PdvmCentralDatenbank(
+                table_name="framedaten", 
+                guid=frame_guid
+            )
+            
+            # View-GUID aus Frame-Daten ermitteln
+            view_guid = framedaten_db.get_static_value("ROOT", "VIEW_GUID")
+            if not view_guid:
+                logger.error(f"❌ Keine view_guid in Frame-Daten gefunden")
+                self.show_text([
+                    "❌ TEST FEHLER: Keine View-GUID",
+                    "",
+                    f"Frame-GUID: {frame_guid}",
+                    "Keine VIEW_GUID in Frame-Daten gefunden"
+                ], small=True)
+                return
+
+            logger.info(f"✅ View-GUID ermittelt: {view_guid}")
+            
+            # === SCHRITT 2: Titel bestimmen ===
+            logger.info("📝 SCHRITT 2: Titel bestimmen...")
+            view_title = title
+            if not view_title:
+                try:
+                    view_header = framedaten_db.get_static_value("ROOT", "VIEW_HEADER")
+                    view_title = view_header or f"Test View: {view_guid[:8]}"
+                except Exception as e:
+                    logger.warning(f"⚠️ Fehler beim Titel-Laden: {e}")
+                    view_title = f"Test View: {view_guid[:8]}"
+            
+            logger.info(f"✅ Titel gesetzt: {view_title}")
+
+            # === SCHRITT 3: call_daten vorbereiten ===
+            logger.info("📦 SCHRITT 3: call_daten vorbereiten...")
+            call_daten = {
+                "view_guid": view_guid,
+                "title": view_title,
+                "first_call": True,
+                "test_mode": True,  # Marker für Test-Aufruf
+            }
+            
+            logger.info(f"✅ call_daten: {call_daten}")
+
+            # === SCHRITT 4: NEUE SAUBERE ARCHITEKTUR verwenden ===
+            logger.info("🔧 SCHRITT 4: View laden (NEUE saubere Architektur)...")
+            logger.info("✅ PdvmViewController (Controller/Logic)")
+            logger.info("✅ PdvmViewUI (Display/Darstellung)")
+            logger.info("⏳ PdvmViewManager (Daten) - Optional für später")
+            
+            try:
+                from pdvm_view_controller import PdvmViewController
+                
+                # NEUE Architektur: Controller erstellen
+                view_controller = PdvmViewController(call_daten, parent=self)
+                
+                # Controller initialisieren (lädt Daten, erstellt UI)
+                init_success = view_controller.initialize()
+                
+                if not init_success:
+                    raise RuntimeError("Controller-Initialisierung fehlgeschlagen")
+                
+                # Widget für Arbeitsbereich holen
+                view_widget = view_controller.get_widget()
+                
+                if not view_widget:
+                    raise RuntimeError("Kein Widget vom Controller erhalten")
+                
+                # Content löschen und neues Widget hinzufügen
+                self.clear_content_layout()
+                self.content_layout.addWidget(view_widget)
+                
+                # Controller speichern für Stichtag-Refresh und spätere Operationen
+                self.current_view_controller = view_controller
+                self.current_view_widget = view_widget
+                
+                logger.info(f"✅ TEST VIEW gestartet: {view_guid}")
+                logger.info(f"📊 Titel: {view_title}")
+                logger.info(f"🏗️ Architektur: NEU (Controller + UI)")
+                logger.info(f"🎯 Controller-Instanz: {type(view_controller).__name__}")
+                logger.info(f"🎨 UI-Widget: {type(view_widget).__name__}")
+                
+            except ImportError as import_error:
+                logger.error(f"❌ Neue Architektur nicht verfügbar: {import_error}")
+                import traceback
+                logger.error(traceback.format_exc())
+                self.show_text([
+                    "❌ TEST FEHLER: Neue Architektur nicht verfügbar",
+                    "",
+                    f"Import-Fehler: {import_error}",
+                    "",
+                    f"View-GUID: {view_guid}",
+                    f"Titel: {view_title}",
+                    "",
+                    "Module prüfen:",
+                    "- pdvm_view_controller.py",
+                    "- pdvm_view_ui.py"
+                ], small=True)
+            
+        except Exception as e:
+            logger.error(f"❌ TEST FEHLER: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            self.show_text([
+                "❌ TEST FEHLER beim View-Laden",
+                "",
+                f"Frame-GUID: {frame_guid}",
+                f"Fehler: {str(e)}",
+                "",
+                "Siehe main.log für Details"
+            ], small=True)
 
     def show_text_klein(self, text):
         """Kleine Meldung unten anhängen."""

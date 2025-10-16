@@ -61,6 +61,55 @@ class LinearFilterExecutionManager:
         
         logger.info(f"🎯 LinearFilterExecutionManager initialisiert für View: {self.view_guid}")
     
+    def load_filter_from_gcs(self) -> Optional[Dict[str, Any]]:
+        """
+        ⚠️ DEPRECATED V2 - Wird nicht mehr verwendet!
+        
+        V2: Matrix Manager lädt search_string direkt via _load_search_string_from_gcs()
+        Diese Methode ist nur noch für Backward-Kompatibilität vorhanden.
+        
+        Lädt Filter-Config AUTONOM aus GCS (App-DB)
+        
+        Prüft beide Felder (einfach, komplex) und gibt den ersten gefundenen zurück.
+        
+        Returns:
+            Dict mit 'type' und 'config' oder None
+        """
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                logger.warning("⚠️ GCS nicht verfügbar - kann Filter nicht laden")
+                return None
+            
+            # Prüfe einfacher Filter
+            einfach_config, _ = gcs._app_db.get_value(self.view_guid, 'einfach')
+            if einfach_config:
+                logger.info(f"📊 Einfacher Filter aus GCS geladen")
+                logger.info(f"   Config: {einfach_config}")
+                return {
+                    'type': 'einfach',
+                    'config': einfach_config
+                }
+            
+            # Prüfe komplexer Filter
+            komplex_config, _ = gcs._app_db.get_value(self.view_guid, 'komplex')
+            if komplex_config:
+                logger.info(f"📊 Komplexer Filter aus GCS geladen")
+                logger.info(f"   Config: {komplex_config}")
+                return {
+                    'type': 'komplex',
+                    'config': komplex_config
+                }
+            
+            logger.info(f"📋 Keine Filter-Config in GCS gefunden")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden Filter aus GCS: {e}")
+            return None
+    
     def execute_filter_linear(self, filter_type: str, filter_config: Dict[str, Any]) -> bool:
         """
         EINFACHER FILTER-EINSTIEG - Nur grundlegende Funktionen!
@@ -95,7 +144,9 @@ class LinearFilterExecutionManager:
                 logger.error(f"❌ Unbekannter Filter-Typ: {filter_type}")
                 return False
             
+            # Schritt 3: Persistierung in GCS (wenn erfolgreich)
             if success:
+                self._save_filter_to_gcs(filter_type, filter_config)
                 logger.info(f"✅ Einfacher linearer Filter ({filter_type}) erfolgreich")
             else:
                 logger.error(f"❌ Einfacher linearer Filter ({filter_type}) fehlgeschlagen")
@@ -243,6 +294,50 @@ class LinearFilterExecutionManager:
             logger.error(f"❌ Fehler bei komplexem Filter: {e}")
             return False
     
+    def _save_filter_to_gcs(self, filter_type: str, filter_config: Dict[str, Any]):
+        """
+        ⚠️ DEPRECATED V2 - Wird nicht mehr verwendet!
+        
+        V2: Jeder Filter-Dialog speichert selbst:
+        - search_parameter_dialog.py: _save_search_string_to_gcs()
+        - extended_filter_engine.py: save_field_conditions() + _build_search_string_from_conditions()
+        - linear_filter_execution_manager.py: execute_global_search_filter()
+        
+        Diese Methode ist nur noch für Backward-Kompatibilität vorhanden.
+        
+        Speichert Filter persistent in GCS App-DB
+        
+        Args:
+            filter_type: 'einfach' oder 'komplex'
+            filter_config: Filter-Konfiguration
+        """
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                logger.warning("⚠️ GCS nicht verfügbar - keine Persistierung möglich")
+                return
+            
+            # Bestimme Feld-Name basierend auf Filter-Typ
+            if filter_type in ['einfach', 'simple', 'parametric']:
+                field_name = 'einfach'
+            elif filter_type == 'komplex':
+                field_name = 'komplex'
+            else:
+                logger.warning(f"⚠️ Unbekannter Filter-Typ für Persistierung: {filter_type}")
+                return
+            
+            # Speichern in App-DB
+            gcs._app_db.set_value(self.view_guid, field_name, filter_config)
+            gcs._app_db.save_all_values()  # 💾 CRITICAL: Commit to database!
+            
+            logger.info(f"💾 Filter persistent gespeichert: {self.view_guid}/{field_name}")
+            logger.info(f"   Config: {filter_config}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern Filter in GCS: {e}")
+    
     def reset_all_filters(self):
         """Reset alle Filter und kehre zur kompletten Datenbasis zurück"""
         logger.info("🔄 === RESET ALLE FILTER ===")
@@ -251,6 +346,9 @@ class LinearFilterExecutionManager:
             # Reset Filter-State
             self.last_filter_type = None
             self.last_filter_config = None
+            
+            # Persistierung: Filter aus GCS löschen
+            self._clear_filters_from_gcs()
             
             # Reset zur kompletten Datenbasis
             success = self._reset_to_complete_data()
@@ -274,9 +372,29 @@ class LinearFilterExecutionManager:
             logger.error(f"❌ Fehler beim Reset aller Filter: {e}")
             return False
     
+    def _clear_filters_from_gcs(self):
+        """Löscht alle Filter aus GCS App-DB"""
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if not gcs:
+                logger.warning("⚠️ GCS nicht verfügbar - keine Persistierung möglich")
+                return
+            
+            # Lösche beide Filter-Typen
+            gcs._app_db.set_value(self.view_guid, 'einfach', None)
+            gcs._app_db.set_value(self.view_guid, 'komplex', None)
+            gcs._app_db.save_all_values()  # 💾 CRITICAL: Commit to database!
+            
+            logger.info(f"🗑️ Filter aus GCS gelöscht: {self.view_guid}/einfach, {self.view_guid}/komplex")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen Filter aus GCS: {e}")
+    
     def execute_global_search_filter(self, search_string: str) -> bool:
         """
-        GLOBALE SUCHE - sucht in allen Feldern nach dem Suchbegriff
+        V2: GLOBALE SUCHE - sucht in allen Feldern + persistiert search_string
         
         Args:
             search_string: Globaler Suchbegriff (z.B. 'li')
@@ -284,7 +402,7 @@ class LinearFilterExecutionManager:
         Returns:
             bool: True wenn erfolgreich, False wenn Fehler
         """
-        logger.info(f"🔍 === GLOBALE SUCHE ===")
+        logger.info(f"🔍 === GLOBALE SUCHE V2 ===")
         logger.info(f"🔍 Suchbegriff: '{search_string}'")
         
         try:
@@ -292,6 +410,24 @@ class LinearFilterExecutionManager:
             success_reset = self._reset_to_complete_data()
             if not success_reset:
                 logger.warning("⚠️ Reset konnte nicht durchgeführt werden, versuche trotzdem globale Suche")
+            
+            # V2: Speichere Parameters + search_string
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if gcs and hasattr(gcs, '_app_db') and gcs._app_db:
+                # 1. Speichere Parameters für UI (unter 'gesamt')
+                gcs._app_db.set_value(self.view_guid, 'gesamt', {
+                    'search_text': search_string
+                })
+                
+                # 2. Speichere search_string für Pipeline
+                gcs._app_db.set_value(self.view_guid, 'search_string', search_string)
+                
+                # 3. CRITICAL: Speichere beide zusammen
+                gcs._app_db.save_all_values()
+                
+                logger.info(f"💾 V2: Globale Suche + search_string persistent gespeichert")
             
             # Führe globale Suche aus
             matrix_manager = self._get_matrix_manager()
@@ -311,6 +447,58 @@ class LinearFilterExecutionManager:
                 
         except Exception as e:
             logger.error(f"❌ Fehler bei globaler Suche: {e}")
+            return False
+    
+    def execute_parametric_filter(self, search_string: str, filter_params: dict = None) -> bool:
+        """
+        V2: PARAMETRISCHER FILTER - filtert nach Feldern + persistiert search_string
+        
+        Args:
+            search_string: Formatierter Filter-String (z.B. 'familienname_show:Müller')
+            filter_params: Optional - Filter-Parameter für UI-Anzeige (dict)
+        
+        Returns:
+            bool: True wenn erfolgreich, False wenn Fehler
+        """
+        logger.info(f"🔍 === PARAMETRISCHER FILTER V2 ===")
+        logger.info(f"🔍 search_string: '{search_string}'")
+        
+        try:
+            # Reset zur kompletten Datenbasis
+            success_reset = self._reset_to_complete_data()
+            if not success_reset:
+                logger.warning("⚠️ Reset konnte nicht durchgeführt werden, versuche trotzdem Filter")
+            
+            # V2: Speichere search_string (Parameters wurden bereits vom Dialog gespeichert)
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            if gcs and hasattr(gcs, '_app_db') and gcs._app_db:
+                # Speichere search_string für Pipeline
+                gcs._app_db.set_value(self.view_guid, 'search_string', search_string)
+                
+                # Speichere
+                gcs._app_db.save_all_values()
+                
+                logger.info(f"💾 V2: Parametrischer Filter search_string gespeichert")
+            
+            # Führe parametrischen Filter aus
+            matrix_manager = self._get_matrix_manager()
+            if matrix_manager:
+                result = matrix_manager.apply_filter(search_string)
+                
+                if result:
+                    logger.info("✅ Parametrischer Filter erfolgreich angewendet")
+                    return True
+                else:
+                    logger.error("❌ Parametrischer Filter fehlgeschlagen")
+                    return False
+            else:
+                logger.error("❌ MatrixManager nicht verfügbar für parametrischen Filter")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei parametrischem Filter: {e}")
             return False
 
 

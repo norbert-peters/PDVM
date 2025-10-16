@@ -17,19 +17,11 @@ import logging
 from global_gcs import gcs  # Globaler Zugriff auf GCS
 from extended_filter_engine import extended_filter_engine  # Extended Filter Engine
 
-logger = logging.getLogger(__name__)
+# V3 Filter-System
+from einfach_filter_manager import EinfachFilterManager
+from komplex_filter_manager import KomplexFilterManager
 
-# LINEARES FILTER-SYSTEM IMPORT
-try:
-    from linear_filter_execution_manager import get_linear_filter_manager
-    logger.info("✅ LinearFilterExecutionManager verfügbar in SearchParameterDialog")
-except ImportError as e:
-    logger.warning(f"⚠️ LinearFilterExecutionManager nicht verfügbar: {e}")
-    
-    # Fallback-Funktion
-    def get_linear_filter_manager(view_guid):
-        logger.error("❌ get_linear_filter_manager nicht verfügbar - Fallback wird verwendet")
-        return None
+logger = logging.getLogger(__name__)
 
 class SearchParameterDialog(QDialog):
     """
@@ -43,19 +35,21 @@ class SearchParameterDialog(QDialog):
     filter_changed = pyqtSignal()  # Signal für Filter-Änderungen
     search_changed = pyqtSignal(dict)  # Neue Search-Parameter
     
-    def __init__(self, parent, view_guid, controls_config, current_filters=None):
+    def __init__(self, parent, view_guid, controls_config, current_filters=None, matrix_manager=None):
         """
         Args:
             parent: Parent-Widget
             view_guid: GUID der View für Controls
             controls_config: Dictionary mit Controls direkt vom Dialog
             current_filters: Dict mit aktuellen Filter-Werten
+            matrix_manager: Matrix Manager für Filter-Ausführung (V3)
         """
         super().__init__(parent)
         
         self.view_guid = view_guid
         self.controls_config = controls_config  # Direkt vom Dialog erhalten
         self.current_filters = current_filters or {}
+        self.matrix_manager = matrix_manager  # V3: Für Filter-Manager
         
         # WICHTIG: Backup der ursprünglichen Filter für Cancel-Behandlung
         self.original_filters = self.current_filters.copy()
@@ -77,13 +71,21 @@ class SearchParameterDialog(QDialog):
         # GCS Key für persistente Speicherung der Suchparameter
         self.gcs_filters_key = f"search_parameters_{view_guid}"
         
-        # LinearFilterExecutionManager für direkte Filter-Ausführung
-        try:
-            self.linear_filter_manager = get_linear_filter_manager(view_guid)
-            logger.info("✅ LinearFilterExecutionManager im SearchParameterDialog initialisiert")
-        except Exception as e:
-            logger.warning(f"⚠️ LinearFilterExecutionManager konnte nicht initialisiert werden: {e}")
-            self.linear_filter_manager = None
+        # V3 Filter-Manager initialisieren
+        if self.matrix_manager:
+            self.einfach_filter_manager = EinfachFilterManager(
+                view_guid=self.view_guid,
+                matrix_manager=self.matrix_manager
+            )
+            self.komplex_filter_manager = KomplexFilterManager(
+                view_guid=self.view_guid,
+                matrix_manager=self.matrix_manager
+            )
+            logger.info("✅ V3 Filter-Manager im SearchParameterDialog initialisiert")
+        else:
+            logger.warning("⚠️ Kein Matrix Manager - V3 Filter deaktiviert")
+            self.einfach_filter_manager = None
+            self.komplex_filter_manager = None
         
         self.setup_ui()
         self.load_persistent_filters()  # Lade persistente Filter
@@ -415,6 +417,48 @@ class SearchParameterDialog(QDialog):
                 logger.info(f"✅ {len(filters)} Filter persistent in ANWENDUNGSDATEN gespeichert")
         except Exception as e:
             logger.warning(f"⚠️ Fehler beim Speichern persistenter Filter: {e}")
+    
+    def _save_search_string_to_gcs(self, new_filters, extended_summary):
+        """
+        🆕 V2: Speichert search_string in GCS für autonome Pipeline
+        
+        Konvertiert Filter-Parameter zu search_string und speichert beides:
+        - Parameter unter 'einfach' (für Dialog-Anzeige)
+        - search_string unter 'search_string' (für Pipeline)
+        """
+        try:
+            if not gcs or not hasattr(gcs, '_app_db'):
+                logger.warning("⚠️ GCS nicht verfügbar für search_string Speicherung")
+                return
+            
+            # Erstelle search_string aus Filtern
+            search_parts = []
+            
+            if extended_summary and len(extended_summary) > 0:
+                # KOMPLEX-Filter
+                logger.info(f"🔵 Erstelle search_string für KOMPLEX-Filter")
+                for field_key, summary in extended_summary.items():
+                    search_parts.append(f"EXTENDED:{field_key}:{summary}")
+            else:
+                # EINFACH-Filter
+                logger.info(f"🟢 Erstelle search_string für EINFACH-Filter")
+                for field_key, value in new_filters.items():
+                    if not field_key.startswith('EXTENDED:'):
+                        search_parts.append(f"{field_key}:{value}")
+            
+            search_string = "||".join(search_parts) if search_parts else None
+            
+            # Speichere search_string
+            gcs._app_db.set_value(self.view_guid, 'search_string', search_string)
+            gcs._app_db.save_all_values()  # 💾 CRITICAL!
+            
+            if search_string:
+                logger.info(f"💾 search_string gespeichert: '{search_string[:100]}...'")
+            else:
+                logger.info(f"💾 search_string gelöscht (keine Filter)")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern search_string: {e}")
 
     def load_persistent_filters(self):
         """Lade persistent gespeicherte Filter aus anwendungsdaten - KORRIGIERT: über self._app_db"""
@@ -970,47 +1014,61 @@ class SearchParameterDialog(QDialog):
             reset_manager._reset_extended_filter_engine()
             reset_manager._reset_filter_caches()
 
-            # SCHRITT 5: Persistent speichern
+            # V2 EINFACH: Dialog ist AUTONOM!
+            # 1. Speichere Parameter unter 'einfach' oder 'komplex'
+            filter_type = 'komplex' if (extended_summary and len(extended_summary) > 0) else 'einfach'
             self.save_persistent_filters(new_filters)
-            logger.info(f"✅ {len(new_filters)} Filter persistent in ANWENDUNGSDATEN gespeichert")
+            logger.info(f"💾 {len(new_filters)} Filter-Parameter unter '{filter_type}' gespeichert")
             
-            # SCHRITT 5: DIREKTE FILTER-AUSFÜHRUNG über LinearFilterExecutionManager
-            if self.linear_filter_manager:
-                try:
-                    # EINFACH: Nur UI-Modus entscheidet
-                    logger.info(f"🔍 Filter-Entscheidung: UI-Modus={self.filter_mode}, Filter-Anzahl={len(new_filters)}")
-                    
-                    if self.filter_mode == "KOMPLEX":
-                        # KOMPLEX-Modus: Benutzer hat explizit KOMPLEX gewählt
-                        logger.info(f"🔵 KOMPLEX-Modus gewählt")
-                        
-                        success = self.linear_filter_manager.execute_parameter_dialog_filter(
-                            new_filters, 
-                            extended_conditions,  # Verwende gespeicherte Conditions
-                            force_complex=True
-                        )
-                        if success:
-                            logger.info("✅ Komplexe Parameter-Filter erfolgreich ausgeführt")
-                        else:
-                            logger.warning("⚠️ Komplexe Parameter-Filter-Ausführung fehlgeschlagen")
-                    else:
-                        # EINFACH-Modus: Benutzer hat EINFACH gewählt (oder Standard)
-                        logger.info(f"🟢 EINFACH-Modus gewählt")
-                        
-                        success = self.linear_filter_manager.execute_parameter_dialog_filter(
-                            new_filters
-                        )
-                        if success:
-                            logger.info("✅ Einfache Parameter-Filter erfolgreich ausgeführt")
-                        else:
-                            logger.warning("⚠️ Einfache Parameter-Filter-Ausführung fehlgeschlagen")
-                        
-                except Exception as filter_exec_error:
-                    logger.error(f"❌ Fehler bei Filter-Ausführung: {filter_exec_error}")
+            # 2. Baue search_string aus Parametern
+            search_parts = []
+            
+            if extended_summary and len(extended_summary) > 0:
+                # KOMPLEX: "EXTENDED:field:summary"
+                logger.info(f"🔵 KOMPLEX-Filter: {len(extended_summary)} Felder")
+                for field_key, summary in extended_summary.items():
+                    search_parts.append(f"EXTENDED:{field_key}:{summary}")
             else:
-                logger.warning("⚠️ LinearFilterExecutionManager nicht verfügbar - verwende Signal-Fallback")
-                # Fallback: Signal emittieren
-                self.search_changed.emit(new_filters)
+                # EINFACH: "field:value"
+                logger.info(f"🟢 EINFACH-Filter: {len(new_filters)} Felder")
+                for field_key, value in new_filters.items():
+                    if not field_key.startswith('EXTENDED:'):
+                        search_parts.append(f"{field_key}:{value}")
+            
+            search_string = "||".join(search_parts) if search_parts else None
+            
+            # 3. V3 FILTER-SYSTEM: Verwende richtige Manager
+            if extended_summary and len(extended_summary) > 0:
+                # KOMPLEX-Filter → KomplexFilterManager
+                if self.komplex_filter_manager:
+                    # Baue field_conditions Dict für Manager
+                    field_conditions = {}
+                    for field_key, conditions in self.extended_filter_conditions.items():
+                        if conditions:
+                            field_conditions[field_key] = conditions
+                    
+                    success = self.komplex_filter_manager.execute_komplex_filter(field_conditions)
+                    if success:
+                        logger.info(f"✅ V3 KOMPLEX-Filter angewendet: {len(field_conditions)} Felder")
+                    else:
+                        logger.error(f"❌ V3 KOMPLEX-Filter fehlgeschlagen")
+                else:
+                    logger.error("❌ KomplexFilterManager nicht verfügbar")
+            elif new_filters:
+                # EINFACH-Filter → EinfachFilterManager
+                if self.einfach_filter_manager:
+                    # Entferne EXTENDED: Prefix für Manager
+                    clean_filters = {k: v for k, v in new_filters.items() if not k.startswith('EXTENDED:')}
+                    
+                    success = self.einfach_filter_manager.execute_einfach_filter(clean_filters)
+                    if success:
+                        logger.info(f"✅ V3 EINFACH-Filter angewendet: {len(clean_filters)} Felder")
+                    else:
+                        logger.error(f"❌ V3 EINFACH-Filter fehlgeschlagen")
+                else:
+                    logger.error("❌ EinfachFilterManager nicht verfügbar")
+            else:
+                logger.info("ℹ️ Keine Filter - überspringe Ausführung")
             
             # SCHRITT 6: Ergebnis setzen - TRENNUNG UI/VERARBEITUNG
             self.result_filters = new_filters
@@ -1605,7 +1663,7 @@ class SearchParameterDialog(QDialog):
             return False
 
 
-def show_search_parameter_dialog(parent, view_guid, controls_config, current_filters=None):
+def show_search_parameter_dialog(parent, view_guid, controls_config, current_filters=None, matrix_manager=None):
     """
     Zeige Modal-Dialog für Search-Parameter.
     
@@ -1614,11 +1672,12 @@ def show_search_parameter_dialog(parent, view_guid, controls_config, current_fil
         view_guid: GUID der View für Controls
         controls_config: Dictionary mit Controls direkt vom Dialog
         current_filters: Dict mit aktuellen Filter-Werten
+        matrix_manager: Matrix Manager für V3 Filter-System
         
     Returns:
         dict: Neue Filter-Parameter (bei OK) oder ursprüngliche Filter (bei Abbruch)
     """
-    dialog = SearchParameterDialog(parent, view_guid, controls_config, current_filters)
+    dialog = SearchParameterDialog(parent, view_guid, controls_config, current_filters, matrix_manager)
     
     # Modal ausführen (blockiert!)
     result = dialog.exec_()

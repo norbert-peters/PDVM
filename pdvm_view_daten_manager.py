@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 import pdvm_central_systemsteuerung_global
 from linear_projection_manager import get_projection_manager
+from pdvm_matrix_pipeline import get_matrix_pipeline
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 
@@ -73,10 +74,14 @@ class PdvmViewDatenManager:
         # Column Control System - PERSISTENT!
         self.column_control = None
         self.basis_columns = []
-        self.basis_data = []
+        self.basis_data = []  # DEPRECATED - wird durch Pipeline ersetzt
+        
+        # === NEU: Matrix Pipeline (PERSISTENT!) ===
+        self.matrix_pipeline = get_matrix_pipeline(self.view_guid)
 
         logger.info(f"🔧 NEUER LINEAR aufgebauter DatenManager gestartet (PERSISTENT)")
         logger.info(f"📋 View: {self.view_guid}, First Call: {self.first_call}")
+        logger.info(f"🚀 Matrix Pipeline: {self.matrix_pipeline}")
 
         # Daten laden
         self._build_system()
@@ -199,6 +204,10 @@ class PdvmViewDatenManager:
             if self.first_call:
                 records_loaded = self._load_records_data(limit=100)
                 logger.info(f"✅ {records_loaded} Datensätze geladen")
+                
+                # === NEU: Pipeline aufbauen nach Daten-Laden ===
+                logger.info("🔧 SCHRITT 5: Matrix Pipeline aufbauen")
+                self._build_matrix_pipeline()
             else:
                 logger.info("📊 SKIP: Datenladen übersprungen (first_call=False)")
 
@@ -251,6 +260,193 @@ class PdvmViewDatenManager:
             logger.error(f"❌ Fehler beim Refresh der Controls/Projektion: {e}")
             traceback.print_exc()
 
+    def _build_matrix_pipeline(self):
+        """
+        Baut die vollständige Matrix-Pipeline auf:
+        BasisMatrix → FilterMatrix → SortMatrix → Projektion
+        
+        Wird aufgerufen nach _load_records_data()
+        """
+        try:
+            logger.info("🚀 === MATRIX PIPELINE AUFBAU START ===")
+            
+            # SCHRITT 1: Alle Spaltennamen sammeln (inkl. _abdatum, _formatiertes_abdatum)
+            all_columns = set()
+            if self.column_control and hasattr(self.column_control, 'column_data'):
+                for col_name in self.column_control.column_data.keys():
+                    all_columns.add(col_name)
+            all_columns_list = sorted(list(all_columns))
+            logger.info(f"📋 {len(all_columns_list)} Spalten gefunden (inkl. _abdatum/_formatiertes_abdatum)")
+            
+            # SCHRITT 2: BasisMatrix aufbauen
+            logger.info("🔨 SCHRITT 1: BasisMatrix aufbauen")
+            self.matrix_pipeline.build_basis_matrix(self.column_control, all_columns_list)
+            
+            # SCHRITT 3: FilterMatrix aufbauen (aktuell kein Filter)
+            logger.info("🔨 SCHRITT 2: FilterMatrix aufbauen")
+            self.matrix_pipeline.apply_filter(filter_func=None)  # TODO: Filter-Funktion integrieren
+            
+            # SCHRITT 4: SortMatrix aufbauen (aktuell keine Sortierung)
+            logger.info("🔨 SCHRITT 3: SortMatrix aufbauen")
+            self.matrix_pipeline.apply_sort(sort_column=None, reverse=False)  # TODO: Sort-Parameter integrieren
+            
+            # SCHRITT 5: Projektion aufbauen (nur sichtbare _show Spalten)
+            logger.info("🔨 SCHRITT 4: Projektion aufbauen")
+            visible_columns = [col['name'] for col in self.basis_columns if col.get('show', False)]
+            logger.info(f"👁️ Sichtbare Spalten: {len(visible_columns)}")
+            self.matrix_pipeline.project(visible_columns)
+            
+            # Pipeline-Status loggen
+            self.matrix_pipeline.log_pipeline_status()
+            
+            logger.info("✅ === MATRIX PIPELINE AUFBAU ABGESCHLOSSEN ===")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Pipeline-Aufbau: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def rebuild_pipeline_with_stichtag(self):
+        """
+        Baut Pipeline nach Stichtag-Wechsel neu auf:
+        1. Cached Records mit neuem Stichtag in BasisMatrix befüllen
+        2. Pipeline komplett durchlaufen
+        
+        WICHTIG: Wird von Refresh-Button aufgerufen
+        """
+        try:
+            logger.info("🔄 === REBUILD PIPELINE MIT NEUEM STICHTAG ===")
+            logger.info(f"📅 Aktueller Stichtag: {gcs.stichtag}")
+            
+            # SCHRITT 1: BasisMatrix mit cached records neu befüllen
+            if hasattr(self, '_cached_all_records') and self._cached_all_records:
+                logger.info("♻️ Verwende gecachte Records für Stichtag-Wechsel")
+                
+                # Daten NEU verarbeiten mit neuem Stichtag
+                logger.info("🔄 Verarbeite Daten mit neuem Stichtag...")
+                self._reprocess_cached_records_with_new_stichtag()
+                
+                # BasisMatrix neu aufbauen
+                all_columns = list(self.column_control.column_data.keys())
+                self.matrix_pipeline.build_basis_matrix(self.column_control, all_columns)
+                
+                # Pipeline durchlaufen
+                self.matrix_pipeline.rebuild_from_basis()
+                
+                logger.info("✅ Pipeline mit neuem Stichtag komplett durchlaufen")
+                return True
+            else:
+                logger.warning("⚠️ Keine gecachten Records vorhanden - lade Daten neu")
+                self._load_records_data(limit=100)
+                self._build_matrix_pipeline()
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Pipeline-Rebuild: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def apply_search_filter(self, search_string: str, visible_columns: list):
+        """
+        EINFACHE SUCHE: Wendet Filter auf BasisMatrix an
+        
+        Args:
+            search_string: Suchtext (aus Dialog)
+            visible_columns: Sichtbare Spalten für Suche
+        
+        Returns:
+            True wenn erfolgreich
+        """
+        try:
+            logger.info(f"🔍 Matrix Manager: Wende Filter an: '{search_string}'")
+            
+            if not search_string:
+                # Leere Suche = Pipeline ohne Filter
+                logger.info("🔄 Leere Suche - Pipeline ohne Filter durchlaufen")
+                self.matrix_pipeline.rebuild_from_basis()
+                return True
+            
+            # Filter-Funktion erstellen
+            search_lower = search_string.lower()
+            
+            def search_filter(row_data):
+                """Sucht in sichtbaren Spalten mit 'enthält'"""
+                for col_key in visible_columns:
+                    if col_key in row_data:
+                        value_str = str(row_data[col_key]).lower() if row_data[col_key] is not None else ''
+                        if search_lower in value_str:
+                            return True
+                return False
+            
+            # Filter anwenden → FilterMatrix
+            self.matrix_pipeline.apply_filter(search_filter)
+            
+            # Rest der Pipeline durchlaufen (Sort + Projection)
+            # WICHTIG: rebuild_from_basis würde BasisMatrix nehmen!
+            # Wir müssen manuell Sort und Projection machen:
+            self.matrix_pipeline.apply_sort(
+                self.matrix_pipeline.sort_column,
+                self.matrix_pipeline.sort_reverse
+            )
+            self.matrix_pipeline.project(self.matrix_pipeline.visible_columns)
+            
+            logger.info(f"✅ Filter angewendet: {self.matrix_pipeline.filter_matrix.get_row_count()} Zeilen")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Anwenden des Filters: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _reprocess_cached_records_with_new_stichtag(self):
+        """
+        Verarbeitet gecachte Records mit neuem Stichtag
+        Aktualisiert column_control mit neuen Werten (3-Ebenen)
+        """
+        try:
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            from pdvm_datetime import Pdvm_DateTime
+            
+            # temp_instance und temp_dt initialisieren
+            temp_instance = PdvmCentralDatenbank(
+                db_name="PdvmManager.db",
+                table_name=self.view_table,
+                guid=None
+            )
+            temp_dt = gcs.temp_dt_inst
+            
+            logger.info(f"🔄 Verarbeite {len(self._cached_all_records)} gecachte Records mit neuem Stichtag")
+            
+            for record_info in self._cached_all_records:
+                data_guid = record_info["uid"]
+                data_dict = record_info["daten_dict"]
+                
+                # set_data befüllt temp_instance
+                temp_instance.set_data(data_dict, data_guid)
+                
+                # Row-Record neu erstellen - ORIGINAL SUFFIX!
+                row_record = {'uid_original': data_guid}
+                row_record['uid_original_abdatum'] = None
+                row_record['uid_original_formatiertes_abdatum'] = None
+                
+                # _original Felder neu befüllen mit neuem Stichtag
+                self._fill_original_columns(row_record, temp_instance, temp_dt)
+                
+                # _show Spalten neu befüllen
+                self._fill_show_columns(row_record, temp_dt)
+                
+                # Column Control aktualisieren
+                self.column_control.set_row_data(data_guid, row_record)
+            
+            logger.info("✅ Alle Records mit neuem Stichtag verarbeitet")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Reprocessing: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def _refresh_control_parameters_only(self):
         """
         NUR-PARAMETER-REFRESH: Aktualisiert nur die show/order Parameter ohne neue Controls zu erstellen.
@@ -368,26 +564,104 @@ class PdvmViewDatenManager:
         else:
             return col_name.replace('_', ' ').title()
 
+    def _debug_print_matrix_row(self, row_data: dict, row_idx: int = 0):
+        """
+        Erweiterte Debug-Ausgabe einer Matrix-Row mit allen 3 Ebenen
+        
+        Zeigt speziell:
+        - uid_original (GUID)
+        - familienname_original mit allen 3 Ebenen
+        - Andere wichtige Felder
+        """
+        logger.info(f"🔍 === MATRIX ROW {row_idx} DEBUG (3-EBENEN) ===")
+        
+        # GUID
+        guid = row_data.get('uid_original', 'UNBEKANNT')
+        logger.info(f"  👤 GUID: {guid}")
+        
+        # Familienname mit 3 Ebenen
+        if 'familienname_original' in row_data:
+            fn_wert = row_data.get('familienname_original')
+            fn_abdatum = row_data.get('familienname_original_abdatum')
+            fn_formatiert = row_data.get('familienname_original_formatiertes_abdatum')
+            
+            logger.info(f"  📋 familienname_original:")
+            logger.info(f"    ├─ 🗄️ EBENE 1 (Wert):       '{fn_wert}'")
+            logger.info(f"    ├─ 📅 EBENE 2 (AB-Datum):   {fn_abdatum}")
+            logger.info(f"    └─ 🎨 EBENE 3 (Formatiert): '{fn_formatiert}'")
+        else:
+            logger.warning(f"  ⚠️ familienname_original NICHT in row_data!")
+        
+        # Vorname und Geburtsdatum
+        for key in ['vorname_original', 'geburtsdatum_original']:
+            if key in row_data:
+                wert = row_data.get(key)
+                abdatum = row_data.get(f"{key}_abdatum")
+                formatiert = row_data.get(f"{key}_formatiertes_abdatum")
+                logger.info(f"  📋 {key}: '{wert}' | abdatum={abdatum} | formatiert='{formatiert}'")
+        
+        # Alle Keys zeigen (erste 20)
+        all_keys = list(row_data.keys())
+        logger.info(f"  🗝️ Alle Keys ({len(all_keys)}): {', '.join(all_keys[:20])}...")
 
     def get_abdatum_matrix(self, show_only=True):
-        """Gibt die Abdatum-Matrix für die aktuelle Projektion zurück (wie im Matrix-Prototyp)."""
-        if not hasattr(self, '_abdatum_matrix') or self._abdatum_matrix is None:
+        """
+        Gibt die Abdatum-Matrix für die aktuelle Projektion zurück
+        
+        VERWENDET EBENE 3 (__formatiert Suffix) für UI-Tooltips
+        
+        Args:
+            show_only: Nur sichtbare Spalten (True) oder alle (False)
+        
+        Returns:
+            List[List[str]]: 2D-Matrix mit formatierten Abdatum-Werten
+        """
+        logger.info("🔍 === get_abdatum_matrix() START ===")
+        
+        if not self.column_control:
+            logger.error("❌ column_control ist None!")
             return None
             
-        # Projektion wie bei get_table_data_for_display
+        # Projektion ermitteln
         if show_only:
             columns = sorted([col for col in self.basis_columns if col.get('show', False)], key=lambda c: c.get('displayOrder', 999))
         else:
             columns = sorted(self.basis_columns, key=lambda c: c.get('expertOrder', 999))
             
         col_names = [col['name'] for col in columns]
+        logger.info(f"📊 Spaltennamen ({len(col_names)}): {col_names[:5]}...")
+        
         abdatum_matrix = []
         
-        # LINEARE LÖSUNG: Abdatum-Werte sind bereits für alle Spalten (inkl. _show) vorhanden
-        for ab_row in self._abdatum_matrix:
-            projected_row = [ab_row.get(col_name, None) for col_name in col_names]
-            abdatum_matrix.append(projected_row)
+        # Über alle GUIDs iterieren
+        guids = list(self.column_control.row_guids)
+        logger.info(f"👤 GUIDs ({len(guids)}): {guids[:3]}...")
+        
+        for row_idx, guid in enumerate(guids):
+            row_data = self.column_control.get_row_data(guid)
             
+            # DEBUG: Erste Row detailliert ausgeben
+            if row_idx == 0:
+                self._debug_print_matrix_row(row_data, row_idx)
+            
+            abdatum_row = []
+            for col_idx, col_name in enumerate(col_names):
+                # EBENE 3: Formatiertes Abdatum holen (_formatiertes_abdatum Suffix)
+                formatiert = row_data.get(f"{col_name}_formatiertes_abdatum")
+                abdatum_row.append(formatiert)
+                
+                # DEBUG: Log für familienname
+                if row_idx == 0 and col_name == 'familienname_original':
+                    logger.info(f"  🔍 familienname_original_formatiertes_abdatum = '{formatiert}'")
+            
+            abdatum_matrix.append(abdatum_row)
+            
+        logger.info(f"✅ Abdatum-Matrix erstellt: {len(abdatum_matrix)} Zeilen, {len(col_names)} Spalten")
+        
+        # DEBUG: Zeige erste Zeile
+        if abdatum_matrix and abdatum_matrix[0]:
+            logger.info(f"🔍 Erste Zeile Abdatum-Matrix (erste 5): {abdatum_matrix[0][:5]}")
+        
         return abdatum_matrix
     
     def _load_or_init_column_controls(self, view_felder):
@@ -526,7 +800,22 @@ class PdvmViewDatenManager:
         columns.append(dummy_col)
         order_counter += 1
 
-        logger.info(f"🔧 {len(columns)} Standard-Controls mit Standard-Sortierung erstellt")
+        # 🆕 row_type Control - Enthält Zeilen-Metadaten (data/group_header/group_footer)
+        row_type_col = {
+            'name': 'row_type',
+            'type': 'dict',  # Dict-Typ für flexible Metadaten
+            'show': False,  # NIEMALS in Projektion sichtbar
+            'expertOrder': order_counter,
+            'displayOrder': order_counter,
+            'field_config': {},
+            'spaltenueberschrift': 'Zeilen-Typ',
+            'sortable': False,  # Nicht sortierbar
+            'filterable': False  # Nicht filterbar
+        }
+        columns.append(row_type_col)
+        order_counter += 1
+
+        logger.info(f"🔧 {len(columns)} Standard-Controls mit Standard-Sortierung erstellt (inkl. dummy + row_type)")
 
         # SCHRITT 3: Synchronisation - Attribute aus Systemsteuerung in bestehende Controls übernehmen
         found_new_controls = False
@@ -715,9 +1004,12 @@ class PdvmViewDatenManager:
     
     def _load_records_data(self, limit=100):
         """
-        SCHRITT 4: Daten laden
-        3. set_data pro Zeile 
-        4. get_value pro Feld mit Zusatzspalten-Logik
+        SCHRITT 4: Daten laden - KORREKTE ORIGINAL-LOGIK
+        
+        1. EINMAL alle Datensätze aus DB lesen
+        2. EINE temp_instance für ALLE Datensätze
+        3. Pro Datensatz: set_data → get_value mit Stichtag
+        4. 3-Ebenen-Struktur befüllen: wert, abdatum, formatiert
         """
         try:
             if not hasattr(self, 'view_table') or not self.view_table:
@@ -725,62 +1017,90 @@ class PdvmViewDatenManager:
 
             from pdvm_central_datenbank import PdvmCentralDatenbank
 
-            # Alle Datensätze laden
+            # === SCHRITT 1: EINMAL alle Datensätze laden (außer 0000...-GUID) ===
+            logger.info("📊 === SCHRITT 1: Lade ALLE Datensätze EINMAL aus DB ===")
             data_db = PdvmCentralDatenbank(
                 db_name="PdvmManager.db",
                 table_name=self.view_table,
-                guid=None
+                guid=None  # Kein GUID = Lese-Modus
             )
 
             all_records = data_db.lesen_alle_ohne_system(limit=limit)
-            logger.info(f"📊 {len(all_records)} Datensätze geladen")
+            logger.info(f"✅ {len(all_records)} Datensätze geladen")
+            
+            # Cache für Stichtags-Wechsel
+            self._cached_all_records = all_records
 
-            # Datetime-Formatter
-            from pdvm_datetime import Pdvm_DateTime
-            dt_formatter = Pdvm_DateTime("DEU")
-
-            # Pro Datensatz verarbeiten
-            successful_records = 0
-            working_db = PdvmCentralDatenbank(
+            # === SCHRITT 2: EINE temp_instance + DateTime für ALLE Datensätze ===
+            logger.info("🔧 === SCHRITT 2: Initialisiere EINE temp_instance für ALLE Datensätze ===")
+            temp_instance = PdvmCentralDatenbank(
                 db_name="PdvmManager.db",
                 table_name=self.view_table,
-                guid=None
+                guid=None  # Ohne GUID = für set_data nutzbar
             )
 
-            abdatum_matrix = []
+            # Datetime-Formatter EINMAL initialisieren
+            from pdvm_datetime import Pdvm_DateTime
+            temp_dt = gcs.temp_dt_inst  # Verwende GCS temp_dt_inst
+            if not temp_dt:
+                temp_dt = Pdvm_DateTime("DEU")
+                logger.warning("⚠️ Kein temp_dt_inst in GCS - verwende lokale Instanz")
+            logger.info(f"✅ temp_instance und temp_dt initialisiert")
+
+            # === SCHRITT 3: Pro Datensatz - set_data + get_value ===
+            logger.info("🔄 === SCHRITT 3: Verarbeite Datensätze mit set_data + get_value ===")
+            successful_records = 0
 
             for i, record_info in enumerate(all_records):
                 try:
                     data_guid = record_info["uid"]
                     data_dict = record_info["daten_dict"]
 
-                    # 3. set_data pro Zeile
-                    working_db.set_data(data_dict, data_guid)
+                    # === KRITISCH: set_data befüllt temp_instance ===
+                    temp_instance.set_data(data_dict, data_guid)
 
                     # Row-Record erstellen
                     row_record = {'uid_original': data_guid}
+                    
+                    # 🆕 row_type: Normale Daten-Zeile
+                    row_record['row_type'] = {'type': 'data'}
+                    
+                    # === 3-EBENEN für uid_original (hat kein Abdatum) - ORIGINAL SUFFIX! ===
+                    row_record['uid_original_abdatum'] = None
+                    row_record['uid_original_formatiertes_abdatum'] = None
 
-                    # 4. get_value pro _original Feld
-                    abdatum_row = self._fill_original_columns(row_record, working_db, dt_formatter, collect_abdatum=True)
+                    # === SCHRITT 3a: _original Felder befüllen mit 3-EBENEN-STRUKTUR ===
+                    self._fill_original_columns(row_record, temp_instance, temp_dt)
 
-                    # 5. _show Spalten aus _original übertragen (erstmal 1:1)
-                    # WICHTIG: Auch Abdatum für _show Spalten übertragen
-                    self._fill_show_columns(row_record, abdatum_row)
+                    # === SCHRITT 3b: _show Spalten aus _original kopieren (inkl. 3 Ebenen) ===
+                    self._fill_show_columns(row_record, temp_dt)
 
-                    # In Column Control speichern
+                    # In Column Control speichern (enthält jetzt alle 3 Ebenen pro Feld)
                     self.column_control.set_row_data(data_guid, row_record)
-                    abdatum_matrix.append(abdatum_row)
                     successful_records += 1
+                    
+                    # DEBUG: Erste Row detailliert ausgeben
+                    if successful_records == 1:
+                        self._debug_print_matrix_row(row_record, 0)
 
                     if (i + 1) % 20 == 0:
                         logger.info(f"   📊 {i+1}/{len(all_records)} Datensätze verarbeitet...")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Fehler bei Datensatz {record_info.get('uid', 'unbekannt')}: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
                     continue
 
-            self._abdatum_matrix = abdatum_matrix
-            logger.info(f"✅ {successful_records} Datensätze erfolgreich geladen")
+            logger.info(f"✅ {successful_records} Datensätze erfolgreich geladen (mit 3-Ebenen-Struktur)")
+            
+            # DEBUG: Nochmal erste Row ausgeben nach allen Verarbeitungen
+            if self.column_control.row_guids:
+                first_guid = list(self.column_control.row_guids)[0]
+                first_row = self.column_control.get_row_data(first_guid)
+                logger.info("🔍 === FINALE MATRIX-ROW NACH ALLEN VERARBEITUNGEN ===")
+                self._debug_print_matrix_row(first_row, 0)
+            
             return successful_records
 
         except Exception as e:
@@ -788,121 +1108,170 @@ class PdvmViewDatenManager:
             traceback.print_exc()
             return 0
     
-    def _fill_original_columns(self, row_record: dict, working_db, dt_formatter, collect_abdatum=False):
+    def _fill_original_columns(self, row_record: dict, temp_instance, temp_dt):
         """
-        SCHRITT 4: _original Spalten befüllen
-        Linear durch alle _original Spalten, mit get_value + Zusatzspalten-Logik
-        Wenn collect_abdatum=True, wird eine dict-Liste mit ab_zeit pro Spalte zurückgegeben.
+        SCHRITT 3a: _original Spalten befüllen mit 3-EBENEN-STRUKTUR
+        
+        KORREKTE LOGIK aus pdvm_view_dialog.py:
+        1. Sortiere Controls: Basis-Felder vor Zusatzfeldern
+        2. Basis-Felder: get_value() → (wert, abdatum)
+        3. Zusatzfelder (date_alter etc.): Berechnung aus Basis-Feld
+        4. Für jeden control_key: 3 Ebenen befüllen
         """
-        import copy
-        abdatum_row = {} if 'collect_abdatum' in locals() or 'collect_abdatum' in globals() else None
-        import inspect
-        frame = inspect.currentframe()
-        args, _, _, values = inspect.getargvalues(frame)
-        collect_abdatum = values.get('collect_abdatum', False)
         try:
-            # SPEZIELL: uid_original behandeln
-            if 'uid_original' in row_record and collect_abdatum:
-                # uid_original hat kein echtes ab_zeit (es ist die GUID selbst)
-                abdatum_row['uid_original'] = None
-                
-            for col in self.basis_columns:
+            # === Sortiere Controls: Basis-Felder VOR Zusatzfeldern ===
+            def sort_key(col):
+                col_type = col.get('type', '')
+                if col_type in ['date_alter', 'date_jahr', 'date_monat', 'date_tag']:
+                    return 1  # Zusatzfelder später
+                else:
+                    return 0  # Basis-Felder zuerst
+            
+            # Nur _original Controls (ohne uid_original)
+            original_cols = [col for col in self.basis_columns 
+                           if col['name'].endswith('_original') and col['name'] != 'uid_original']
+            sorted_cols = sorted(original_cols, key=sort_key)
+            
+            logger.debug(f"🔄 Verarbeite {len(sorted_cols)} _original Felder (sortiert)")
+            
+            for col in sorted_cols:
                 col_name = col['name']
-                if not col_name.endswith('_original') or col_name == 'uid_original':
-                    continue  # uid_original bereits oben behandelt
                 col_type = col.get('type', '')
                 gruppe = col.get('gruppe', 'PERSDATEN')
                 feld = col.get('feld')
+                
                 if gruppe:
                     gruppe = str(gruppe).upper()
                 if feld:
                     feld = str(feld).upper()
-                if not col_type.startswith("date_"):
-                    if feld and gruppe:
+                
+                # === SPEZIALFALL: Date-Zusatzfelder (alter, jahr, monat, tag) ===
+                if col_type in ['date_alter', 'date_jahr', 'date_monat', 'date_tag']:
+                    # Basis-Feld finden
+                    zusatz_suffix = col_type.replace('date_', '')
+                    base_field = col_name.replace('_original', '').replace(f'_{zusatz_suffix}', '')
+                    base_original = f"{base_field}_original"
+                    base_wert = row_record.get(base_original)
+                    
+                    logger.debug(f"  📅 Zusatzfeld {col_name}: Basis={base_original}, Wert={base_wert}")
+                    
+                    if base_wert and base_wert != 1001.0:
                         try:
-                            wert = working_db.get_value(gruppe, feld, ab_zeit=gcs.global_stichtag)
-                            ab_zeit = None
-                            if isinstance(wert, dict):
-                                ab_zeit = wert.get('ab_zeit', None)
-                                wert_inhalt = wert.get('wert', "")
-                                if wert_inhalt is None or wert_inhalt == "":
-                                    row_record[col_name] = ""
-                                else:
-                                    row_record[col_name] = wert_inhalt
+                            temp_dt.PdvmDateTime = float(base_wert)
+                            
+                            if col_type == 'date_alter':
+                                calculated_value = str(temp_dt.calc_alter(gcs.stichtag))
+                            elif col_type == 'date_jahr':
+                                calculated_value = str(temp_dt.Year)
+                            elif col_type == 'date_monat':
+                                calculated_value = str(temp_dt.Month)
+                            elif col_type == 'date_tag':
+                                calculated_value = str(temp_dt.Day)
                             else:
-                                row_record[col_name] = wert if wert is not None else ""
-                            if collect_abdatum:
-                                abdatum_row[col_name] = ab_zeit
-                            logger.debug(f"✅ {col_name} = {row_record[col_name]} (get_value {gruppe}, {feld}) ab_zeit={ab_zeit}")
+                                calculated_value = ""
+                            
+                            row_record[col_name] = calculated_value
+                            logger.debug(f"  ✅ {col_name} = {calculated_value}")
                         except Exception as e:
-                            logger.debug(f"⚠️ get_value Fehler für {col_name} ({gruppe}, {feld}): {e}")
                             row_record[col_name] = ""
-                            if collect_abdatum:
-                                abdatum_row[col_name] = None
+                            logger.debug(f"  ⚠️ Berechnung fehlgeschlagen für {col_name}: {e}")
                     else:
                         row_record[col_name] = ""
-                        if collect_abdatum:
-                            abdatum_row[col_name] = None
+                    
+                    # Date-Zusatzfelder haben kein eigenes Abdatum - ORIGINAL SUFFIX!
+                    row_record[f"{col_name}_abdatum"] = None
+                    row_record[f"{col_name}_formatiertes_abdatum"] = None
+                    continue
+                
+                # === NORMALFALL: Basis-Felder aus DB ===
+                if feld and gruppe:
+                    try:
+                        # KRITISCH: get_value() gibt Tupel zurück (wert, abdatum)
+                        result = temp_instance.get_value(gruppe, feld, gcs.st_inst.PdvmDateTime)
+                        
+                        # Tupel auspacken
+                        if isinstance(result, tuple) and len(result) >= 2:
+                            wert, abdatum = result[0], result[1]
+                        else:
+                            wert, abdatum = result, None
+                        
+                        logger.debug(f"  🔍 {col_name}: wert={wert}, abdatum={abdatum}")
+                        
+                        # === 3-EBENEN BEFÜLLEN (ORIGINAL-SUFFIX!) ===
+                        
+                        # EBENE 1: Wert
+                        row_record[col_name] = wert
+                        
+                        # EBENE 2: AB-Datum (roh) - ORIGINAL SUFFIX!
+                        row_record[f"{col_name}_abdatum"] = abdatum
+                        
+                        # EBENE 3: Formatiertes AB-Datum - ORIGINAL SUFFIX!
+                        if abdatum:
+                            temp_dt.PdvmDateTime = float(abdatum)
+                            formatiert = temp_dt.FormTimeStamp
+                            row_record[f"{col_name}_formatiertes_abdatum"] = formatiert
+                            logger.debug(f"  🎨 {col_name}_formatiertes_abdatum = {formatiert}")
+                        else:
+                            row_record[f"{col_name}_formatiertes_abdatum"] = None
+                    
+                    except Exception as e:
+                        logger.debug(f"  ⚠️ get_value Fehler für {col_name}: {e}")
+                        # Fehlerfall: Alle 3 Ebenen leer - ORIGINAL SUFFIX!
+                        row_record[col_name] = ""
+                        row_record[f"{col_name}_abdatum"] = None
+                        row_record[f"{col_name}_formatiertes_abdatum"] = None
                 else:
-                    zusatz_typ = col_type.replace("date_", "")
-                    basis_col_name = col_name.replace(f"_{zusatz_typ}_original", "_original")
-                    if basis_col_name in row_record:
-                        basis_wert_raw = row_record[basis_col_name]
-                        if isinstance(basis_wert_raw, dict) and 'wert' in basis_wert_raw:
-                            basis_wert = basis_wert_raw['wert']
-                        else:
-                            basis_wert = basis_wert_raw
-                        if isinstance(basis_wert, (int, float)) and basis_wert > 0:
-                            zusatz_wert = self._berechne_datum_zusatz(basis_wert, zusatz_typ, dt_formatter)
-                            row_record[col_name] = zusatz_wert
-                        else:
-                            row_record[col_name] = ""
-                        if collect_abdatum:
-                            # KORREKTUR: Abdatum der Basis-Spalte verwenden, nicht None
-                            abdatum_row[col_name] = abdatum_row.get(basis_col_name, None)
-                    else:
-                        if feld and gruppe:
-                            try:
-                                basis_wert_raw = working_db.get_value(gruppe, feld, ab_zeit=gcs.global_stichtag)
-                                ab_zeit = basis_wert_raw.get('ab_zeit', None) if isinstance(basis_wert_raw, dict) else None
-                                basis_wert = basis_wert_raw['wert'] if isinstance(basis_wert_raw, dict) else basis_wert_raw
-                                if isinstance(basis_wert, (int, float)) and basis_wert > 0:
-                                    zusatz_wert = self._berechne_datum_zusatz(basis_wert, zusatz_typ, dt_formatter)
-                                    row_record[col_name] = zusatz_wert
-                                else:
-                                    row_record[col_name] = ""
-                                if collect_abdatum:
-                                    abdatum_row[col_name] = ab_zeit
-                            except Exception as e:
-                                logger.debug(f"⚠️ get_value Fehler für Zusatzspalte {col_name}: {e}")
-                                row_record[col_name] = ""
-                                if collect_abdatum:
-                                    abdatum_row[col_name] = None
-                        else:
-                            row_record[col_name] = ""
-                            if collect_abdatum:
-                                abdatum_row[col_name] = None
-            if collect_abdatum:
-                return abdatum_row
+                    # Kein Feld/Gruppe: Alle 3 Ebenen leer - ORIGINAL SUFFIX!
+                    row_record[col_name] = ""
+                    row_record[f"{col_name}_abdatum"] = None
+                    row_record[f"{col_name}_formatiertes_abdatum"] = None
+                    
         except Exception as e:
             logger.error(f"❌ Fehler beim Befüllen der _original Spalten: {e}")
-            if collect_abdatum:
-                return abdatum_row
+            import traceback
+            traceback.print_exc()
     
-    def _berechne_datum_zusatz(self, original_datum: float, zusatz_typ: str, dt_formatter):
+    def _format_abdatum(self, abdatum_value, temp_dt):
+        """
+        Formatiert ein Abdatum länderspezifisch via pdvm_DateTime
+        
+        Args:
+            abdatum_value: Rohdatum (z.B. 2024310.12500)
+            temp_dt: Pdvm_DateTime Instanz
+        
+        Returns:
+            str: Formatiertes Datum (z.B. "05.11.2024 03:00:00")
+            None: Wenn kein Abdatum vorhanden
+        """
+        if abdatum_value is None:
+            return None
+        
+        # SPEZIALFALL: Default-Wert 1001.0 (01.01.0001)
+        if float(abdatum_value) == 1001.0:
+            return "01.01.0001 (Default)"
+        
+        try:
+            temp_dt.PdvmDateTime = float(abdatum_value)
+            formatted = temp_dt.FormTimeStamp
+            return formatted
+        except Exception as e:
+            logger.debug(f"❌ Formatierungs-Fehler für {abdatum_value}: {e}")
+            return f"{abdatum_value} (Fehler)"
+    
+    def _berechne_datum_zusatz(self, original_datum: float, zusatz_typ: str, temp_dt):
         """Berechnet Datum-Zusatzwerte"""
         try:
-            dt_formatter.PdvmDateTime = original_datum
+            temp_dt.PdvmDateTime = original_datum
             
             if zusatz_typ == "alter":
                 # PRÄZISE TAGESEXAKTE ALTERSBERECHNUNG
-                return self._berechne_alter(gcs.global_stichtag, original_datum)
+                return temp_dt.calc_alter(gcs.stichtag)
             elif zusatz_typ == "jahr":
-                return dt_formatter.Year
+                return temp_dt.Year
             elif zusatz_typ == "monat":
-                return dt_formatter.Month
+                return temp_dt.Month
             elif zusatz_typ == "tag":
-                return dt_formatter.Day
+                return temp_dt.Day
             else:
                 return ""
         except Exception as e:
@@ -916,9 +1285,12 @@ class PdvmViewDatenManager:
 
     def _fill_show_columns(self, row_record: dict, abdatum_row: dict = None):
         """
-        SCHRITT 5: _show Spalten befüllen
-        Erstmal einfach: 1:1 aus _original übertragen mit besserer Behandlung
-        ERWEITERT: Auch Abdatum für _show Spalten von _original übertragen
+        SCHRITT 5: _show Spalten befüllen mit 3-EBENEN-STRUKTUR
+        
+        Kopiert ALLE 3 Ebenen von _original zu _show:
+        - {col_name}              → EBENE 1: Wert
+        - {col_name}_abdatum      → EBENE 2: AB-Datum (roh)
+        - {col_name}_formatiertes_abdatum  → EBENE 3: Formatiertes AB-Datum
         """
         try:
             # System uid_show
@@ -926,14 +1298,13 @@ class PdvmViewDatenManager:
                 guid = row_record['uid_original']
                 row_record['uid_show'] = guid[:8] + "..." if guid else ""
                 
-                # Abdatum auch für uid_show setzen (falls vorhanden)
-                if abdatum_row and 'uid_original' in abdatum_row:
-                    abdatum_row['uid_show'] = abdatum_row['uid_original']
+                # === 3-EBENEN für uid_show (kopiert von uid_original) ===
+                row_record['uid_show_abdatum'] = row_record.get('uid_original_abdatum')
+                row_record['uid_show_formatiertes_abdatum'] = row_record.get('uid_original_formatiertes_abdatum')
             
             # Alle anderen _show Spalten
             for col in self.basis_columns:
                 col_name = col['name']
-                col_type = col['type']
                 
                 if not col_name.endswith('_show') or col_name == 'uid_show':
                     continue
@@ -942,13 +1313,22 @@ class PdvmViewDatenManager:
                 original_col_name = col_name.replace('_show', '_original')
                 
                 if original_col_name in row_record:
-                    original_wert = row_record[original_col_name]
+                    # === 3-EBENEN KOPIEREN (SUFFIX-PATTERN) ===
                     
-                    # LINEARES ABDATUM ÜBERTRAGEN: _show bekommt dasselbe Abdatum wie _original
-                    if abdatum_row and original_col_name in abdatum_row:
-                        abdatum_row[col_name] = abdatum_row[original_col_name]
+                    # EBENE 1: Wert
+                    row_record[col_name] = row_record[original_col_name]
                     
-                    # Bei normalen Feldern: Historische Dictionaries zu lesbaren Werten
+                    # EBENE 2: AB-Datum (roh)
+                    row_record[f"{col_name}_abdatum"] = row_record.get(f"{original_col_name}_abdatum")
+                    
+                    # EBENE 3: Formatiertes AB-Datum
+                    row_record[f"{col_name}_formatiertes_abdatum"] = row_record.get(f"{original_col_name}_formatiertes_abdatum")
+                    
+                    logger.debug(f"✅ {col_name} kopiert von {original_col_name} (3 Ebenen)")
+                    
+                    # Bei normalen Feldern: Historische Dictionaries zu lesbaren Werten (LEGACY - sollte nicht mehr vorkommen)
+                    original_wert = row_record[col_name]
+                    col_type = col.get('type', '')
                     if not col_type.startswith("date_") and isinstance(original_wert, dict) and 'wert' in original_wert:
                         # Für Datum: PdvmDateTime Formatierung
                         if col_type == "date" and isinstance(original_wert['wert'], (int, float)):

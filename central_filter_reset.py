@@ -125,6 +125,14 @@ class CentralFilterResetManager:
                     reset_count += 1
                     logger.info(f"🗑️ Persistenter Filter gelöscht: {column}")
             
+            # 🆕 V2: Lösche s_string, s_source UND schnell (wenn nicht Gesamtfilter bewahrt werden soll)
+            if not preserve_gesamtfilter:
+                gcs._app_db.set_value(self.view_guid, 's_string', None)
+                gcs._app_db.set_value(self.view_guid, 's_source', None)
+                gcs._app_db.set_value(self.view_guid, 'schnell', None)
+                logger.info(f"🗑️ s_string + s_source + schnell gelöscht")
+                reset_count += 3
+            
             # Speichere Änderungen
             if reset_count > 0:
                 gcs._app_db.save_all_values()

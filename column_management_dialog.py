@@ -145,27 +145,28 @@ class ColumnManagementDialog(QDialog):
                 QMessageBox.warning(self, "Fehler", "Keine Controls-Konfiguration in GCS verfügbar")
                 return
             
-            # STATISCHE PROJEKTION für Column Management - je nach Expert Mode
+            # KRITISCH: Verwende die vorberechnete Projektions-Tabelle!
+            # Diese ist bereits korrekt sortiert nach display_order
             projection_key = 'change_expert' if gcs.expert_mode else 'change_standard'
             current_projection = gcs.get_projection_table(self.view_guid, projection_key)
             
-            # SORTIERUNG: Spalten nach der korrekten Order sortieren (je nach Modus)
-            order_field = 'expert_order' if gcs.expert_mode else 'display_order'
+            if not current_projection:
+                logger.warning(f"⚠️ Keine Projektion '{projection_key}' verfügbar")
+                # Fallback: Projektionen neu aufbauen
+                gcs.rebuild_projection_tables(self.view_guid)
+                current_projection = gcs.get_projection_table(self.view_guid, projection_key)
+                
+                if not current_projection:
+                    logger.error("❌ Auch nach rebuild keine Projektion verfügbar!")
+                    QMessageBox.warning(self, "Fehler", "Spalten-Konfiguration konnte nicht geladen werden")
+                    return
             
-            # Erstelle sortierte Liste aus der Projektion
-            sortable_columns = []
+            logger.info(f"✅ Projektion '{projection_key}' geladen: {len(current_projection)} Spalten")
+            logger.debug(f"📋 Spalten-Reihenfolge: {current_projection[:5]}..." if len(current_projection) > 5 else f"📋 Spalten-Reihenfolge: {current_projection}")
+            
+            # LINEARE IMPLEMENTATION: Verwende Projektion DIREKT - ist bereits korrekt sortiert!
             for column_key in current_projection:
                 config = all_controls.get(column_key, {})
-                order_value = config.get(order_field, 999)
-                sortable_columns.append((column_key, order_value, config))
-            
-            # Nach Order sortieren
-            sortable_columns.sort(key=lambda x: x[1])  # Sortiere nach order_value
-            
-            logger.info(f"📋 Spalten sortiert nach {order_field}: {len(sortable_columns)} Spalten")
-            
-            # LINEARE IMPLEMENTATION: Zeige alle verfügbaren Spalten in korrekter Reihenfolge
-            for column_key, order_value, config in sortable_columns:
                 
                 # Erstelle List-Item
                 item = QListWidgetItem()
@@ -288,19 +289,29 @@ class ColumnManagementDialog(QDialog):
                         changes_made = True
                         logger.debug(f"📝 {column_key}: expert_mode {old_expert} → {new_expert}")
             
-            # 3. SORTIERUNGS-INDEX AKTUALISIEREN (modusspezifisch)
-            # Standard Mode: display_order | Expert Mode: expert_order
-            order_field = 'expert_order' if gcs.expert_mode else 'display_order'
+            # 3. SORTIERUNGS-INDEX AKTUALISIEREN (je nach Modus!)
+            # STANDARD-Modus: Aktualisiert nur display_order
+            # EXPERT-Modus: Aktualisiert nur expert_order
+            # So bleiben beide Orders unabhängig voneinander!
             
             for index, column_key in enumerate(new_order):
                 if column_key in all_controls:
-                    old_order = all_controls[column_key].get(order_field, 999)
                     new_order_value = index
                     
-                    if old_order != new_order_value:
-                        all_controls[column_key][order_field] = new_order_value
-                        changes_made = True
-                        logger.debug(f"📋 {column_key}: {order_field} {old_order} → {new_order_value}")
+                    if gcs.expert_mode:
+                        # EXPERT MODE: Nur expert_order aktualisieren
+                        old_expert = all_controls[column_key].get('expert_order', 999)
+                        if old_expert != new_order_value:
+                            all_controls[column_key]['expert_order'] = new_order_value
+                            changes_made = True
+                            logger.debug(f"📋 {column_key}: expert_order {old_expert} → {new_order_value}")
+                    else:
+                        # STANDARD MODE: Nur display_order aktualisieren
+                        old_display = all_controls[column_key].get('display_order', 999)
+                        if old_display != new_order_value:
+                            all_controls[column_key]['display_order'] = new_order_value
+                            changes_made = True
+                            logger.debug(f"📋 {column_key}: display_order {old_display} → {new_order_value}")
             
             # 4. ÄNDERUNGEN SPEICHERN UND PROJEKTIONEN NEU AUFBAUEN
             if changes_made or len(new_order) > 0:  # Auch bei Sortierung ohne Property-Änderung
@@ -308,15 +319,17 @@ class ColumnManagementDialog(QDialog):
                 gcs.db.set_value(self.view_guid, 'controls', all_controls)
                 logger.info(f"💾 Controls gespeichert für View {self.view_guid}")
                 
-                # Projektions-Tabellen neu aufbauen
+                # KRITISCH: Projektions-Tabellen NEU AUFBAUEN
+                # Dies erstellt die 8 Projektions-Tabellen neu basierend auf den aktualisierten Controls
                 gcs.rebuild_projection_tables(self.view_guid)
+                logger.info(f"🔄 Projektions-Tabellen neu aufgebaut für View {self.view_guid}")
                 
                 # Persistieren
                 gcs.db.save_all_values()
-                logger.info(f"✅ Spalten-Properties und Sortierung aktualisiert - Projektionen automatisch neu aufgebaut")
+                logger.info(f"✅ Spalten-Properties und Sortierung gespeichert - Projektionen aktualisiert")
                 
-                # Signal senden für View-Update
-                self.columns_changed.emit(new_order)  # Neue Sortierung senden
+                # Signal senden für View-Update (enthält neue Spalten-Reihenfolge)
+                self.columns_changed.emit(new_order)
             else:
                 logger.info("ℹ️ Keine Änderungen erkannt")
             
