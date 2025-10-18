@@ -23,6 +23,7 @@ MIGRATION VON:
 
 import logging
 from PyQt5.QtWidgets import QWidget, QMessageBox
+from PyQt5.QtCore import QObject, pyqtSignal
 from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_central_systemsteuerung import get_gcs
 
@@ -32,7 +33,7 @@ from pdvm_einfach_filter_manager import EinfachFilterManager
 
 logger = logging.getLogger(__name__)
 
-class PdvmViewController:
+class PdvmViewController(QObject):
     """
     Controller für View-Operationen
     
@@ -44,6 +45,9 @@ class PdvmViewController:
     - Manager und UI synchronisieren
     """
     
+    # Signal für Datensatz-Auswahl (z.B. für GenerellerDialog)
+    row_double_clicked = pyqtSignal(dict)  # (row_data mit GUID)
+    
     def __init__(self, call_daten, parent=None):
         """
         Initialisiert den View-Controller
@@ -52,6 +56,8 @@ class PdvmViewController:
             call_daten: Dict mit view_guid, title, first_call, test_mode
             parent: Parent-Widget (MainAppComplete)
         """
+        super().__init__(parent)  # QObject initialisieren für Signals
+        
         logger.info("🎮 === PdvmViewController INITIALISIERUNG ===")
         
         # Core-Attribute aus call_daten
@@ -495,6 +501,7 @@ class PdvmViewController:
             self.ui.search_requested.connect(self._handle_search)
             self.ui.filter_requested.connect(self._handle_filter_request)
             self.ui.sort_requested.connect(self._handle_sort_request)
+            self.ui.row_double_clicked.connect(self._handle_row_double_clicked)
             logger.info("✅ UI-Signals verbunden")
             
             # ✅ V3: Schnellsuche-UI laden (falls gespeichert)
@@ -1187,6 +1194,39 @@ class PdvmViewController:
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Anwenden der Sortierung: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _handle_row_double_clicked(self, row_data):
+        """
+        Handler für Doppelklick auf Datensatz
+        
+        Args:
+            row_data: Dict mit allen Feldern des Datensatzes (3-Ebenen Struktur)
+        """
+        logger.info("🖱️ Datensatz doppelt geklickt")
+        
+        try:
+            # GUID extrahieren (versuche verschiedene Varianten)
+            guid = row_data.get('guid')
+            if not guid:
+                guid = row_data.get('GUID')
+            if not guid:
+                guid = row_data.get('id')
+            if not guid:
+                guid = row_data.get('ID')
+            
+            if guid:
+                logger.info(f"  📋 GUID: {guid}")
+            else:
+                logger.warning("  ⚠️ Keine GUID im Datensatz gefunden!")
+            
+            # Signal weiterleiten an Parent (z.B. GenerellerDialog)
+            self.row_double_clicked.emit(row_data)
+            logger.info("  ✅ Signal 'row_double_clicked' emittiert")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Doppelklick-Handler: {e}")
             import traceback
             logger.error(traceback.format_exc())
     

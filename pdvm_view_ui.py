@@ -59,6 +59,7 @@ class PdvmViewUI(QWidget):
     filter_requested = pyqtSignal(str, dict)  # (filter_type, filter_config)
     sort_requested = pyqtSignal(object)  # (sort_config) - object akzeptiert dict UND list!
     column_visibility_changed = pyqtSignal(str, bool)  # (column_name, visible)
+    row_double_clicked = pyqtSignal(dict)  # (row_data) - Datensatz bei Doppelklick
     
     def __init__(self, controller, parent=None):
         """
@@ -378,6 +379,9 @@ class PdvmViewUI(QWidget):
         
         # 🔗 Gruppen-Collapse/Expand durch Klick auf Gruppen-Header
         table.cellClicked.connect(self._on_cell_clicked)
+        
+        # 🔗 Doppelklick für Datensatz-Auswahl (z.B. für GenerellerDialog)
+        table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         
         # Vertikaler Header
         table.verticalHeader().setVisible(True)
@@ -1280,6 +1284,56 @@ class PdvmViewUI(QWidget):
         
         # Collapse/Expand Toggle
         self._toggle_group_collapse(group_id, row)
+    
+    def _on_cell_double_clicked(self, row, column):
+        """
+        Cell-Doppelklick Handler → Sendet row_data an Controller
+        
+        Args:
+            row: Zeilen-Index
+            column: Spalten-Index
+        """
+        try:
+            # Prüfen ob es ein Gruppen-Header ist (diese ignorieren)
+            item = self.table_widget.item(row, column)
+            if item:
+                item_type = item.data(Qt.UserRole + 1)
+                if item_type == 'GROUP_HEADER':
+                    logger.debug("📂 Gruppen-Header doppelt geklickt → ignoriert")
+                    return
+            
+            # Row-Data aus Matrix holen
+            if not hasattr(self.controller, 'matrix_manager'):
+                logger.error("❌ Matrix Manager nicht verfügbar!")
+                return
+            
+            from pdvm_pipeline import get_pipeline
+            pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+            
+            # Finde die entsprechende Zeile in der Matrix (ohne Gruppen-Header)
+            data_row_index = 0
+            for matrix_row in pipeline.matrix_project:
+                row_type = matrix_row.get('row_type')
+                
+                # Überspringe Gruppen-Header
+                if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                    continue
+                
+                # Ist das die gesuchte Zeile?
+                if data_row_index == row:
+                    # Signal mit row_data emittieren
+                    logger.info(f"🖱️ Doppelklick auf Zeile {row} → Signal emittiert")
+                    self.row_double_clicked.emit(matrix_row)
+                    return
+                
+                data_row_index += 1
+            
+            logger.warning(f"⚠️ Zeile {row} nicht in Matrix gefunden!")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Doppelklick-Handler: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _toggle_group_collapse(self, group_id: str, header_row: int):
         """
