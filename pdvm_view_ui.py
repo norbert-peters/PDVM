@@ -228,6 +228,50 @@ class PdvmViewUI(QWidget):
         header_layout.addWidget(self.sum_reset_button)
         logger.info("✅ Summen Reset Button hinzugefügt")
         
+        # 📂 COLLAPSE ALL BUTTON (Alle Gruppen zuklappen)
+        self.collapse_all_button = QPushButton("◀ Alle")
+        self.collapse_all_button.setFixedHeight(32)
+        self.collapse_all_button.setToolTip("Alle Gruppen zuklappen")
+        self.collapse_all_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.collapse_all_button.clicked.connect(self._collapse_all_groups)
+        header_layout.addWidget(self.collapse_all_button)
+        logger.info("✅ Collapse All Button hinzugefügt")
+        
+        # 📂 EXPAND ALL BUTTON (Alle Gruppen aufklappen)
+        self.expand_all_button = QPushButton("▼ Alle")
+        self.expand_all_button.setFixedHeight(32)
+        self.expand_all_button.setToolTip("Alle Gruppen aufklappen")
+        self.expand_all_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2ecc71;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #27ae60;
+            }
+        """)
+        self.expand_all_button.clicked.connect(self._expand_all_groups)
+        header_layout.addWidget(self.expand_all_button)
+        logger.info("✅ Expand All Button hinzugefügt")
+        
         # Info-Label (Anzahl Datensätze)
         self.info_label = QLabel("Keine Daten")
         self.info_label.setStyleSheet("""
@@ -730,6 +774,10 @@ class PdvmViewUI(QWidget):
                 # Nicht editierbar
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 
+                # 🎯 WICHTIG: Marker setzen für Collapse-Logik
+                if col_idx == 0:  # Nur in erster Spalte
+                    item.setData(Qt.UserRole + 1, 'SUM_ROW')
+                
                 # Item setzen
                 self.table_widget.setItem(row_idx, col_idx, item)
             
@@ -987,6 +1035,64 @@ class PdvmViewUI(QWidget):
         
         logger.info("✅ Summen zurückgesetzt - Summen-Zeile entfernt")
     
+    def _collapse_all_groups(self):
+        """
+        Klappt ALLE Gruppen zu
+        
+        Workflow:
+        1. Findet alle Gruppen-Header in matrix_project
+        2. Setzt collapsed=True für alle
+        3. Aktualisiert UI (alle Zeilen ausblenden)
+        """
+        logger.info("📂 === COLLAPSE ALL GROUPS ===")
+        
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        
+        # Alle Gruppen-Header finden und collapsed setzen
+        group_count = 0
+        for row_data in pipeline.matrix_project:
+            row_type = row_data.get('row_type')
+            if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                row_type['collapsed'] = True
+                group_count += 1
+        
+        logger.info(f"  ✅ {group_count} Gruppen auf collapsed=True gesetzt")
+        
+        # UI komplett neu rendern (einfachster Weg)
+        self.controller.refresh_ui_from_pipeline()
+        
+        logger.info("✅ Alle Gruppen zugeklappt")
+    
+    def _expand_all_groups(self):
+        """
+        Klappt ALLE Gruppen auf
+        
+        Workflow:
+        1. Findet alle Gruppen-Header in matrix_project
+        2. Setzt collapsed=False für alle
+        3. Aktualisiert UI (alle Zeilen einblenden)
+        """
+        logger.info("📂 === EXPAND ALL GROUPS ===")
+        
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        
+        # Alle Gruppen-Header finden und collapsed zurücksetzen
+        group_count = 0
+        for row_data in pipeline.matrix_project:
+            row_type = row_data.get('row_type')
+            if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                row_type['collapsed'] = False
+                group_count += 1
+        
+        logger.info(f"  ✅ {group_count} Gruppen auf collapsed=False gesetzt")
+        
+        # UI komplett neu rendern (einfachster Weg)
+        self.controller.refresh_ui_from_pipeline()
+        
+        logger.info("✅ Alle Gruppen aufgeklappt")
+    
     def _toggle_expert_mode(self, checked):
         """Expert Mode ein/ausschalten - PERSISTENT in GCS - PIPELINE-PROJEKTION NEU DURCHLAUFEN"""
         logger.info(f"🔧 Expert Mode Toggle: {'AN' if checked else 'AUS'}")
@@ -1171,7 +1277,7 @@ class PdvmViewUI(QWidget):
             header_item.setText(new_text)
         
         # Zeilen ein/ausblenden
-        # Finde alle Zeilen die zur Gruppe gehören (bis zum nächsten Header oder Ende)
+        # Finde alle Zeilen die zur Gruppe gehören (bis zum nächsten Header, Ende oder SUMMEN-ZEILE)
         total_rows = self.table_widget.rowCount()
         current_row = header_row + 1
         
@@ -1185,7 +1291,12 @@ class PdvmViewUI(QWidget):
             if item_type == 'GROUP_HEADER':
                 break  # Nächste Gruppe beginnt
             
-            # Zeile ein/ausblenden
+            # 🎯 WICHTIG: Summen-Zeile NIEMALS ausblenden!
+            if item_type == 'SUM_ROW':
+                logger.info(f"  ⚠️ Summen-Zeile erreicht (Zeile {current_row}) - NICHT ausblenden!")
+                break  # Summen-Zeile bleibt immer sichtbar
+            
+            # Zeile ein/ausblenden (nur normale Daten-Zeilen)
             if is_collapsed:
                 self.table_widget.setRowHidden(current_row, True)
             else:
