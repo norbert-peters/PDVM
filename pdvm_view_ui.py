@@ -35,6 +35,11 @@ from pdvm_matrix_constants import (
     get_wert, get_abdatum, get_formatiert
 )
 
+# ========================================
+# GLOBALER GCS-ZUGRIFF (ULTRA-EINFACH)
+# ========================================
+from pdvm_central_systemsteuerung import get_gcs as gcs
+
 logger = logging.getLogger(__name__)
 
 
@@ -180,6 +185,48 @@ class PdvmViewUI(QWidget):
         else:
             self.expert_mode_button = None
             logger.info("ℹ️ Expert Mode Button nicht verfügbar (kein Admin)")
+        
+        # 🎯 SORT RESET BUTTON (für alle Benutzer)
+        self.sort_reset_button = QPushButton("🔄 Sort")
+        self.sort_reset_button.setFixedHeight(32)
+        self.sort_reset_button.setToolTip("Sortierung zurücksetzen")
+        self.sort_reset_button.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        self.sort_reset_button.clicked.connect(self._reset_sort)
+        header_layout.addWidget(self.sort_reset_button)
+        logger.info("✅ Sort Reset Button hinzugefügt")
+        
+        # 🆕 SUMMEN RESET BUTTON (für alle Benutzer)
+        self.sum_reset_button = QPushButton("🔄 Σ")
+        self.sum_reset_button.setFixedHeight(32)
+        self.sum_reset_button.setToolTip("Summen zurücksetzen")
+        self.sum_reset_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+        """)
+        self.sum_reset_button.clicked.connect(self._reset_sum)
+        header_layout.addWidget(self.sum_reset_button)
+        logger.info("✅ Summen Reset Button hinzugefügt")
         
         # Info-Label (Anzahl Datensätze)
         self.info_label = QLabel("Keine Daten")
@@ -333,13 +380,16 @@ class PdvmViewUI(QWidget):
         # WICHTIG: visible_columns für Header-Klick befüllen!
         self._determine_visible_columns()
         
-        # Expert Mode Status prüfen
-        from pdvm_central_systemsteuerung import get_gcs
-        gcs = get_gcs()
-        expert_mode = gcs.expert_mode if gcs else False
+        # ✅ Expert Mode Status direkt aus GCS
+        expert_mode = gcs().expert_mode if gcs() else False
         
-        # Tabelle leeren und neu konfigurieren
-        self.table_widget.clear()
+        # 🎯 KRITISCH: Tabelle KOMPLETT zurücksetzen (sonst bleiben alte Zeilen!)
+        # Problem: clear() löscht nur Inhalt, nicht die Zeilen selbst
+        # Lösung: Erst auf 0 setzen, dann auf neue Anzahl
+        self.table_widget.setRowCount(0)  # ← ERST auf 0 setzen (löscht ALLE Zeilen)
+        self.table_widget.setColumnCount(0)  # ← Spalten auch zurücksetzen
+        
+        # Jetzt neue Größe setzen
         self.table_widget.setRowCount(len(projected_matrix))
         self.table_widget.setColumnCount(len(column_keys))
         
@@ -368,12 +418,27 @@ class PdvmViewUI(QWidget):
         
         self.table_widget.setHorizontalHeaderLabels(header_labels)
         
-        # FEATURE 3: Header-Schriftgröße etwas größer machen
+        # ========================================================================
+        # FEATURE 3: Header-Schriftgröße Bold + 2 Punkte größer (von GCS!)
+        # ========================================================================
         header = self.table_widget.horizontalHeader()
-        font = header.font()
-        font.setPointSize(font.pointSize() + 1)
-        font.setBold(True)
-        header.setFont(font)
+        
+        # Font-Größe aus GCS holen (zentral definiert)
+        gcs_instance = self.controller.gcs
+        if gcs_instance and hasattr(gcs_instance, 'header_font_size'):
+            header_size = gcs_instance.header_font_size
+        else:
+            # Fallback falls GCS nicht verfügbar
+            header_size = 11  # Default = 9pt Basis + 2pt
+            logger.warning("⚠️ GCS nicht verfügbar, verwende Fallback-Header-Größe: 11pt")
+        
+        # Font erstellen mit fester Größe aus GCS
+        header_font = QFont()
+        header_font.setBold(True)
+        header_font.setPointSize(header_size)
+        header.setFont(header_font)
+        
+        logger.debug(f"📏 Header-Font: {header_size}pt (aus GCS), Bold")
         
         # FEATURE 2: Header Tooltips setzen
         for col_idx, tooltip in enumerate(header_tooltips):
@@ -392,6 +457,11 @@ class PdvmViewUI(QWidget):
             # === GRUPPEN-HEADER RENDERING ===
             if row_type == 'group_header':
                 self._render_group_header_in_table(row_idx, row_type_dict, column_keys)
+                continue  # Nächste Zeile
+            
+            # === SUMMEN-ZEILE RENDERING ===
+            if row_type == 'sum_row':
+                self._render_sum_row_in_table(row_idx, row_data, row_type_dict, column_keys)
                 continue  # Nächste Zeile
             
             # === NORMALE DATEN-ZEILE ===
@@ -458,14 +528,22 @@ class PdvmViewUI(QWidget):
     
     def _render_group_header_in_table(self, row_idx: int, row_type_dict: dict, column_keys: list):
         """
-        🆕 PHASE 3: Rendert Gruppen-Header-Zeile in Tabelle
+        🆕 PHASE 3 + SUMMEN: Rendert Gruppen-Header-Zeile in Tabelle
+        
+        VARIANTE 2 (Spalten):
+        - Erste Spalte: Gruppen-Text (KEIN Spanning)
+        - Summen-Spalten: Zeigen Gruppen-Summen
+        - Andere Spalten: Leer
         
         Args:
             row_idx: Zeilen-Index
-            row_type_dict: row_type Dict mit Gruppen-Metadaten
+            row_type_dict: row_type Dict mit Gruppen-Metadaten (inkl. group_sums)
             column_keys: Liste der Spalten-Keys
         """
         try:
+            from PyQt5.QtGui import QColor, QFont
+            from PyQt5.QtCore import Qt
+            
             # Metadaten extrahieren
             group_level = row_type_dict.get('level', 0)
             group_column = row_type_dict.get('column', '')
@@ -473,76 +551,231 @@ class PdvmViewUI(QWidget):
             group_count = row_type_dict.get('count', 0)
             is_collapsed = row_type_dict.get('collapsed', False)
             group_id = row_type_dict.get('group_id', '')
+            group_sums = row_type_dict.get('group_sums', {})  # 🆕 Gruppen-Summen
             
-            # Einrückung + Icon
-            indent = "  " * group_level
-            icon = "▶" if is_collapsed else "▼"
+            # 🔍 DEBUG: Gruppen-Summen prüfen
+            if group_sums:
+                logger.debug(f"🧮 Gruppen-Header hat Summen: {group_sums}")
+            else:
+                logger.warning(f"⚠️ Gruppen-Header OHNE Summen! row_type_dict keys: {row_type_dict.keys()}")
             
-            # Spaltenname formatieren
-            display_column = group_column.replace('_original', '').replace('_show', '').replace('_', ' ').title()
+            # Font für alle Zellen
+            gcs_instance = self.controller.gcs
+            if gcs_instance and hasattr(gcs_instance, 'group_font_size'):
+                group_size = gcs_instance.group_font_size
+            else:
+                group_size = 10  # Default
             
-            # Text
-            text = f"{indent}{icon} {display_column}: {group_value}"
-            if group_count > 0:
-                text += f" ({group_count} Einträge)"
-            
-            # Item erstellen
-            item = QTableWidgetItem(text)
-            
-            # 🎨 STYLING
-            from PyQt5.QtGui import QColor, QFont
+            group_font = QFont()
+            group_font.setBold(True)
+            group_font.setPointSize(group_size)
             
             # Hintergrund nach Ebene
             if group_level == 0:
-                item.setBackground(QColor("#e3f2fd"))  # Hellblau
+                bg_color = QColor("#e3f2fd")  # Hellblau
             elif group_level == 1:
-                item.setBackground(QColor("#bbdefb"))  # Mittelblau
+                bg_color = QColor("#bbdefb")  # Mittelblau
             else:
-                item.setBackground(QColor("#90caf9"))  # Dunkelblau
+                bg_color = QColor("#90caf9")  # Dunkelblau
             
-            # Font: Bold + größer
-            font = item.font()
-            font.setBold(True)
-            font.setPointSize(font.pointSize() + 1)
-            item.setFont(font)
+            # 🆕 VARIANTE 2: Jede Spalte einzeln befüllen (KEIN Spanning!)
+            for col_idx, col_key in enumerate(column_keys):
+                
+                # === ERSTE SPALTE: Gruppen-Text ===
+                if col_idx == 0:
+                    indent = "  " * group_level
+                    icon = "▶" if is_collapsed else "▼"
+                    display_column = group_column.replace('_original', '').replace('_show', '').replace('_', ' ').title()
+                    
+                    text = f"{indent}{icon} {display_column}: {group_value}"
+                    if group_count > 0:
+                        text += f" ({group_count})"
+                    
+                    item = QTableWidgetItem(text)
+                    
+                    # Tooltip mit Gruppen-Info
+                    tooltip = (
+                        f"Gruppierung: {display_column}\n"
+                        f"Wert: {group_value}\n"
+                        f"Ebene: {group_level}\n"
+                        f"Einträge: {group_count}\n"
+                        f"Status: {'Eingeklappt' if is_collapsed else 'Ausgeklappt'}\n"
+                        f"ID: {group_id}"
+                    )
+                    if group_sums:
+                        tooltip += "\n\nGruppen-Summen:"
+                        for sum_col, sum_val in group_sums.items():
+                            tooltip += f"\n  {sum_col}: {sum_val}"
+                    item.setToolTip(tooltip)
+                    
+                    # Group-ID speichern für Click-Handler
+                    item.setData(Qt.UserRole, group_id)
+                    item.setData(Qt.UserRole + 1, 'GROUP_HEADER')
+                
+                # === SUMMEN-SPALTE: Zeige Gruppen-Summe ===
+                elif col_key in group_sums:
+                    sum_value = group_sums[col_key]
+                    
+                    # Formatierung
+                    if isinstance(sum_value, float):
+                        display_value = f"Σ {sum_value:,.2f}".replace(',', ' ').replace('.', ',')
+                    elif isinstance(sum_value, int):
+                        display_value = f"Σ {sum_value:,}".replace(',', ' ')
+                    else:
+                        display_value = f"Σ {sum_value}"
+                    
+                    item = QTableWidgetItem(display_value)
+                    
+                    # Tooltip
+                    item.setToolTip(f"Gruppen-Summe: {sum_value}\nÜber {group_count} Einträge")
+                
+                # === ANDERE SPALTEN: Leer ===
+                else:
+                    item = QTableWidgetItem("")
+                
+                # Styling für ALLE Zellen
+                item.setBackground(bg_color)
+                item.setFont(group_font)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                
+                # Item setzen
+                self.table_widget.setItem(row_idx, col_idx, item)
             
-            # Tooltip
-            tooltip = (
-                f"Gruppierung: {display_column}\n"
-                f"Wert: {group_value}\n"
-                f"Ebene: {group_level}\n"
-                f"Einträge: {group_count}\n"
-                f"Status: {'Eingeklappt' if is_collapsed else 'Ausgeklappt'}\n"
-                f"ID: {group_id}"
-            )
-            item.setToolTip(tooltip)
-            
-            # Group-ID speichern für Click-Handler (Phase 3.3)
-            from PyQt5.QtCore import Qt
-            item.setData(Qt.UserRole, group_id)
-            item.setData(Qt.UserRole + 1, 'GROUP_HEADER')
-            
-            # Item setzen + Spanning
-            self.table_widget.setItem(row_idx, 0, item)
-            if len(column_keys) > 1:
-                self.table_widget.setSpan(row_idx, 0, 1, len(column_keys))
-            
-            logger.debug(f"✅ Gruppen-Header gerendert: Row {row_idx}, Level {group_level}, {group_value}")
+            logger.debug(f"✅ Gruppen-Header gerendert: Row {row_idx}, Level {group_level}, {group_value}, {len(group_sums)} Summen")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Rendern von Gruppen-Header: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
+    def _render_sum_row_in_table(self, row_idx: int, row_data: dict, row_type_dict: dict, column_keys: list):
+        """
+        🆕 SUMMEN: Rendert Summen-Zeile in Tabelle
+        
+        Args:
+            row_idx: Zeilen-Index
+            row_data: Komplette Zeilen-Daten (mit Summen-Werten)
+            row_type_dict: row_type Dict mit Summen-Metadaten
+            column_keys: Liste der Spalten-Keys
+        """
+        try:
+            from PyQt5.QtGui import QColor, QFont
+            from PyQt5.QtCore import Qt
+            
+            # Metadaten extrahieren
+            sum_label = row_type_dict.get('label', 'Summe')
+            sum_columns = row_type_dict.get('columns', [])
+            row_count = row_type_dict.get('row_count', 0)
+            
+            logger.debug(f"🧮 Rendere Summen-Zeile: {len(sum_columns)} Summen-Spalten")
+            logger.debug(f"🔍 row_data keys: {list(row_data.keys())[:10]}...")  # Erste 10 Keys
+            
+            # Durch alle Spalten iterieren
+            for col_idx, col_key in enumerate(column_keys):
+                # Erste Spalte: Label "Summe (X Zeilen)"
+                if col_idx == 0:
+                    text = f"{sum_label}"
+                    if row_count > 0:
+                        text += f" ({row_count} Zeilen)"
+                    
+                    item = QTableWidgetItem(text)
+                    
+                # Spalte ist in sum_columns: Summen-Wert anzeigen
+                elif col_key in sum_columns:
+                    cell = row_data.get(col_key, [None, None, None])
+                    
+                    # 🔍 DEBUG: Zell-Wert prüfen
+                    logger.debug(f"  Spalte {col_key}: cell={cell}")
+                    
+                    # EBENE 1: Summen-Wert (ist bereits berechnet)
+                    sum_value = get_wert(cell)
+                    
+                    # Formatierung (z.B. Tausender-Trennzeichen)
+                    if isinstance(sum_value, float):
+                        display_value = f"{sum_value:,.2f}".replace(',', ' ').replace('.', ',')
+                    elif isinstance(sum_value, int):
+                        display_value = f"{sum_value:,}".replace(',', ' ')
+                    else:
+                        display_value = str(sum_value) if sum_value is not None else ""
+                    
+                    item = QTableWidgetItem(display_value)
+                    
+                    # Tooltip
+                    tooltip = f"Summe: {sum_value}\nSummiert über: {row_count} Zeilen"
+                    item.setToolTip(tooltip)
+                    
+                # Andere Spalten: Leer
+                else:
+                    item = QTableWidgetItem("")
+                
+                # 🎨 STYLING (ALLE Zellen)
+                # Hintergrund: Gelb-Grau
+                item.setBackground(QColor("#fff9c4"))  # Hellgelb
+                
+                # Font: Bold + 1 Punkt größer
+                gcs_instance = self.controller.gcs
+                if gcs_instance and hasattr(gcs_instance, 'group_font_size'):
+                    sum_size = gcs_instance.group_font_size
+                else:
+                    sum_size = 10  # Default
+                
+                sum_font = QFont()
+                sum_font.setBold(True)
+                sum_font.setPointSize(sum_size)
+                item.setFont(sum_font)
+                
+                # Nicht editierbar
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                
+                # Item setzen
+                self.table_widget.setItem(row_idx, col_idx, item)
+            
+            logger.debug(f"✅ Summen-Zeile gerendert: Row {row_idx}, {len(sum_columns)} Summen-Spalten")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Rendern von Summen-Zeile: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def _determine_visible_columns(self):
-        """Sichtbare Spalten aus Controls ermitteln"""
-        # Expert Mode Status prüfen
+        """
+        ✅ ULTRA-VEREINFACHT: Hole Projektion DIREKT aus GCS
+        
+        KEINE Wrapper-Methode mehr - direkter Zugriff auf GCS!
+        """
+        gcs_instance = self.controller.gcs
+        if not gcs_instance:
+            logger.error("❌ GCS nicht verfügbar!")
+            self.visible_columns = []
+            return
+        
+        # Expert Mode aus Button oder GCS
         expert_mode_active = False
         if self.expert_mode_button:
             expert_mode_active = self.expert_mode_button.isChecked()
         
-        # Delegiere an neue Methode
-        self._determine_visible_columns_with_expert_mode(expert_mode_active)
+        # ✅ DIREKTER GCS-ZUGRIFF: Index 0 (Standard) oder 5 (Expert)
+        projection_index = 5 if expert_mode_active else 0
+        column_keys = gcs_instance.get_projection_table(self.controller.view_guid, projection_index)
+        
+        logger.debug(f"📊 Projektion [{projection_index}] {'Expert' if expert_mode_active else 'Standard'}: {len(column_keys)} Spalten")
+        
+        # Konvertiere Keys zu visible_columns Format (für UI-Rendering)
+        self.visible_columns = []
+        for col_key in column_keys:
+            control_config = self.current_controls.get(col_key)
+            if control_config:
+                self.visible_columns.append({
+                    'key': col_key,
+                    'label': control_config.get('name', col_key),
+                    'type': control_config.get('type', 'string'),
+                    'display_order': control_config.get('display_order', 999),
+                    'expert_mode': control_config.get('expert_mode', False)
+                })
+            else:
+                logger.warning(f"⚠️ Spalte {col_key} in Projektion, aber nicht in Controls!")
+        
+        logger.info(f"  ✅ {len(self.visible_columns)} Spalten aus GCS-Projektion [{projection_index}] geladen")
     
     def _populate_table(self):
         """Tabelle mit Daten befüllen"""
@@ -685,16 +918,81 @@ class PdvmViewUI(QWidget):
     
     # === EVENT HANDLER ===
     
+    def _reset_sort(self):
+        """
+        Sortierung zurücksetzen - ANALOG ZU FILTER-RESET
+        
+        Workflow:
+        1. sg_string und sg_source in app_db auf None setzen
+        2. Pipeline ab SORT neu durchlaufen
+        3. UI aktualisieren
+        """
+        logger.info("🔄 === SORT RESET ===")
+        
+        gcs_instance = gcs()
+        if not gcs_instance:
+            logger.error("❌ GCS nicht verfügbar - Sort Reset nicht möglich!")
+            return
+        
+        # sg_string und sg_source auf None setzen
+        gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_string', None)
+        gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_source', None)
+        gcs_instance._app_db.save_all_values()
+        
+        logger.info("✅ sg_string und sg_source zurückgesetzt (None)")
+        
+        # Pipeline ab SORT neu durchlaufen
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        pipeline.run('SORT')
+        
+        # UI aktualisieren
+        self.controller.refresh_ui_from_pipeline()
+        
+        logger.info("✅ Sortierung zurückgesetzt - Original-Reihenfolge wiederhergestellt")
+    
+    def _reset_sum(self):
+        """
+        Summen-Konfiguration zurücksetzen - ANALOG ZU SORT-RESET
+        
+        Workflow:
+        1. sum_string und sum_source in app_db auf None setzen
+        2. Pipeline ab SUMMEN neu durchlaufen
+        3. UI aktualisieren
+        """
+        logger.info("🔄 === SUMMEN RESET ===")
+        
+        gcs_instance = gcs()
+        if not gcs_instance:
+            logger.error("❌ GCS nicht verfügbar - Summen Reset nicht möglich!")
+            return
+        
+        # sum_string und sum_source auf None setzen
+        gcs_instance._app_db.set_value(self.controller.view_guid, 'sum_string', None)
+        gcs_instance._app_db.set_value(self.controller.view_guid, 'sum_source', None)
+        gcs_instance._app_db.save_all_values()
+        
+        logger.info("✅ sum_string und sum_source zurückgesetzt (None)")
+        
+        # Pipeline ab SUMMEN neu durchlaufen
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        pipeline.run('SUMMEN')
+        
+        # UI aktualisieren
+        self.controller.refresh_ui_from_pipeline()
+        
+        logger.info("✅ Summen zurückgesetzt - Summen-Zeile entfernt")
+    
     def _toggle_expert_mode(self, checked):
-        """Expert Mode ein/ausschalten - PERSISTENT in GCS"""
+        """Expert Mode ein/ausschalten - PERSISTENT in GCS - PIPELINE-PROJEKTION NEU DURCHLAUFEN"""
         logger.info(f"🔧 Expert Mode Toggle: {'AN' if checked else 'AUS'}")
         
-        # Expert Mode in GCS persistent setzen
-        from pdvm_central_systemsteuerung import get_gcs
-        gcs = get_gcs()
-        if gcs:
-            gcs.expert_mode = checked
-            logger.info(f"✅ Expert Mode in GCS gesetzt: {gcs.expert_mode}")
+        # ✅ Expert Mode in GCS persistent setzen - direkt ohne Zuweisung
+        gcs_instance = gcs()
+        if gcs_instance:
+            gcs_instance.expert_mode = checked
+            logger.info(f"✅ Expert Mode in GCS gesetzt: {gcs_instance.expert_mode}")
         else:
             logger.error("❌ GCS nicht verfügbar - Expert Mode nicht gesetzt!")
         
@@ -705,50 +1003,12 @@ class PdvmViewUI(QWidget):
             else:
                 self.expert_mode_button.setText("👨‍💼 Expert Mode")
         
-        # MATRIX-PIPELINE: Controller auffordern, UI mit neuer Projektion neu zu laden
-        # Controller wählt automatisch die richtige Projektions-Tabelle basierend auf GCS expert_mode
-        logger.info("🔄 Lade UI mit neuer Projektion (basierend auf GCS expert_mode)...")
-        self.controller.refresh_ui_from_matrix()
+        # 🎯 KRITISCH: Pipeline-Projektion NEU durchlaufen!
+        # Pipeline holt Expert Mode aus GCS und berechnet Projektion neu (Index 0 oder 5)
+        logger.info("🔄 Pipeline-Projektion wird NEU berechnet (Expert Mode geändert)...")
+        self.controller.refresh_ui_from_pipeline(rerun_projection=True)
         
-        logger.info(f"✅ Expert Mode umgeschaltet und UI aktualisiert")
-    
-    def _determine_visible_columns_with_expert_mode(self, expert_mode_active):
-        """Sichtbare Spalten mit Expert Mode ermitteln"""
-        self.visible_columns = []
-        
-        # Nur _show Controls
-        for control_key, control_config in self.current_controls.items():
-            if control_config.get('control_type') != 'show':
-                continue
-            
-            # Expert Mode Prüfung
-            is_expert = control_config.get('expert_mode', False)
-            
-            # WICHTIG: Im Expert-Modus ALLE Spalten anzeigen
-            if expert_mode_active:
-                # Expert Mode: ALLE _show Controls (ignoriere 'show' Flag)
-                self.visible_columns.append({
-                    'key': control_key,
-                    'label': control_config.get('name', control_key),
-                    'type': control_config.get('type', 'string'),
-                    'display_order': control_config.get('display_order', 999),
-                    'expert_mode': is_expert
-                })
-            else:
-                # Normal Mode: Nur Spalten mit show=True UND nicht expert_mode
-                if control_config.get('show', False) and not is_expert:
-                    self.visible_columns.append({
-                        'key': control_key,
-                        'label': control_config.get('name', control_key),
-                        'type': control_config.get('type', 'string'),
-                        'display_order': control_config.get('display_order', 999),
-                        'expert_mode': is_expert
-                    })
-        
-        # Nach display_order sortieren
-        self.visible_columns.sort(key=lambda x: x['display_order'])
-        
-        logger.info(f"  📋 {len(self.visible_columns)} Spalten ermittelt (Expert Mode: {expert_mode_active})")
+        logger.info(f"✅ Expert Mode umgeschaltet und UI mit neuer Projektion aktualisiert")
     
     def _on_header_clicked(self, logical_index):
         """Header-Klick → Einfache Sortierung mit asc/desc Toggle"""
@@ -771,16 +1031,34 @@ class PdvmViewUI(QWidget):
                 self.current_sort_direction = 'asc'
                 logger.info(f"🆕 Neue Sortierung: {column_key}")
             
-            # Sortier-Config erstellen
-            sort_config = {
-                'column': column_key,
-                'direction': self.current_sort_direction
-            }
-            
-            logger.info(f"🚀 Emit sort_requested Signal: {sort_config}")
-            
-            # An Controller senden
-            self.sort_requested.emit(sort_config)
+            # 🎯 ANALOG ZU FILTER: sg_string und sg_source in app_db speichern
+            gcs_instance = gcs()
+            if gcs_instance:
+                # sg_string: Einfache Sort-Config
+                sg_string = {
+                    'column': column_key,
+                    'direction': self.current_sort_direction
+                }
+                
+                # In app_db speichern
+                gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_string', sg_string)
+                gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_source', 'einfach')
+                gcs_instance._app_db.save_all_values()
+                
+                logger.info(f"✅ sg_string gespeichert: {sg_string}")
+                logger.info(f"✅ sg_source gespeichert: 'einfach'")
+                
+                # 🎯 Pipeline ab SORT neu durchlaufen
+                from pdvm_pipeline import get_pipeline
+                pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+                pipeline.run('SORT')
+                
+                # UI aktualisieren
+                self.controller.refresh_ui_from_pipeline()
+                
+                logger.info(f"✅ Header-Sort angewendet: {column_key} {self.current_sort_direction}")
+            else:
+                logger.error("❌ GCS nicht verfügbar - Sort nicht angewendet!")
         else:
             logger.warning(f"❌ Spalten-Index {logical_index} außerhalb von visible_columns ({len(self.visible_columns)} Spalten)")
             logger.warning(f"📋 Visible columns: {[c.get('key', '?') for c in self.visible_columns]}")
@@ -856,7 +1134,7 @@ class PdvmViewUI(QWidget):
         logger.info("🗑️ Suche löschen Button geklickt")
         try:
             # ✅ V3: FilterResetManager für ALLE Filter-Löschungen
-            from filter_reset_manager import get_filter_reset_manager
+            from pdvm_filter_reset_manager import get_filter_reset_manager
             # Controller hat matrix_manager
             if not hasattr(self.controller, 'matrix_manager'):
                 logger.error("❌ Controller hat keinen matrix_manager!")
@@ -939,7 +1217,7 @@ class PdvmViewUI(QWidget):
             
             if filter_type == 'simple':
                 # EINFACHER FILTER: V3 Dialog mit direkter Eingabe
-                from einfach_filter_dialog import SimpleFilterDialog
+                from pdvm_einfach_filter_dialog import SimpleFilterDialog
                 
                 dialog = SimpleFilterDialog(
                     parent=self,
@@ -951,7 +1229,7 @@ class PdvmViewUI(QWidget):
                 
             elif filter_type == 'complex':
                 # KOMPLEXER FILTER: V3 Dialog mit 4-Positionen
-                from komplex_filter_dialog import ComplexFilterDialog
+                from pdvm_komplex_filter_dialog import ComplexFilterDialog
                 
                 dialog = ComplexFilterDialog(
                     parent=self,
@@ -984,25 +1262,25 @@ class PdvmViewUI(QWidget):
             logger.error(traceback.format_exc())
     
     def _request_advanced_sort(self):
-        """Erweiterte Sortierung anfordern"""
+        """Erweiterte Sortierung anfordern - DIALOG → sg_string + sg_source"""
         logger.info("📊 Erweiterte Sortierung angefordert")
         
         try:
             from advanced_sort_dialog import AdvancedSortDialog
             from pdvm_central_systemsteuerung import (
-                get_gcs, 
+                get_gcs as gcs_func, 
                 TABLE_INDEX_SORT, 
                 EXPERT_MODE_OFFSET
             )
             
-            gcs = get_gcs()
-            expert_mode = gcs.expert_mode if gcs else False
+            gcs_instance = gcs_func()
+            expert_mode = gcs_instance.expert_mode if gcs_instance else False
             
             # Berechne Array-Index: 3 (Standard) oder 8 (Expert = 3 + 5)
             table_index = TABLE_INDEX_SORT + (EXPERT_MODE_OFFSET if expert_mode else 0)
             
             # Hole Sort-Projektion (bereits gefiltert: NUR sortierbare Spalten!)
-            projection = gcs.get_projection_table(self.controller.view_guid, table_index)
+            projection = gcs_instance.get_projection_table(self.controller.view_guid, table_index)
             
             logger.info(f"  📋 Sort-Projektion Index {table_index}: {len(projection) if projection else 0} Spalten")
             
@@ -1015,23 +1293,31 @@ class PdvmViewUI(QWidget):
             
             if dialog.exec_():
                 sort_config = dialog.get_sort_config()
-                self.sort_requested.emit(sort_config)
+                
+                # 🎯 ANALOG ZU FILTER: sg_string und sg_source in app_db speichern
+                if gcs_instance and sort_config:
+                    gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_string', sort_config)
+                    gcs_instance._app_db.set_value(self.controller.view_guid, 'sg_source', 'multi')
+                    gcs_instance._app_db.save_all_values()
+                    
+                    logger.info(f"✅ sg_string gespeichert: {sort_config}")
+                    logger.info(f"✅ sg_source gespeichert: 'multi'")
+                    
+                    # 🎯 Pipeline ab SORT neu durchlaufen
+                    from pdvm_pipeline import get_pipeline
+                    pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+                    pipeline.run('SORT')
+                    
+                    # UI aktualisieren
+                    self.controller.refresh_ui_from_pipeline()
+                    
+                    logger.info(f"✅ Advanced-Sort angewendet (multi)")
+                else:
+                    logger.warning("⚠️ Keine Sort-Config vom Dialog erhalten")
                 
         except Exception as e:
             logger.error(f"❌ Sortier-Dialog Fehler: {e}")
             QMessageBox.warning(self, "Fehler", f"Sortier-Dialog konnte nicht geöffnet werden:\n{e}")
-    
-    def _reset_sort(self):
-        """Sortierung zurücksetzen"""
-        logger.info("🔄 Sortierung zurücksetzen")
-        
-        # State zurücksetzen
-        self.current_sort_column = None
-        self.current_sort_direction = 'asc'
-        
-        # An Controller senden (None = keine Sortierung)
-        if hasattr(self.controller, 'reset_sort'):
-            self.controller.reset_sort()
     
     def _enable_all_sortable(self):
         """Alle Spalten sortierbar machen"""

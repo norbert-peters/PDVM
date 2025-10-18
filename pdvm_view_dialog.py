@@ -1,4 +1,4 @@
-"""
+﻿"""
 PdvmViewDialog - SAUBERE LINEARE ARCHITEKTUR
 
 Architektur-Prinzipien:
@@ -18,12 +18,13 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon
 
-# GLOBALE IMPORTS: Konsistente GCS-Verwendung
-from global_gcs import gcs
-from pdvm_central_systemsteuerung import get_gcs
+# ========================================
+# GLOBALER GCS-ZUGRIFF (ULTRA-EINFACH)
+# ========================================
+from pdvm_central_systemsteuerung import get_gcs as gcs
 
 # V3 Filter-System
-from schnellsuche_manager import SchnellsucheManager
+from pdvm_schnellsuche_manager import SchnellsucheManager
 
 import logging
 import time
@@ -32,21 +33,6 @@ import traceback
 import re
 
 logger = logging.getLogger(__name__)
-
-# NEUES UNIFIED LINEAR FILTER SYSTEM
-from pdvm_linear_filter_integration import create_pdvm_linear_filter
-
-def get_gcs_linear():
-    """LINEARE GCS-Hilfsfunktion - konsistente Verwendung"""
-    try:
-        # Versuche zuerst globale GCS
-        if gcs and gcs.is_initialized:
-            return gcs
-        # Fallback auf get_gcs Funktion
-        return get_gcs()
-    except Exception as e:
-        logger.warning(f"⚠️ GCS nicht verfügbar: {e}")
-        return None
 
 from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_spalten_parameter_dialog import PdvmSpaltenParameterDialog
@@ -856,11 +842,17 @@ class PdvmViewDialog(QWidget):
             logger.info(f"📂 View-GUID: {self.view_guid}")
             logger.info(f"🔍 Filter-String: '{filter_string}'")
             
+            # ⚠️ VERALTET: Diese Methode gehört zum alten V1/V2 Filter-System
+            # TODO: Komplett durch V3 Filter-Manager ersetzen
+            logger.warning("⚠️ apply_filter_string() ist VERALTET (V1/V2) - bitte V3 Filter-Manager verwenden!")
+            return
+            
             # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'display') and self.display and hasattr(self.display, 'table'):
-                # VEREINFACHT: Keine Column-Mappings mehr - Control-Key Patch übernimmt das
-                self.linear_filter = create_pdvm_linear_filter(self.table, self.view_guid)
-                logger.info("✅ Linear Filter Integration mit Control-Key Patch erstellt")
+            # if not self.linear_filter and hasattr(self, 'display') and self.display and hasattr(self.display, 'table'):
+            #     # VEREINFACHT: Keine Column-Mappings mehr - Control-Key Patch übernimmt das
+            #     # ❌ ARCHIVIERT: create_pdvm_linear_filter aus pdvm_linear_filter_integration
+            #     self.linear_filter = None  # create_pdvm_linear_filter(self.table, self.view_guid)
+            #     logger.info("✅ Linear Filter Integration mit Control-Key Patch erstellt")
             
             if not self.linear_filter:
                 logger.error("❌ Kein Linear Filter verfügbar")
@@ -886,24 +878,6 @@ class PdvmViewDialog(QWidget):
                 
         except Exception as e:
             logger.error(f"❌ Fehler beim stufenweisen Filtern: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def _apply_extended_filters_direct(self, filter_string):
-        """Direkte Anwendung der Extended Filter Engine"""
-        try:
-            logger.info("🚀 Starte direkte Extended Filter Engine Anwendung")
-            
-            # Import Extended Filter Engine
-            from extended_filter_engine import extended_filter_engine
-            
-            # Direkt die Extended Filter Engine auf die Tabelle anwenden
-            extended_filter_engine.apply_extended_filters_to_table(self, {})
-            
-            logger.info("✅ Extended Filter Engine direkt angewendet")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler bei direkter Extended Filter Anwendung: {e}")
             import traceback
             traceback.print_exc()
     
@@ -960,14 +934,15 @@ class PdvmViewDialog(QWidget):
     
     def _apply_global_search(self, search_text):
         """Globale Suche in allen sichtbaren Spalten"""
-        # Hole die sichtbaren Spalten direkt vom Display-Widget
+        # GCS global verfügbar via gcs()
+        # ✅ DIREKT aus GCS-Projektion holen
+        gcs = gcs()
         visible_columns = []
-        if hasattr(self, 'display') and self.display:
-            try:
-                visible_columns = self._get_visible_columns_from_gcs()
-                logger.info(f"🔍 Globale Suche in {len(visible_columns)} sichtbaren Spalten")
-            except Exception as e:
-                logger.warning(f"⚠️ Fehler beim Abrufen sichtbarer Spalten: {e}")
+        
+        if gcs and hasattr(self, 'view_guid'):
+            projection_index = 5 if gcs.expert_mode else 0
+            visible_columns = gcs.get_projection_table(self.view_guid, projection_index)
+            logger.info(f"🔍 Globale Suche in {len(visible_columns)} sichtbaren Spalten (Projektion [{projection_index}])")
         
         if not visible_columns:
             # Fallback: Alle show-Spalten
@@ -1288,7 +1263,7 @@ class PdvmViewDialog(QWidget):
     def _setup_ui_direct(self):
         """Direkte UI-Erstellung in PdvmViewDialog ohne separate Display-Klasse"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
+            # GCS global verfügbar via gcs()
             from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QFrame, QLineEdit, 
                                        QTableWidget, QPushButton, QToolBar, QAction, QComboBox, QCheckBox)
             from PyQt5.QtGui import QFont, QIcon
@@ -1313,7 +1288,7 @@ class PdvmViewDialog(QWidget):
             header_layout.setContentsMargins(0, 0, 0, 0)
             
             # Header-Label - SICHERE Erstellung
-            gcs = get_gcs()
+            gcs = gcs()
             base_title = getattr(self, 'title', f"View: {self.view_guid}")
             if gcs and gcs.expert_mode and hasattr(gcs, 'st_inst') and gcs.st_inst:
                 formatted_stichtag = getattr(gcs.st_inst, 'FormTimeStamp', str(gcs.st_inst.PdvmDateTime))
@@ -1584,8 +1559,7 @@ class PdvmViewDialog(QWidget):
             menu.addSeparator()
             
             # Expert Mode nur für Admin-Benutzer anzeigen
-            from pdvm_central_systemsteuerung import get_gcs
-            gcs = get_gcs()
+            gcs = gcs()
             if gcs:
                 user_mode = gcs.mode  # 'user' oder 'admin'
                 if user_mode == 'admin':
@@ -1648,7 +1622,7 @@ class PdvmViewDialog(QWidget):
                 return
             
             # 3. V3: ZENTRALER FilterResetManager für ALLE Filter-Typen
-            from filter_reset_manager import get_filter_reset_manager
+            from pdvm_filter_reset_manager import get_filter_reset_manager
             
             reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
             
@@ -1824,61 +1798,42 @@ class PdvmViewDialog(QWidget):
             logger.error(f"❌ Fehler beim Toggle der Suche: {e}")
     
     def _show_advanced_search(self):
-        """Zeige erweiterte Suchparameter"""
+        """🔍 Zeige erweiterten Komplex-Filter-Dialog (V3)"""
         try:
-            logger.info("🔎 Öffne erweiterten Filter-Dialog...")
+            logger.info("🔎 Öffne erweiterten Komplex-Filter-Dialog (V3)...")
             
-            # Import des erweiterten Filter-Dialogs
-            from pdvm_extended_filter_dialog import show_pdvm_extended_filter_dialog
+            # Import des neuen Komplex-Filter-Dialogs
+            from pdvm_komplex_filter_dialog import PdvmKomplexFilterDialog
+            from PyQt5.QtWidgets import QDialog
             
-            # WICHTIG: Filter arbeitet auf ALLEN Spalten der BASIS_MATRIX!
-            # Aber Dialog zeigt nur SICHTBARE Spalten für bessere UX
-            all_columns = []
-            visible_columns = []
-            
-            try:
-                # 1. Hole ALLE Spalten aus MatrixManager (für Filter)
-                if hasattr(self, 'matrix_manager') and self.matrix_manager:
-                    all_columns = self.matrix_manager.columns.copy()
-                    logger.info(f"📊 ALLE Spalten aus MatrixManager: {len(all_columns)} Spalten")
-                
-                # 2. Hole SICHTBARE Spalten aus GCS (für Dialog-Anzeige)
-                gcs_columns = self._get_visible_columns_from_gcs()
-                logger.info(f"�️ SICHTBARE Spalten aus GCS: {len(gcs_columns)} Spalten")
-                
-                for col_name in gcs_columns:
-                    # Generiere Display-Name: 'familienname_show' → 'Familienname'
-                    display_name = col_name.replace('_show', '').replace('_original', '').replace('_', ' ').title()
-                    visible_columns.append((col_name, display_name))
-                    
-            except Exception as e:
-                logger.error(f"❌ Fehler beim Holen der Spalten: {e}")
-                # Fallback: Verwende aktuell angezeigte Spalten
-                if hasattr(self, 'table') and self.table.columnCount() > 0:
-                    for col_idx in range(self.table.columnCount()):
-                        header = self.table.horizontalHeaderItem(col_idx)
-                        if header:
-                            col_name = header.text().lower().replace(' ', '_') + '_show'
-                            visible_columns.append((col_name, header.text()))
-            
-            if not visible_columns:
-                logger.warning("⚠️ Keine sichtbaren Spalten gefunden")
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "Keine Spalten", "Keine sichtbaren Spalten für Filter gefunden!")
+            # Hole sichtbare Spalten aus GCS
+            gcs_instance = gcs()
+            if not gcs_instance:
+                logger.error("❌ GCS nicht verfügbar!")
                 return
             
+            # Projektion abhängig von Expert Mode
+            projection_index = 5 if gcs_instance.expert_mode else 0
+            visible_columns = gcs_instance.get_projection_table(self.view_guid, projection_index) or []
+            
             logger.info(f"📋 Filter-Dialog öffnet mit {len(visible_columns)} sichtbaren Spalten")
-            logger.info(f"🎯 Filter wird auf {len(all_columns)} ALLE Spalten angewendet")
             
-            # Dialog anzeigen - zeigt nur sichtbare Spalten, filtert aber auf ALLEN
-            result = show_pdvm_extended_filter_dialog(self, self.view_guid, visible_columns)
+            # Dialog anzeigen
+            dialog = PdvmKomplexFilterDialog(
+                view_guid=self.view_guid,
+                visible_columns=visible_columns,
+                parent=self
+            )
             
-            if result:
-                logger.info("✅ Erweiterter Filter angewendet")
-                self.refresh_table_direct()
+            result = dialog.exec_()
+            
+            if result == QDialog.Accepted:
+                logger.info("✅ Komplex-Filter angewendet - Refresh wird durch Pipeline automatisch durchgeführt")
             
         except Exception as e:
             logger.error(f"❌ Fehler bei erweiterten Suchparametern: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _show_sorting_dialog(self):
         """📊 Zeige Sortierung & Gruppierung Dialog"""
@@ -1963,14 +1918,14 @@ class PdvmViewDialog(QWidget):
     def _enable_all_columns_sortable(self):
         """🔧 Setzt alle Spalten als sortierbar"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
+            # GCS global verfügbar via gcs()
             from PyQt5.QtWidgets import QMessageBox
             import json
             
             logger.info("🔧 Aktiviere Sortierung für alle Spalten...")
             
             # GCS holen
-            gcs = get_gcs()
+            gcs = gcs()
             if not gcs:
                 QMessageBox.warning(self, "Fehler", "GCS nicht verfügbar")
                 return
@@ -2134,9 +2089,9 @@ class PdvmViewDialog(QWidget):
     def _toggle_expert_mode(self):
         """Toggle Expert Mode über Menü - NUR für mode='admin' - LINEARE SPALTEN-PROJEKTION"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
+            # GCS global verfügbar via gcs()
             from PyQt5.QtWidgets import QMessageBox
-            gcs = get_gcs()
+            gcs = gcs()
             
             if not gcs:
                 logger.error("❌ GCS nicht verfügbar für Expert Mode Toggle")
@@ -2181,8 +2136,7 @@ class PdvmViewDialog(QWidget):
     def _update_header_label(self):
         """Aktualisiere Header-Label basierend auf Expert Mode"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
-            gcs = get_gcs()
+            gcs = gcs()
             
             if not gcs:
                 return
@@ -2327,7 +2281,7 @@ class PdvmViewDialog(QWidget):
                 return
             
             # V3: Verwende SchnellsucheManager
-            from schnellsuche_manager import SchnellsucheManager
+            from pdvm_schnellsuche_manager import SchnellsucheManager
             
             # Matrix Manager DIREKT von self holen (nicht von Controller!)
             if not hasattr(self, 'matrix_manager') or not self.matrix_manager:
@@ -2386,7 +2340,7 @@ class PdvmViewDialog(QWidget):
                 return
             
             # V3: ZENTRALER FilterResetManager für ALLE Filter-Typen
-            from filter_reset_manager import get_filter_reset_manager
+            from pdvm_filter_reset_manager import get_filter_reset_manager
             
             reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
             
@@ -2431,7 +2385,7 @@ class PdvmViewDialog(QWidget):
     def refresh_table_direct(self):
         """Tabelle direkt aktualisieren ohne Display-Klasse"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
+            # GCS global verfügbar via gcs()
             from PyQt5.QtWidgets import QTableWidgetItem
             
             logger.info("🔧 Starte direkte Tabellen-Aktualisierung...")
@@ -2441,7 +2395,7 @@ class PdvmViewDialog(QWidget):
                 logger.error("❌ Tabelle nicht verfügbar!")
                 return
             
-            gcs = get_gcs()
+            gcs = gcs()
             
             # Matrix-Manager für finale Daten verwenden
             from pdvm_matrix_manager import get_matrix_manager
@@ -2585,17 +2539,16 @@ class PdvmViewDialog(QWidget):
     
     def _get_visible_columns_from_gcs(self):
         """
-        🎯 SPALTEN-PROJEKTION: Sichtbare Spalten aus Projektions-Tabellen holen
+        ✅ PROJEKTIONS-BASIERT: Sichtbare Spalten aus GCS-Projektions-Tabellen
         
-        LINEARE ARCHITEKTUR V3:
-        - Verwendet fertige Projektions-Tabellen aus GCS (bereits sortiert!)
-        - StandardMode: table_standard Projektion
-        - ExpertMode: table_expert Projektion
-        - Keine manuelle Filterung mehr - alles in Projektion vorbereitet
+        ARRAY-STRUKTUR in GCS._projection_tables[view_guid]:
+        - Position [0]: View Standard (show=true, display_order)
+        - Position [5]: View Expert (alle außer dummy+row_type, expert_order)
+        
+        DIREKTER ARRAY-ZUGRIFF - keine String-Namen mehr!
         """
         try:
-            from pdvm_central_systemsteuerung import get_gcs
-            gcs = get_gcs()
+            gcs = gcs()
             
             if not gcs:
                 logger.warning("⚠️ GCS nicht verfügbar für Spalten-Projektion")
@@ -2605,21 +2558,18 @@ class PdvmViewDialog(QWidget):
                 logger.warning("⚠️ View-GUID nicht verfügbar für Projektion")
                 return []
             
-            # 🎯 PROJEKTION AUS GCS HOLEN (bereits sortiert nach display_order!)
-            if gcs.expert_mode:
-                projection = gcs.get_projection_table(self.view_guid, 'table_expert')
-                logger.info(f"🎓 ExpertMode Projektion geladen: {len(projection)} Spalten")
-            else:
-                projection = gcs.get_projection_table(self.view_guid, 'table_standard')
-                logger.info(f"👤 StandardMode Projektion geladen: {len(projection)} Spalten")
+            # ✅ DIREKTER ARRAY-ZUGRIFF: Index 0 (Standard) oder 5 (Expert)
+            projection_index = 5 if gcs.expert_mode else 0
+            projection = gcs.get_projection_table(self.view_guid, projection_index)
+            
+            logger.info(f"✅ Projektion [{projection_index}] {'Expert' if gcs.expert_mode else 'Standard'}: {len(projection)} Spalten")
             
             if not projection:
                 logger.warning(f"⚠️ Keine Projektion gefunden - Rebuild notwendig")
                 gcs.rebuild_projection_tables(self.view_guid)
-                projection = gcs.get_projection_table(self.view_guid, 
-                                                    'table_expert' if gcs.expert_mode else 'table_standard')
+                projection = gcs.get_projection_table(self.view_guid, projection_index)
             
-            logger.info(f"✅ Spalten-Projektion: {projection[:5]}..." if len(projection) > 5 else f"✅ Spalten-Projektion: {projection}")
+            logger.debug(f"   Erste 5: {projection[:5]}" if len(projection) > 5 else f"   Alle: {projection}")
             return projection
         
         except Exception as e:
@@ -2965,8 +2915,7 @@ class PdvmViewDisplay(QWidget):
     def _get_title_text(self):
         """Titel-Text mit ExpertMode-spezifischen Ergänzungen - LINEAR"""
         try:
-            from pdvm_central_systemsteuerung import get_gcs
-
+            # GCS global verfügbar via gcs()
             base_title = self.view_dialog.title
 
             # LINEAR: GCS immer verfügbar machen
@@ -2990,8 +2939,7 @@ class PdvmViewDisplay(QWidget):
     def refresh_table(self):
         """Tabelle aktualisieren - LINEARES FILTER-SYSTEM: Nur Zeilen mit display=True anzeigen"""
         # GCS für ExpertMode und andere Features laden
-        from pdvm_central_systemsteuerung import get_gcs
-        gcs = get_gcs()
+        gcs = gcs()
         
         matrix = self.view_dialog.display_matrix
         
@@ -3139,16 +3087,13 @@ class PdvmViewDisplay(QWidget):
                 logger.error("❌ GCS nicht verfügbar")
                 return []
                 
-            # STATISCHE PROJEKTION aus GCS - je nach Expert Mode
-            # Projektionen werden aus der SORT_MATRIX des PdvmMatrixManagers angewendet
-            if gcs.expert_mode:
-                projection = gcs.get_projection_table(view_guid, 'table_expert')
-            else:
-                projection = gcs.get_projection_table(view_guid, 'table_standard')
+            # ✅ DIREKTER ARRAY-ZUGRIFF: Index 0 (Standard) oder 5 (Expert)
+            projection_index = 5 if gcs.expert_mode else 0
+            projection = gcs.get_projection_table(view_guid, projection_index)
             
             if projection:
-                mode_info = "Expert" if gcs.expert_mode else "Standard"
-                logger.debug(f"✅ Tabellen-Projektion ({mode_info}) für SORT_MATRIX: {len(projection)} Spalten")
+                mode_info = f"Expert [{projection_index}]" if gcs.expert_mode else f"Standard [{projection_index}]"
+                logger.debug(f"✅ Tabellen-Projektion {mode_info} für SORT_MATRIX: {len(projection)} Spalten")
                 logger.debug(f"📋 Projektions-Spalten: {projection[:5]}..." if len(projection) > 5 else f"📋 Projektions-Spalten: {projection}")
                 return projection
             else:
@@ -3169,12 +3114,15 @@ class PdvmViewDisplay(QWidget):
             logger.info(f"🔍 Einfache Suche angewendet: '{search_text}'")
     
     def _show_all_rows(self):
-        """Reset alle Zeilen sichtbar - wird vom linearen System automatisch aufgerufen"""
+        """⚠️ VERALTET: Reset alle Zeilen sichtbar - gehört zu V1/V2 System"""
         try:
+            logger.warning("⚠️ _show_all_rows() ist VERALTET - PdvmViewDisplay sollte durch PdvmViewUI ersetzt werden!")
+            
+            # ❌ ARCHIVIERT: create_pdvm_linear_filter nicht mehr verfügbar
             # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'table'):
-                view_guid = getattr(self.view_dialog, 'view_guid', None)
-                self.linear_filter = create_pdvm_linear_filter(self.table, view_guid)
+            # if not self.linear_filter and hasattr(self, 'table'):
+            #     view_guid = getattr(self.view_dialog, 'view_guid', None)
+            #     self.linear_filter = None  # create_pdvm_linear_filter(self.table, view_guid)
             
             if self.linear_filter:
                 return self.linear_filter.clear_all_filters()
@@ -3187,13 +3135,16 @@ class PdvmViewDisplay(QWidget):
             logger.error(f"❌ Fehler bei show_all_rows: {e}")
     
     def _perform_search(self, search_text):
-        """🎯 NEUE LINEARE SUCHE - verwendet Unified Linear Filter"""
+        """⚠️ VERALTET: NEUE LINEARE SUCHE - verwendet Unified Linear Filter (V1/V2)"""
         try:
+            logger.warning("⚠️ _perform_search() ist VERALTET - PdvmViewDisplay sollte durch PdvmViewUI ersetzt werden!")
+            
+            # ❌ ARCHIVIERT: create_pdvm_linear_filter nicht mehr verfügbar
             # Filter-Integration sicherstellen
-            if not self.linear_filter and hasattr(self, 'table'):
-                view_guid = getattr(self.view_dialog, 'view_guid', None)
-                self.linear_filter = create_pdvm_linear_filter(self.table, view_guid)
-                logger.info("✅ Linear Filter Integration für Search erstellt")
+            # if not self.linear_filter and hasattr(self, 'table'):
+            #     view_guid = getattr(self.view_dialog, 'view_guid', None)
+            #     self.linear_filter = None  # create_pdvm_linear_filter(self.table, view_guid)
+            #     logger.info("✅ Linear Filter Integration für Search erstellt")
             
             if not self.linear_filter:
                 logger.error("❌ Kein Linear Filter für Search verfügbar")
@@ -3306,8 +3257,7 @@ class PdvmViewDisplay(QWidget):
         """Erstelle Settings-Dropdown-Menü - LINEAR"""
         try:
             # GCS für ExpertMode-Prüfung laden
-            from pdvm_central_systemsteuerung import get_gcs
-            gcs = get_gcs()
+            gcs = gcs()
             
             settings_menu = QMenu(self)
 
@@ -3582,7 +3532,7 @@ class PdvmViewDisplay(QWidget):
         Setzt auch sinnvolle Default-Werte für sortDirection und sortByOriginal.
         """
         try:
-            from pdvm_central_systemsteuerung import get_gcs
+            # GCS global verfügbar via gcs()
             import json
             
             # View-GUID holen
@@ -3592,7 +3542,7 @@ class PdvmViewDisplay(QWidget):
                 return
             
             # GCS holen
-            gcs = get_gcs()
+            gcs = gcs()
             if not gcs:
                 QMessageBox.warning(self, "Fehler", "GCS nicht verfügbar")
                 return

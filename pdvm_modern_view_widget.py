@@ -2015,17 +2015,35 @@ class PdvmModernViewWidget(QWidget):
         else:
             header_labels = [str(col.get('anzeige', col.get('name', ''))) for col in control_columns]
         self.table.setHorizontalHeaderLabels(header_labels)
-        # Header-Design: fett, 1 Punkt größer, linksbündig
+        
+        # ========================================================================
+        # Header-Design: Bold + 2 Punkte größer (von GCS, keine Akkumulation!)
+        # ========================================================================
         header = self.table.horizontalHeader()
-        font = header.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 1)
-        header.setFont(font)
+        
+        # Font-Größe aus GCS holen (zentral definiert)
+        gcs = self.central_systemsteuerung
+        if gcs and hasattr(gcs, 'header_font_size'):
+            header_size = gcs.header_font_size
+        else:
+            # Fallback falls GCS nicht verfügbar
+            header_size = 11  # Default = 9pt Basis + 2pt
+            logger.warning("⚠️ GCS nicht verfügbar, verwende Fallback-Header-Größe: 11pt")
+        
+        # Font erstellen mit fester Größe aus GCS
+        header_font = QFont()
+        header_font.setBold(True)
+        header_font.setPointSize(header_size)
+        header.setFont(header_font)
+        
+        logger.debug(f"📏 Header-Font: {header_size}pt (aus GCS), Bold")
+        
         # Alle Header explizit linksbündig ausrichten
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         for i in range(self.table.columnCount()):
             header.setSectionResizeMode(i, header.Interactive)
             self.table.model().setHeaderData(i, Qt.Horizontal, Qt.AlignLeft | Qt.AlignVCenter, Qt.TextAlignmentRole)
+        
         # Wordwrap für Header aktivieren
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignCenter)
         self.table.horizontalHeader().setSectionsClickable(True)

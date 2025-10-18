@@ -1,4 +1,4 @@
-"""
+﻿"""
 🎯 PDVM VIEW PIPELINE - VOLLSTÄNDIG GEKAPSELTE VIEW-VERWALTUNG
 ==============================================================
 
@@ -39,7 +39,11 @@ INTERN (AUTOMATISCH):
 import logging
 from typing import Dict, List, Any, Optional
 from PyQt5.QtWidgets import QWidget, QLineEdit
-from pdvm_central_systemsteuerung import get_gcs
+
+# ========================================
+# GLOBALER GCS-ZUGRIFF (ULTRA-EINFACH)
+# ========================================
+from pdvm_central_systemsteuerung import get_gcs as gcs
 from pdvm_pipeline import get_pipeline
 
 logger = logging.getLogger(__name__)
@@ -65,7 +69,7 @@ class PdvmViewPipeline:
         """
         self.view_guid = view_guid
         self.matrix_manager = matrix_manager
-        self.gcs = get_gcs()
+        self.gcs = gcs()
         
         # Matrix-Pipeline (Datenverarbeitung)
         self.matrix_pipeline = get_pipeline(view_guid, matrix_manager)
@@ -122,29 +126,34 @@ class PdvmViewPipeline:
     
     def _load_projection(self):
         """
-        Projektion aus GCS laden (Standard oder Expert Mode)
+        ✅ PROJEKTIONS-BASIERT: Projektion aus GCS-Array laden
         
-        KAPSELT: get_projection_table() Logik aus GCS
+        ARRAY-STRUKTUR in GCS._projection_tables[view_guid]:
+        - Position [0]: View Standard (show=true, display_order)
+        - Position [5]: View Expert (alle außer dummy+row_type, expert_order)
+        
+        DIREKTER ARRAY-ZUGRIFF über expert_mode aus GCS!
         """
         logger.info("📊 === PROJEKTION AUS GCS LADEN ===")
         
         try:
-            # Mode aus GCS lesen
+            # ✅ DIREKTER ARRAY-ZUGRIFF: Index 0 (Standard) oder 5 (Expert)
             expert_mode = self.gcs.expert_mode
-            mode_name = 'table_expert' if expert_mode else 'table_standard'
+            projection_index = 5 if expert_mode else 0
             
-            logger.info(f"📋 Mode: {'ExpertMode' if expert_mode else 'StandardMode'}")
+            logger.info(f"📋 Mode: {'ExpertMode' if expert_mode else 'StandardMode'} → Index [{projection_index}]")
             
-            # Projektionstabelle aus GCS holen
-            projection = self.gcs.get_projection_table(self.view_guid, mode_name)
+            # Projektionstabelle aus GCS-Array holen
+            projection = self.gcs.get_projection_table(self.view_guid, projection_index)
             
             if projection and isinstance(projection, list):
                 self.projection_columns = projection
-                logger.info(f"✅ Projektion geladen: {len(self.projection_columns)} Spalten")
+                logger.info(f"✅ Projektion [{projection_index}] geladen: {len(self.projection_columns)} Spalten")
             else:
-                # Fallback: Alle _show Spalten
-                logger.warning("⚠️ Keine Projektion in GCS - verwende Fallback")
-                self.projection_columns = []  # Wird von Pipeline gefüllt
+                logger.warning(f"⚠️ Keine Projektion an Index [{projection_index}] - erstelle neu")
+                self.gcs.rebuild_projection_tables(self.view_guid)
+                projection = self.gcs.get_projection_table(self.view_guid, projection_index)
+                self.projection_columns = projection if projection else []
         
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden der Projektion: {e}")

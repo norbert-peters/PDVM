@@ -369,15 +369,33 @@ class AdvancedSortDialog(QDialog):
             
             # Aktuelle Konfiguration holen
             sort_config = self.get_sort_config()
+            sum_columns = self.get_sum_columns()  # ← SUMMEN-SPALTEN HOLEN
             
             # In App-DB speichern
             gcs._app_db.set_value(self.view_guid, 'sort', sort_config)
+            
+            # 🆕 SUMMEN als eigenständiger Schritt: sum_string + sum_source
+            if sum_columns:
+                gcs._app_db.set_value(self.view_guid, 'sum_string', sum_columns)
+                gcs._app_db.set_value(self.view_guid, 'sum_source', 'multi')  # Vom Dialog
+            else:
+                # Keine Summen → Werte löschen
+                gcs._app_db.set_value(self.view_guid, 'sum_string', None)
+                gcs._app_db.set_value(self.view_guid, 'sum_source', None)
+            
             gcs._app_db.save_all_values()  # 💾 CRITICAL: Commit to database!
             
             logger.info(f"💾 Sortierung persistent gespeichert: {len(sort_config)} Spalten")
             for idx, cfg in enumerate(sort_config):
                 group_marker = " [GRUPPE]" if cfg.get('is_group') else ""
                 logger.info(f"  {idx+1}. {cfg['column_key']} → {cfg['direction']}{group_marker}")
+            
+            if sum_columns:
+                logger.info(f"💾 Summen-Spalten gespeichert: {len(sum_columns)} Spalten")
+                logger.info(f"  Σ {', '.join(sum_columns)}")
+                logger.info(f"  sum_source: 'multi' (Dialog)")
+            else:
+                logger.info(f"ℹ️ Keine Summen-Spalten ausgewählt - sum_string/sum_source gelöscht")
             
             # Dialog schließen
             self.accept()
@@ -446,6 +464,24 @@ class AdvancedSortDialog(QDialog):
                     )
             
             logger.info(f"✅ Persistierte Sortierung geladen: {self.sort_order_list.count()} Spalten")
+            
+            # 🆕 SUMMEN-SPALTEN LADEN (sum_string statt sum_columns)
+            sum_columns_data, _ = gcs._app_db.get_value(self.view_guid, 'sum_string')
+            sum_source, _ = gcs._app_db.get_value(self.view_guid, 'sum_source')
+            
+            if sum_columns_data and isinstance(sum_columns_data, list):
+                logger.info(f"📋 Lade Summen-Spalten: {len(sum_columns_data)} Spalten (sum_source={sum_source})")
+                
+                # Markiere Summen-Spalten im sum_columns_list
+                for row in range(self.sum_columns_list.count()):
+                    item = self.sum_columns_list.item(row)
+                    column_key = item.data(Qt.UserRole)
+                    
+                    if column_key in sum_columns_data:
+                        item.setSelected(True)
+                        logger.info(f"  Σ {column_key}")
+                
+                logger.info(f"✅ {len(sum_columns_data)} Summen-Spalten geladen")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden der persistierten Sortierung: {e}")

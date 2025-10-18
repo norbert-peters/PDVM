@@ -380,7 +380,7 @@ class ComplexFilterDialog(QDialog):
             if not filter_params:
                 logger.info(f"🗑️ Keine Parameter - Filter wird gelöscht")
                 
-                from komplex_filter_manager import KomplexFilterManager
+                from pdvm_komplex_filter_manager import KomplexFilterManager
                 manager = KomplexFilterManager(
                     view_guid=self.view_guid,
                     matrix_manager=self.matrix_manager
@@ -399,7 +399,7 @@ class ComplexFilterDialog(QDialog):
             logger.info(f"✅ Filter anwenden: {len(filter_params)} Felder")
             
             # KomplexFilterManager verwenden
-            from komplex_filter_manager import KomplexFilterManager
+            from pdvm_komplex_filter_manager import KomplexFilterManager
             
             manager = KomplexFilterManager(
                 view_guid=self.view_guid,

@@ -18,8 +18,8 @@ from global_gcs import gcs  # Globaler Zugriff auf GCS
 from extended_filter_engine import extended_filter_engine  # Extended Filter Engine
 
 # V3 Filter-System
-from einfach_filter_manager import EinfachFilterManager
-from komplex_filter_manager import KomplexFilterManager
+from pdvm_einfach_filter_manager import EinfachFilterManager
+from pdvm_komplex_filter_manager import KomplexFilterManager
 
 logger = logging.getLogger(__name__)
 

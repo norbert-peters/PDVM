@@ -197,10 +197,21 @@ class PdvmAdvancedSortingManager:
     
     def _format_group_header_item(self, item: QTableWidgetItem, row_data: Dict):
         """Formatiert Gruppen-Header Items"""
-        # Fett und hervorgehoben
+        # Font-Größe aus GCS holen (zentral definiert)
+        try:
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            if gcs and hasattr(gcs, 'group_font_size'):
+                group_size = gcs.group_font_size
+            else:
+                group_size = 10  # Fallback = 9pt Basis + 1pt
+        except:
+            group_size = 10  # Fallback bei Import-Fehler
+        
+        # Fett und größer
         font = QFont()
         font.setBold(True)
-        font.setPointSize(font.pointSize() + 1)
+        font.setPointSize(group_size)
         item.setFont(font)
         
         # Hintergrundfarbe

@@ -21,6 +21,7 @@ import logging
 from typing import Dict, List, Tuple, Optional, Any
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidget, QHeaderView, QTableWidgetItem
+from pdvm_central_systemsteuerung import get_gcs as gcs
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +37,16 @@ class PdvmSortingManager:
     4. Visuelle Sortier-Indikatoren
     """
     
-    def __init__(self, view_dialog, gcs=None):
+    def __init__(self, view_dialog, gcs_instance=None):
         """
         Initialisiert den Sorting Manager
         
         Args:
             view_dialog: PdvmViewDialog Instanz mit controls_config
-            gcs: GCS Instanz (optional, wird automatisch geholt)
+            gcs_instance: GCS Instanz (optional, wird automatisch geholt)
         """
         self.view_dialog = view_dialog
-        self.gcs = gcs or self._get_gcs()
+        self.gcs = gcs_instance or gcs()
         
         # Aktueller Sortier-Status
         self.current_sort_column = None
@@ -58,15 +59,6 @@ class PdvmSortingManager:
         self._load_saved_sorting()
         
         logger.info(f"✅ Sorting Manager initialisiert - Current: {self.current_sort_column} ({self.current_sort_direction})")
-    
-    def _get_gcs(self):
-        """GCS-Instanz holen"""
-        try:
-            from pdvm_central_systemsteuerung import get_gcs
-            return get_gcs()
-        except Exception as e:
-            logger.warning(f"⚠️ GCS nicht verfügbar: {e}")
-            return None
     
     def setup_table_sorting(self, table_widget: QTableWidget):
         """

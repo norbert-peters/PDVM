@@ -203,7 +203,7 @@ class SimpleFilterDialog(QDialog):
             if not filter_params:
                 logger.info(f"🗑️ Keine Parameter - Filter wird gelöscht")
                 
-                from einfach_filter_manager import EinfachFilterManager
+                from pdvm_einfach_filter_manager import EinfachFilterManager
                 manager = EinfachFilterManager(
                     view_guid=self.view_guid,
                     matrix_manager=self.matrix_manager
@@ -222,7 +222,7 @@ class SimpleFilterDialog(QDialog):
             logger.info(f"✅ Filter anwenden: {len(filter_params)} Felder")
             
             # EinfachFilterManager verwenden
-            from einfach_filter_manager import EinfachFilterManager
+            from pdvm_einfach_filter_manager import EinfachFilterManager
             
             manager = EinfachFilterManager(
                 view_guid=self.view_guid,

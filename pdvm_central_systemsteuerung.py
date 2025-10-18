@@ -58,6 +58,20 @@ class PdvmCentralSystemsteuerung:
         self._dropdown_cache = {}  # Cache für geladene Dropdowns: {dropdown_name: {language: {key: value}}}
         self._initialized = False
 
+        # ========================================================================
+        # BASIS-SCHRIFTGRÖSSE: Zentral für alle Views (KEINE Akkumulation!)
+        # ========================================================================
+        # Systemweit einheitliche Schriftgrößen:
+        # - base_font_size: Standard-Größe (z.B. 9pt von System)
+        # - header_font_size: Header-Größe = Basis + 2pt
+        # - group_font_size: Gruppierungs-Zeilen = Basis + 1pt
+        from PyQt5.QtWidgets import QApplication
+        app_font = QApplication.font()
+        self.base_font_size = app_font.pointSize()  # System-Standard (z.B. 9pt)
+        self.header_font_size = self.base_font_size + 2  # Header = Basis + 2pt
+        self.group_font_size = self.base_font_size + 1   # Gruppen = Basis + 1pt
+        logger.info(f"📏 Basis-Schriftgrößen: Standard={self.base_font_size}pt, Header={self.header_font_size}pt, Gruppen={self.group_font_size}pt")
+
         # PROJEKTIONS-TABELLEN ARRAY: 10-Positionen pro View
         # Struktur: {view_guid: [10 Listen]} - Positionen 0-4 Standard, 5-9 Expert
         # 0/5: View, 1/6: Change, 2/7: Filter, 3/8: Sort, 4/9: Reserviert
@@ -660,8 +674,15 @@ class PdvmCentralSystemsteuerung:
         - 0/5: View (table_standard/expert)
         - 1/6: Change (change_standard/expert) - Spalten verwalten
         - 2/7: Filter (filter_standard/expert)
-        - 3/8: Sort (sort_standard/expert) - NEU!
+        - 3/8: Sort (sort_standard/expert)
         - 4/9: Reserviert
+        
+        KORREKTE REGELN:
+        1. View Standard (0): Alle mit show=true, Sortierung: display_order
+        2. View Expert (5): Alle außer dummy+row_type, Sortierung: expert_order
+        3. Change Standard (1): Alle mit expert_mode=false, Sortierung: display_sort
+        4. Change Expert (6): Alle außer dummy+row_type, Sortierung: expert_order
+        5. Filter Standard/Expert (2/7): Bestehend beibehalten
         
         Args:
             view_guid: GUID der View
@@ -677,23 +698,25 @@ class PdvmCentralSystemsteuerung:
             logger.info(f"🏗️ Baue Projektions-Array für View {view_guid} mit {len(controls)} Controls")
             
             # Analysiere alle Controls
-            dummy_controls = []
+            excluded_controls = []  # dummy + row_type
             all_controls = []
             non_expert_controls = []  # Spalten die NICHT expert_mode=True haben
             
             for control_key, control_data in controls.items():
-                # Dummy-Check
+                # Exclusion-Check: dummy ODER row_type
                 control_type = control_data.get('type') or control_data.get('control_type', '')
                 is_dummy = (control_type == 'dummy' or 
                            control_data.get('dummy', False) or 
                            control_key.lower().startswith('dummy'))
+                is_row_type = (control_key == 'row_type')
                 
-                if is_dummy:
-                    dummy_controls.append(control_key)
+                if is_dummy or is_row_type:
+                    excluded_controls.append(control_key)
                 else:
                     control_info = {
                         'key': control_key,
                         'display_order': control_data.get('display_order', 999),
+                        'display_sort': control_data.get('display_sort', 999),  # ⭐ NEU für Change Standard
                         'expert_order': control_data.get('expert_order', 999),
                         'show': control_data.get('show', False),
                         'expert_mode': control_data.get('expert_mode', False),
@@ -707,50 +730,62 @@ class PdvmCentralSystemsteuerung:
                     if not control_data.get('expert_mode', False):
                         non_expert_controls.append(control_info)
             
-            # Sortiere Listen nach Order
-            all_controls_by_display = sorted(all_controls, key=lambda x: x['display_order'])
-            all_controls_by_expert = sorted(all_controls, key=lambda x: x['expert_order'])
-            visible_by_display = sorted([c for c in all_controls if c['show']], key=lambda x: x['display_order'])
-            visible_by_expert = sorted([c for c in all_controls if c['show']], key=lambda x: x['expert_order'])
-            non_expert_by_display = sorted(non_expert_controls, key=lambda x: x['display_order'])
-            non_expert_by_expert = sorted(non_expert_controls, key=lambda x: x['expert_order'])
+            # Sortierte Listen erstellen nach KORREKTEN Regeln
+            # 1. View Standard: show=true, sort by display_order
+            visible_by_display = sorted(
+                [c for c in all_controls if c['show']], 
+                key=lambda x: x['display_order']
+            )
+            
+            # 2. View Expert: alle (außer excluded), sort by expert_order
+            all_by_expert = sorted(all_controls, key=lambda x: x['expert_order'])
+            
+            # 3. Change Standard: expert_mode=false, sort by display_sort ⭐ KORRIGIERT
+            non_expert_by_display_sort = sorted(
+                non_expert_controls, 
+                key=lambda x: x['display_sort']
+            )
+            
+            # 4. Change Expert: alle (außer excluded), sort by expert_order (gleich wie View Expert)
             
             # ARRAY-SYSTEM: 10 Projektions-Tabellen
             # Positionen 0-4: Standard Mode | Positionen 5-9: Expert Mode (+5)
             tables = [None] * 10
             
+            # ========================================================================
             # STANDARD MODE (0-4)
-            # Position 0: View - Nur sichtbare Spalten (show=true)
+            # ========================================================================
+            
+            # Position 0: View Standard - Alle mit show=true, Sortierung: display_order ✅
             tables[0] = [c['key'] for c in visible_by_display]
             
-            # Position 1: Change - Spalten verwalten (nicht expert_mode)
-            tables[1] = [c['key'] for c in non_expert_by_display]
+            # Position 1: Change Standard - Alle mit expert_mode=false, Sortierung: display_sort ⭐ KORRIGIERT
+            tables[1] = [c['key'] for c in non_expert_by_display_sort]
             
-            # Position 2: Filter - ALLE sichtbaren Spalten (wie View)
-            # Grund: Benutzer sollen alle sichtbaren Felder filtern können
+            # Position 2: Filter Standard - Alle sichtbaren Spalten (BEIBEHALTEN)
             tables[2] = [c['key'] for c in visible_by_display]
             
-            # Position 3: Sort - ALLE sichtbaren Spalten (wie View)
-            # Grund: Alle sichtbaren Spalten sollten sortierbar sein
+            # Position 3: Sort Standard - Alle sichtbaren Spalten (BEIBEHALTEN)
             tables[3] = [c['key'] for c in visible_by_display]
             
             # Position 4: Reserviert
             tables[4] = []
             
-            # EXPERT MODE (5-9 = Standard + 5)
-            # Position 5: View - Alle Controls (außer dummy)
-            tables[5] = [c['key'] for c in all_controls_by_expert]
+            # ========================================================================
+            # EXPERT MODE (5-9)
+            # ========================================================================
             
-            # Position 6: Change - Alle Controls (außer dummy)
-            tables[6] = [c['key'] for c in all_controls_by_expert]
+            # Position 5: View Expert - Alle außer dummy+row_type, Sortierung: expert_order ✅
+            tables[5] = [c['key'] for c in all_by_expert]
             
-            # Position 7: Filter - ALLE Controls (wie View Expert)
-            # Grund: Im Expert Mode sollte man alle Felder filtern können
-            tables[7] = [c['key'] for c in all_controls_by_expert]
+            # Position 6: Change Expert - Alle außer dummy+row_type, Sortierung: expert_order ✅
+            tables[6] = [c['key'] for c in all_by_expert]
             
-            # Position 8: Sort - ALLE Controls aus Change Expert
-            # Grund: Alle verwaltbaren Spalten sollten sortierbar sein
-            tables[8] = [c['key'] for c in all_controls_by_expert]
+            # Position 7: Filter Expert - Alle Controls (BEIBEHALTEN)
+            tables[7] = [c['key'] for c in all_by_expert]
+            
+            # Position 8: Sort Expert - Alle Controls (BEIBEHALTEN)
+            tables[8] = [c['key'] for c in all_by_expert]
             
             # Position 9: Reserviert
             tables[9] = []
@@ -769,8 +804,8 @@ class PdvmCentralSystemsteuerung:
             logger.info(f"  [7] � Filter Expert: {len(tables[7])} Spalten (alle filterbar)")
             logger.info(f"  [8] 🔄 Sort Expert: {len(tables[8])} Spalten (aus Change, nur sortierbar) ⭐ NEU")
             logger.info(f"  [9] ⏸️  Reserviert: {len(tables[9])} Spalten")
-            logger.info(f"  ❌ Dummy Controls: {len(dummy_controls)} (ausgeschlossen)")
-            logger.info(f"  📋 Non-Expert Controls: {len(non_expert_controls)} (für Change Standard)")
+            logger.info(f"  ❌ Excluded: {len(excluded_controls)} (dummy + row_type) ⭐ KORRIGIERT")
+            logger.info(f"  📋 Non-Expert: {len(non_expert_controls)} (für Change Standard)")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Aufbau der Projektions-Tabellen für {view_guid}: {e}")
@@ -1024,6 +1059,36 @@ def get_gcs():
 def is_gcs_initialized():
     """Prüfe ob GCS initialisiert ist"""
     return _gcs_instance is not None and _gcs_instance.is_initialized
+
+# ========================================
+# HELPER FUNKTION: Vereinfachter Projektions-Zugriff
+# ========================================
+
+def get_view_projection(view_guid: str) -> list:
+    """
+    ✅ ULTRA-VEREINFACHT: Hole View-Projektion basierend auf expert_mode
+    
+    Ersetzt alle _get_visible_columns_from_gcs() Wrapper-Methoden!
+    
+    Args:
+        view_guid: GUID der View
+        
+    Returns:
+        list: Liste der sichtbaren Spalten-Keys (Standard oder Expert)
+        
+    Example:
+        >>> visible_columns = get_view_projection(view_guid)
+    """
+    gcs = get_gcs() if is_gcs_initialized() else None
+    if not gcs:
+        logger.warning("⚠️ GCS nicht verfügbar für Projektions-Zugriff")
+        return []
+    
+    # ✅ DIREKTER ARRAY-ZUGRIFF: Index 0 (Standard) oder 5 (Expert)
+    projection_index = 5 if gcs.expert_mode else 0
+    projection = gcs.get_projection_table(view_guid, projection_index)
+    
+    return projection if projection else []
 
 # Alias für einfachen Zugriff
 gcs = property(get_gcs)

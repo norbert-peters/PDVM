@@ -26,7 +26,7 @@ from typing import List, Dict, Any, Optional
 from copy import deepcopy
 
 # V3 Filter-System: Einheitlicher Parser
-from search_string_parser import get_search_string_parser
+from pdvm_search_string_parser import get_search_string_parser
 
 # 3-Ebenen Array-Struktur
 from pdvm_matrix_constants import (
@@ -1155,20 +1155,39 @@ class PdvmViewMatrixManager:
         2. Daten-Zeilen zählen
         3. Bei Gruppenwechsel: Count der AKTUELLEN Gruppe per UID aktualisieren
         
+        🆕 SUMMEN-ERWEITERUNG:
+        4. Gruppen-Summen pro Header berechnen (aus sum_columns)
+        5. In row_type['group_sums'] speichern
+        
         Args:
             sorted_data: Sortierte Matrix-Daten
             group_columns: Gruppierungs-Spalten Konfiguration
         
         Returns:
-            Liste mit Daten-Zeilen UND Gruppen-Header-Zeilen
+            Liste mit Daten-Zeilen UND Gruppen-Header-Zeilen (mit group_sums)
         """
         if not sorted_data or not group_columns:
             return sorted_data
+        
+        # 🆕 Summen-Spalten aus app_db holen (für Gruppen-Summen)
+        from pdvm_central_systemsteuerung import get_gcs
+        gcs = get_gcs()
+        sum_columns = []
+        if gcs:
+            # 🆕 sum_string statt sum_columns (analog zu s_string/sg_string)
+            sum_string, _ = gcs._app_db.get_value(self.view_guid, 'sum_string')
+            sum_source, _ = gcs._app_db.get_value(self.view_guid, 'sum_source')
+            
+            if sum_source and sum_string and isinstance(sum_string, list):
+                sum_columns = sum_string
+                logger.info(f"  🧮 Berechne Gruppen-Summen für {len(sum_columns)} Spalten (sum_source='{sum_source}')")
         
         result = []
         current_group_values = {}  # {column: value} für aktuelle Gruppe
         current_headers = {}  # {level: header_uid} für aktuelle Header-UIDs
         group_counts = {}  # {header_uid: count} für Zählung
+        group_sums = {}  # 🆕 {header_uid: {column: sum}} für Gruppen-Summen
+        group_has_floats = {}  # 🆕 {header_uid: {column: bool}} Flag ob Float-Werte dabei waren
         
         for idx, row in enumerate(sorted_data):
             # Prüfe ob Gruppen-Wechsel stattfindet
@@ -1224,6 +1243,14 @@ class PdvmViewMatrixManager:
                     header_uid = header.get('uid_original')
                     current_headers[level] = header_uid
                     group_counts[header_uid] = 0
+                    
+                    # 🆕 Summen-Dictionary für Header initialisieren
+                    if sum_columns:
+                        group_sums[header_uid] = {}
+                        group_has_floats[header_uid] = {}  # 🆕 Float-Tracking
+                        for col in sum_columns:
+                            group_sums[header_uid][col] = 0
+                            group_has_floats[header_uid][col] = False  # Initial: keine Floats
             
             # Daten-Zeile hinzufügen
             result.append(row)
@@ -1232,18 +1259,84 @@ class PdvmViewMatrixManager:
             for header_uid in current_headers.values():
                 if header_uid in group_counts:
                     group_counts[header_uid] += 1
+            
+            # 🆕 Summen für ALLE aktiven Header akkumulieren
+            if sum_columns:
+                for header_uid in current_headers.values():
+                    if header_uid in group_sums:
+                        for col in sum_columns:
+                            cell = row.get(col)
+                            # 3-Ebenen-Struktur beachten
+                            if isinstance(cell, list) and len(cell) > 0:
+                                value = cell[0]  # EBENE 1: Original-Wert
+                            else:
+                                value = cell
+                            
+                            original_type = type(value).__name__
+                            
+                            # 🔧 String-zu-Zahl Konvertierung (falls value String ist)
+                            if isinstance(value, str):
+                                try:
+                                    # Prüfe ob String Dezimaltrennzeichen enthält
+                                    if '.' in value or ',' in value:
+                                        value = float(value.replace(',', '.'))
+                                        group_has_floats[header_uid][col] = True
+                                    else:
+                                        # Ganzzahl-String → versuche int, fallback float
+                                        try:
+                                            value = int(value)
+                                        except ValueError:
+                                            value = float(value)
+                                            group_has_floats[header_uid][col] = True
+                                except (ValueError, TypeError):
+                                    # Nicht konvertierbar → überspringen
+                                    continue
+                            
+                            # Float-Detection: Original war bereits Float
+                            elif isinstance(value, float):
+                                # Prüfe ob Float tatsächlich Nachkommastellen hat
+                                if value % 1 != 0:  # Hat Nachkommastellen
+                                    group_has_floats[header_uid][col] = True
+                            
+                            # Nur numerische Werte summieren
+                            if isinstance(value, (int, float)):
+                                group_sums[header_uid][col] += value
         
-        # 🔧 PASS 2: Counts in Header-Zeilen per UID aktualisieren
+        # 🔧 PASS 2: Counts + Summen in Header-Zeilen per UID aktualisieren
         for row in result:
             row_type_dict = row.get('row_type', {})
             if isinstance(row_type_dict, dict) and row_type_dict.get('type') == 'group_header':
                 header_uid = row.get('uid_original')
+                
+                # Count per UID aktualisieren (wie bisher)
                 if header_uid in group_counts:
-                    # Count per UID aktualisieren
                     row['row_type']['count'] = group_counts[header_uid]
+                
+                # 🆕 Summen per UID aktualisieren + Integer-Konvertierung
+                if header_uid in group_sums:
+                    # Konvertiere Summen zu Integer, falls keine Floats dabei waren
+                    final_sums = {}
+                    for col, sum_value in group_sums[header_uid].items():
+                        # Prüfe ob Float-Werte dabei waren
+                        has_floats = group_has_floats.get(header_uid, {}).get(col, False)
+                        
+                        if not has_floats and isinstance(sum_value, float):
+                            # Keine Floats dabei + Summe hat keine Nachkommastellen → Integer
+                            if sum_value % 1 == 0:
+                                final_sums[col] = int(sum_value)
+                                logger.debug(f"  🔢 {col}: {sum_value} (Float) → {int(sum_value)} (Int)")
+                            else:
+                                final_sums[col] = sum_value
+                        else:
+                            final_sums[col] = sum_value
+                    
+                    row['row_type']['group_sums'] = final_sums
+                    logger.debug(f"  📊 Header {header_uid}: group_sums = {final_sums}")
         
         logger.info(f"  ✅ {len(result)} Zeilen erstellt ({len(sorted_data)} Daten + {len(result) - len(sorted_data)} Header)")
         logger.info(f"  📊 {len(group_counts)} Header-Counts aktualisiert")
+        if sum_columns:
+            logger.info(f"  🧮 {len(group_sums)} Header-Summen berechnet für {len(sum_columns)} Spalten")
         return result
     
     def _create_group_header(self, column: str, value, count: int, level: int) -> dict:

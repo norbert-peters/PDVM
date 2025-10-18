@@ -27,8 +27,8 @@ from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_central_systemsteuerung import get_gcs
 
 # V3 Filter-System
-from schnellsuche_manager import SchnellsucheManager
-from einfach_filter_manager import EinfachFilterManager
+from pdvm_schnellsuche_manager import SchnellsucheManager
+from pdvm_einfach_filter_manager import EinfachFilterManager
 
 logger = logging.getLogger(__name__)
 
@@ -724,12 +724,11 @@ class PdvmViewController:
         
         EFFIZIENTER WORKFLOW:
         1. Controls aus GCS neu laden (wurden vom Dialog geändert)
-        2. Projektions-Tabellen neu berechnen (aus geänderten Controls)
-        3. Projektion auf bestehende SortMatrix anwenden
-        4. UI aktualisieren
+        2. Pipeline-Projektion neu durchlaufen (holt Expert Mode aus GCS)
+        3. UI aktualisieren mit neuer Projektion
         
         KEINE BasisMatrix/Filter/Sort Rebuild!
-        Verwendet für: Spalten-Verwaltung, Expert-Mode Toggle
+        Verwendet für: Spalten-Verwaltung
         """
         logger.info("🔄 === PROJECTION-ONLY REFRESH ===")
         
@@ -744,13 +743,9 @@ class PdvmViewController:
                 else:
                     logger.warning("  ⚠️ Keine Controls aus GCS geladen - verwende bestehende")
             
-            # SCHRITT 2: Projektions-Tabellen neu berechnen
-            logger.info("  📊 SCHRITT 2: Projektions-Tabellen neu berechnen...")
-            self._build_projection_tables()
-            
-            # SCHRITT 3: Projektion auf bestehende SortMatrix anwenden
-            logger.info("  🎯 SCHRITT 3: Projektion anwenden...")
-            self.refresh_ui_from_matrix()
+            # SCHRITT 2: Pipeline-Projektion neu durchlaufen + UI aktualisieren
+            logger.info("  🎯 SCHRITT 2: Pipeline-Projektion neu durchlaufen...")
+            self.refresh_ui_from_pipeline(rerun_projection=True)
             
             logger.info("✅ Projection-Only Refresh abgeschlossen")
             
@@ -759,7 +754,7 @@ class PdvmViewController:
             import traceback
             logger.error(traceback.format_exc())
     
-    def refresh_ui_from_pipeline(self):
+    def refresh_ui_from_pipeline(self, rerun_projection=False):
         """
         UI aus Pipeline aktualisieren - VOLLSTÄNDIG AUTONOM!
         
@@ -767,8 +762,11 @@ class PdvmViewController:
         - Projizierte Matrix-Daten
         - Sichtbare Spalten
         - Aktuellen Suchtext für Schnellsuche-Feld
+        
+        Args:
+            rerun_projection: True = Pipeline-Projektion neu durchlaufen (für Expert Mode/Spalten-Verwaltung)
         """
-        logger.info(f"🎨 UI-Update aus Pipeline")
+        logger.info(f"🎨 UI-Update aus Pipeline (rerun_projection={rerun_projection})")
         
         try:
             if not self.ui:
@@ -778,6 +776,11 @@ class PdvmViewController:
             # Pipeline holen
             from pdvm_pipeline import get_pipeline
             pipeline = get_pipeline(self.view_guid, self.matrix_manager)
+            
+            # 🎯 KRITISCH: Bei Expert Mode Toggle / Spalten-Verwaltung → Projektion neu durchlaufen!
+            if rerun_projection:
+                logger.info("🔄 Pipeline-Projektion wird NEU durchlaufen (Expert Mode / Spalten-Verwaltung)...")
+                pipeline.run('PROJECT')
             
             # Projizierte Daten aus Pipeline holen
             matrix_project, visible_columns = pipeline.get_projected_data()
@@ -1027,7 +1030,7 @@ class PdvmViewController:
             
             try:
                 # ✅ V3: FilterResetManager für ALLE Filter-Löschungen
-                from filter_reset_manager import get_filter_reset_manager
+                from pdvm_filter_reset_manager import get_filter_reset_manager
                 reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
                 success = reset_manager.reset_all_filters()
                 
@@ -1066,200 +1069,19 @@ class PdvmViewController:
             
             return
         
-        # Sichtbare Spalten und Controls holen
-        visible_columns = self.get_projection_table('table_expert' if self.gcs.expert_mode else 'table_standard')
-        
-        if filter_type == 'simple':
-            # Einfacher Filter-Dialog
-            from pdvm_simple_filter_dialog import show_simple_filter_dialog
-            
-            filter_data = show_simple_filter_dialog(
-                parent=self.ui,
-                view_guid=self.view_guid,
-                visible_columns=visible_columns,
-                column_control=self.all_controls
-            )
-            
-            if filter_data:
-                self._apply_simple_filter(filter_data)
-        
-        elif filter_type == 'complex':
-            # Komplexer Filter-Dialog
-            from pdvm_complex_filter_dialog import show_complex_filter_dialog
-            
-            filter_data = show_complex_filter_dialog(
-                parent=self.ui,
-                view_guid=self.view_guid,
-                visible_columns=visible_columns,
-                column_control=self.all_controls
-            )
-            
-            if filter_data:
-                self._apply_complex_filter(filter_data)
-    
-    def _apply_simple_filter(self, filter_data):
-        """
-        EINFACH: Erstellt Filter-Funktion und ruft Matrix Manager auf
-        """
-        logger.info(f"🔍 Wende einfachen Filter an: {len(filter_data)} Felder")
-        
-        try:
-            # Sichtbare Spalten
-            visible_columns = self.get_projection_table('table_expert' if self.gcs.expert_mode else 'table_standard')
-            
-            # Filter-Funktion erstellen
-            def simple_filter(row_data):
-                for field_key, field_filter in filter_data.items():
-                    value_to_search = field_filter['value'].lower()
-                    is_positive = (field_filter['mode'] == 'positive')
-                    
-                    if field_key not in row_data:
-                        continue
-                    
-                    # Array-Wert holen (WERT = Index 0)
-                    cell = row_data[field_key]
-                    if isinstance(cell, list) and len(cell) > 0:
-                        wert = cell[0]  # WERT
-                    else:
-                        wert = cell
-                    
-                    field_str = str(wert).lower() if wert is not None else ''
-                    contains = value_to_search in field_str
-                    
-                    if is_positive and not contains:
-                        return False
-                    if not is_positive and contains:
-                        return False
-                
-                return True
-            
-            # EINFACHER Aufruf: Matrix Manager macht alles!
-            self.matrix_manager.apply_custom_filter(simple_filter, visible_columns)
-            
-            # UI aktualisieren
-            self.refresh_ui_from_matrix()
-            
-            logger.info(f"✅ Einfacher Filter angewendet")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Anwenden des einfachen Filters: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def _apply_complex_filter(self, filter_data):
-        """
-        EINFACH: Erstellt Filter-Funktion und ruft Matrix Manager auf
-        """
-        logger.info(f"🔍 Wende komplexen Filter an: {len(filter_data)} Felder")
-        
-        try:
-            from pdvm_complex_filter_dialog import SearchCondition
-            
-            # Sichtbare Spalten
-            visible_columns = self.get_projection_table('table_expert' if self.gcs.expert_mode else 'table_standard')
-            
-            # Filter-Funktion erstellen
-            def complex_filter(row_data):
-                for field_key, field_filter in filter_data.items():
-                    conditions = [SearchCondition.from_dict(c) for c in field_filter['conditions']]
-                    
-                    if not conditions:
-                        continue
-                    
-                    if field_key not in row_data:
-                        return False
-                    
-                    # Array-Wert holen (WERT = Index 0)
-                    cell = row_data[field_key]
-                    if isinstance(cell, list) and len(cell) > 0:
-                        wert = cell[0]  # WERT
-                    else:
-                        wert = cell
-                    
-                    field_str = str(wert).lower() if wert is not None else ''
-                    
-                    field_result = None
-                    for cond in conditions:
-                        match = self._evaluate_condition(field_str, cond)
-                        
-                        if cond.logic_operator == 'FIRST':
-                            field_result = match
-                        elif cond.logic_operator == 'AND':
-                            field_result = field_result and match
-                        elif cond.logic_operator == 'OR':
-                            field_result = field_result or match
-                    
-                    if not field_result:
-                        return False
-                
-                return True
-            
-            # EINFACHER Aufruf: Matrix Manager macht alles!
-            self.matrix_manager.apply_custom_filter(complex_filter, visible_columns)
-            
-            # UI aktualisieren
-            self.refresh_ui_from_matrix()
-            
-            logger.info(f"✅ Komplexer Filter angewendet")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Anwenden des komplexen Filters: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
-    def _evaluate_condition(self, field_str, condition):
-        """
-        Evaluiert eine einzelne SearchCondition
-        
-        Args:
-            field_str: Feldwert als String (lowercase)
-            condition: SearchCondition
-        
-        Returns:
-            bool: Bedingung erfüllt?
-        """
-        search_value = condition.value.lower()
-        operator = condition.operator_type
-        
-        # Operator anwenden
-        if operator == 'enthält':
-            match = search_value in field_str
-        elif operator == 'beginnt mit':
-            match = field_str.startswith(search_value)
-        elif operator == 'endet mit':
-            match = field_str.endswith(search_value)
-        elif operator == 'ist gleich':
-            match = field_str == search_value
-        elif operator == 'ist leer':
-            match = len(field_str) == 0
-        elif operator == '>':
-            try:
-                match = float(field_str) > float(search_value)
-            except:
-                match = field_str > search_value
-        elif operator == '<':
-            try:
-                match = float(field_str) < float(search_value)
-            except:
-                match = field_str < search_value
-        elif operator == '>=':
-            try:
-                match = float(field_str) >= float(search_value)
-            except:
-                match = field_str >= search_value
-        elif operator == '<=':
-            try:
-                match = float(field_str) <= float(search_value)
-            except:
-                match = field_str <= search_value
-        else:
-            match = False
-        
-        # Negation anwenden
-        if condition.negation == 'NOT':
-            match = not match
-        
-        return match
+        # ========================================================================
+        # ⚠️ ALTE V1/V2 FILTER-METHODEN - NICHT MEHR VERWENDET IN V3
+        # ========================================================================
+        # In V3 werden Filter DIREKT in den Dialogen über Manager ausgeführt:
+        # - pdvm_einfach_filter_dialog.py → pdvm_einfach_filter_manager.py
+        # - pdvm_komplex_filter_dialog.py → pdvm_komplex_filter_manager.py
+        # - pdvm_view_ui.py ruft Dialoge auf (Zeile ~942 und ~954)
+        # Diese Methode wird NICHT MEHR aufgerufen!
+        # ========================================================================
+        logger.warning(f"⚠️ Filter-Typ '{filter_type}' wird in V3 nicht mehr hier verarbeitet!")
+        logger.info("ℹ️  Filter werden jetzt direkt in den Dialogen ausgeführt (V3-Architektur)")
+        # Alte V1/V2 Methoden (_apply_simple_filter, _apply_complex_filter, _evaluate_condition)
+        # wurden entfernt (~220 Zeilen) - siehe Git-History bei Bedarf
     
     def _handle_sort_request(self, sort_config):
         """
