@@ -1,6 +1,6 @@
-# advanced_sort_dialog.py
+# pdvm_sort_summen_dialog.py
 """
-🎓 ERWEITERTE SORTIERUNG DIALOG
+🎓 ERWEITERTE SORTIERUNG & SUMMEN DIALOG
 
 Ermöglicht:
 - Multi-Level Sortierung

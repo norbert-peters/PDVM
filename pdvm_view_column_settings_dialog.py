@@ -117,7 +117,7 @@ class ColumnSettingsDialog(QDialog):
 
             if view_guid and gcs:
                 # LINEARER PROJECTION MANAGER: Direkte Updates
-                from linear_projection_manager import get_projection_manager
+                from pdvm_projection_manager import get_projection_manager
                 projection_manager = get_projection_manager(view_guid, gcs)
                 
                 # Controls als Dictionary aufbereiten
@@ -153,7 +153,7 @@ class ColumnSettingsDialog(QDialog):
 
             if view_guid:
                 # LINEARER PROJECTION MANAGER
-                from linear_projection_manager import get_projection_manager
+                from pdvm_projection_manager import get_projection_manager
                 projection_manager = get_projection_manager(view_guid, gcs)
                 projection_keys = projection_manager.get_management_projection()
 

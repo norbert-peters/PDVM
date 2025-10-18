@@ -17,7 +17,7 @@ from PyQt5.QtCore import Qt
 # Globale Instanz direkt importieren
 import pdvm_central_systemsteuerung_global
 from pdvm_central_systemsteuerung import is_expert_mode_available
-from linear_projection_manager import get_projection_manager
+from pdvm_projection_manager import get_projection_manager
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
 logger = logging.getLogger(__name__)

@@ -1266,7 +1266,7 @@ class PdvmViewUI(QWidget):
         logger.info("📊 Erweiterte Sortierung angefordert")
         
         try:
-            from advanced_sort_dialog import AdvancedSortDialog
+            from pdvm_sort_summen_dialog import AdvancedSortDialog
             from pdvm_central_systemsteuerung import (
                 get_gcs as gcs_func, 
                 TABLE_INDEX_SORT, 

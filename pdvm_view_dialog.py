@@ -1838,7 +1838,7 @@ class PdvmViewDialog(QWidget):
     def _show_sorting_dialog(self):
         """📊 Zeige Sortierung & Gruppierung Dialog"""
         try:
-            from advanced_sort_dialog import AdvancedSortDialog
+            from pdvm_sort_summen_dialog import AdvancedSortDialog
             from PyQt5.QtWidgets import QDialog
             
             logger.info("📊 Öffne Sortierung & Gruppierung Dialog...")
@@ -3434,7 +3434,7 @@ class PdvmViewDisplay(QWidget):
     def _sortierung_verwaltung(self):
         """🎓 Erweiterte Sortierung mit Gruppierung und Summierung"""
         try:
-            from advanced_sort_dialog import AdvancedSortDialog
+            from pdvm_sort_summen_dialog import AdvancedSortDialog
             
             # View-GUID für Persistierung
             view_guid = getattr(self.view_dialog, 'view_guid', None)

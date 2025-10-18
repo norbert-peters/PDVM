@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 import pdvm_central_systemsteuerung_global
-from linear_projection_manager import get_projection_manager
+from pdvm_projection_manager import get_projection_manager
 from pdvm_matrix_pipeline import get_matrix_pipeline
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung
 
