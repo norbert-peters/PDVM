@@ -1211,32 +1211,40 @@ class PdvmViewController(QObject):
         Handler für Doppelklick auf Datensatz
         
         Args:
-            row_data: Dict mit allen Feldern des Datensatzes (3-Ebenen Struktur)
+            row_data: Dict mit allen Feldern des Datensatzes (3-Ebenen Struktur - ARRAYS!)
         """
         logger.info("🖱️ Datensatz doppelt geklickt")
         
         try:
-            # GUID extrahieren (PDVM-Standard: uid_original)
-            guid = row_data.get('uid_original')
+            # ✅ ARRAY: GUID extrahieren aus 3-Ebenen Struktur
+            # uid_original ist ein Array: [wert, abdatum, formatiert]
+            from pdvm_matrix_constants import get_wert
+            
+            guid = None
+            
+            # 1. PDVM-Standard: uid_original (ist ARRAY!)
+            uid_cell = row_data.get('uid_original')
+            if uid_cell:
+                guid = get_wert(uid_cell) if isinstance(uid_cell, list) else uid_cell
+            
+            # 2. Fallback: Versuche andere Varianten
             if not guid:
-                # Fallback: Versuche andere Varianten
-                guid = row_data.get('guid')
-            if not guid:
-                guid = row_data.get('GUID')
-            if not guid:
-                guid = row_data.get('uid')
-            if not guid:
-                guid = row_data.get('UID')
-            if not guid:
-                guid = row_data.get('id')
-            if not guid:
-                guid = row_data.get('ID')
+                for key in ['guid', 'GUID', 'uid', 'UID', 'id', 'ID']:
+                    value = row_data.get(key)
+                    if value:
+                        guid = get_wert(value) if isinstance(value, list) else value
+                        if guid:
+                            break
             
             if guid:
                 logger.info(f"  📋 GUID (uid_original): {guid}")
             else:
                 logger.warning("  ⚠️ Keine GUID im Datensatz gefunden!")
                 logger.warning(f"  📂 Verfügbare Felder: {list(row_data.keys())[:10]}...")
+                # Debug: Zeige uid_original Struktur
+                uid_cell = row_data.get('uid_original')
+                if uid_cell:
+                    logger.warning(f"  📂 uid_original Struktur: {uid_cell}")
             
             # Signal weiterleiten an Parent (z.B. GenerellerDialog)
             self.row_double_clicked.emit(row_data)

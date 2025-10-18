@@ -467,25 +467,35 @@ class PdvmGenerellerDialog(QWidget):
         Handler wenn Datensatz in View ausgewählt wird
         
         Args:
-            row_data: Dictionary mit Zeilen-Daten (muss 'uid_original' enthalten)
+            row_data: Dictionary mit Zeilen-Daten (3-Ebenen ARRAY-Struktur!)
         """
         logger.info("🎯 Datensatz ausgewählt in View")
         
         try:
-            # GUID aus row_data extrahieren
-            # PDVM-Standard: uid_original
+            # ✅ ARRAY: GUID aus 3-Ebenen Struktur extrahieren
+            # uid_original ist ein Array: [wert, abdatum, formatiert]
+            from pdvm_matrix_constants import get_wert
+            
             selected_guid = None
             
             if isinstance(row_data, dict):
-                # Versuche GUID-Felder (uid_original zuerst!)
+                # Versuche GUID-Felder (uid_original zuerst - ist ARRAY!)
                 for key in ['uid_original', 'guid', 'GUID', 'uid', 'UID', 'id', 'ID']:
                     if key in row_data:
-                        selected_guid = row_data[key]
-                        break
+                        value = row_data[key]
+                        # ARRAY-Struktur? → get_wert() verwenden
+                        selected_guid = get_wert(value) if isinstance(value, list) else value
+                        if selected_guid:
+                            break
             
             if not selected_guid:
                 logger.warning(f"⚠️ Keine GUID in row_data gefunden!")
                 logger.warning(f"  📂 Verfügbare Felder: {list(row_data.keys())[:10] if isinstance(row_data, dict) else 'Kein Dict'}")
+                # Debug: Zeige uid_original Struktur
+                if isinstance(row_data, dict):
+                    uid_cell = row_data.get('uid_original')
+                    if uid_cell:
+                        logger.warning(f"  📂 uid_original Struktur: {uid_cell}")
                 return
             
             logger.info(f"  📋 Ausgewählte GUID: {selected_guid}")
