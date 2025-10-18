@@ -12,6 +12,7 @@ Robuste Architektur mit:
 
 import logging
 from typing import Dict, Union
+from PyQt5.QtCore import QObject, pyqtSignal
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_central_datenbank import PdvmCentralDatenbank
 
@@ -45,11 +46,21 @@ _LEGACY_INDEX_MAP = {
 }
 # ========================================
 
-class PdvmCentralSystemsteuerung:
-    """Zentrale Systemsteuerung mit robuster Architektur"""
-
+class PdvmCentralSystemsteuerung(QObject):
+    """
+    Zentrale Systemsteuerung mit robuster Architektur
+    
+    Signals:
+    - stichtag_changed(float): Emittiert bei Stichtag-Änderung
+    """
+    
+    # Signal für Stichtag-Änderungen
+    stichtag_changed = pyqtSignal(float)  # Neuer Stichtag-Wert
+    
     def __init__(self, user_guid, user_data):
         """Initialisierung direkt im Konstruktor"""
+        super().__init__()  # QObject initialisieren für Signals
+        
         self._db = None
         self._user_guid = user_guid
         self._user_data = user_data
@@ -393,6 +404,8 @@ class PdvmCentralSystemsteuerung:
         
         Diese Methode liest den aktuellen Wert aus self._st_inst.PdvmDateTime
         und speichert ihn in der Systemsteuerungsdatenbank.
+        
+        Emittiert Signal 'stichtag_changed' nach erfolgreicher Aktualisierung.
         """
         self._ensure_initialized()
         if self._st_inst and self._db:
@@ -402,6 +415,10 @@ class PdvmCentralSystemsteuerung:
             # Persistiere alle Änderungen
             self._db.save_all_values()
             logger.info(f"💾 Stichtag in finale GCS gespeichert: {current_stichtag} ({self._st_inst.FormTimeStamp})")
+            
+            # 🔔 Signal emittieren für alle verbundenen Views
+            self.stichtag_changed.emit(current_stichtag)
+            logger.info(f"🔔 Signal 'stichtag_changed' emittiert: {current_stichtag}")
         else:
             logger.error("❌ Kann Stichtag nicht speichern - st_inst oder db nicht verfügbar")
     

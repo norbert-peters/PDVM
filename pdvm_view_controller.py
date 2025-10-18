@@ -562,19 +562,19 @@ class PdvmViewController(QObject):
         logger.info("🔧 SCHRITT 10: Stichtag-Signal verbinden...")
         
         try:
-            if self.gcs and hasattr(self.gcs, 'stichtag_manager'):
-                stichtag_mgr = self.gcs.stichtag_manager
-                
+            if self.gcs and hasattr(self.gcs, 'stichtag_changed'):
                 # Signal verbinden: Bei Stichtag-Änderung → reload_with_stichtag
-                stichtag_mgr.stichtag_changed.connect(self.reload_with_stichtag)
+                self.gcs.stichtag_changed.connect(self.reload_with_stichtag)
                 
                 logger.info("  ✅ Stichtag-Signal verbunden → reload_with_stichtag()")
                 logger.info(f"  📅 Aktueller Stichtag: {self.gcs.stichtag}")
             else:
-                logger.warning("  ⚠️ Kein Stichtag-Manager in GCS gefunden")
+                logger.warning("  ⚠️ GCS hat kein 'stichtag_changed' Signal")
                 
         except Exception as e:
             logger.warning(f"⚠️ Stichtag-Signal Verbindung: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
     
     def _get_columns_from_controls(self):
         """Basis-Spalten aus Controls ableiten"""
