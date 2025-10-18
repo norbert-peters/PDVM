@@ -191,25 +191,25 @@ class PdvmGenerellerDialog(QWidget):
             
             # ROOT_TABLE
             self.root_table, _ = self.framedaten_db.get_value(
-                self.frame_guid, gruppe, 'ROOT_TABLE'
+                gruppe, 'ROOT_TABLE'
             )
             logger.info(f"  📋 ROOT_TABLE: {self.root_table}")
             
             # VIEW_GUID
             self.view_guid, _ = self.framedaten_db.get_value(
-                self.frame_guid, gruppe, 'VIEW_GUID'
+                gruppe, 'VIEW_GUID'
             )
             logger.info(f"  📋 VIEW_GUID: {self.view_guid}")
             
             # DIALOG_GUID
             self.dialog_guid, _ = self.framedaten_db.get_value(
-                self.frame_guid, gruppe, 'DIALOG_GUID'
+                gruppe, 'DIALOG_GUID'
             )
             logger.info(f"  📋 DIALOG_GUID: {self.dialog_guid}")
             
             # HEADER_TEXT
             self.header_text, _ = self.framedaten_db.get_value(
-                self.frame_guid, gruppe, 'HEADER_TEXT'
+                gruppe, 'HEADER_TEXT'
             )
             logger.info(f"  📋 HEADER_TEXT: {self.header_text}")
             
@@ -251,7 +251,7 @@ class PdvmGenerellerDialog(QWidget):
                 
                 # DIALOG_GUID in Framedaten speichern
                 self.framedaten_db.set_value(
-                    self.frame_guid, 'ROOT', 'DIALOG_GUID', self.dialog_guid
+                    'ROOT', 'DIALOG_GUID', self.dialog_guid
                 )
                 self.framedaten_db.save_all_values()
                 logger.info("  💾 DIALOG_GUID in Framedaten gespeichert")
@@ -261,25 +261,25 @@ class PdvmGenerellerDialog(QWidget):
             self.dialogdaten_db = PdvmCentralDatenbank('anwendungsdaten', self.dialog_guid)
             
             # Prüfen ob ROOT-Gruppe existiert (via get_value - wenn None dann nicht vorhanden)
-            active_tab_test, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'ROOT', 'active_tab')
+            active_tab_test, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
             root_exists = (active_tab_test is not None)
             
             if not root_exists:
                 logger.info("  🆕 Erstelle initiale Dialogdaten...")
                 
                 # Initiale ROOT-Parameter
-                self.dialogdaten_db.set_value(self.dialog_guid, 'ROOT', 'active_tab', 0)
-                self.dialogdaten_db.set_value(self.dialog_guid, 'ROOT', 'tab_count', 2)
+                self.dialogdaten_db.set_value('ROOT', 'active_tab', 0)
+                self.dialogdaten_db.set_value('ROOT', 'tab_count', 2)
                 
                 # Tab01 Parameter (View)
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab01', 'tab_type', 'view')
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab01', 'tab_title', 'Übersicht')
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab01', 'view_guid', self.view_guid)
+                self.dialogdaten_db.set_value('Tab01', 'tab_type', 'view')
+                self.dialogdaten_db.set_value('Tab01', 'tab_title', 'Übersicht')
+                self.dialogdaten_db.set_value('Tab01', 'view_guid', self.view_guid)
                 
                 # Tab02 Parameter (Edit)
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab02', 'tab_type', 'edit')
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab02', 'tab_title', 'Bearbeiten')
-                self.dialogdaten_db.set_value(self.dialog_guid, 'Tab02', 'selected_guid', None)
+                self.dialogdaten_db.set_value('Tab02', 'tab_type', 'edit')
+                self.dialogdaten_db.set_value('Tab02', 'tab_title', 'Bearbeiten')
+                self.dialogdaten_db.set_value('Tab02', 'selected_guid', None)
                 
                 self.dialogdaten_db.save_all_values()
                 logger.info("  ✅ Initiale Dialogdaten erstellt")
@@ -298,7 +298,7 @@ class PdvmGenerellerDialog(QWidget):
         
         try:
             # Tab-Anzahl aus Dialogdaten
-            tab_count, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'ROOT', 'tab_count')
+            tab_count, _ = self.dialogdaten_db.get_value('ROOT', 'tab_count')
             tab_count = int(tab_count) if tab_count else 2
             
             logger.info(f"  📊 Tab-Anzahl: {tab_count}")
@@ -310,7 +310,7 @@ class PdvmGenerellerDialog(QWidget):
             self._create_edit_tab()
             
             # Aktiven Tab wiederherstellen
-            active_tab, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'ROOT', 'active_tab')
+            active_tab, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
             if active_tab is not None:
                 active_tab = int(active_tab)
                 if 0 <= active_tab < self.tab_widget.count():
@@ -332,7 +332,7 @@ class PdvmGenerellerDialog(QWidget):
         
         try:
             # Tab-Titel aus Dialogdaten
-            tab_title, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'Tab01', 'tab_title')
+            tab_title, _ = self.dialogdaten_db.get_value('Tab01', 'tab_title')
             tab_title = tab_title or 'Übersicht'
             
             # View-Container
@@ -404,7 +404,7 @@ class PdvmGenerellerDialog(QWidget):
         
         try:
             # Tab-Titel aus Dialogdaten
-            tab_title, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'Tab02', 'tab_title')
+            tab_title, _ = self.dialogdaten_db.get_value('Tab02', 'tab_title')
             tab_title = tab_title or 'Bearbeiten'
             
             # Edit-Container
@@ -503,7 +503,7 @@ class PdvmGenerellerDialog(QWidget):
             self.current_selected_guid = selected_guid
             
             # GUID in Dialogdaten speichern
-            self.dialogdaten_db.set_value(self.dialog_guid, 'Tab02', 'selected_guid', selected_guid)
+            self.dialogdaten_db.set_value('Tab02', 'selected_guid', selected_guid)
             self.dialogdaten_db.save_all_values()
             
             # GUID-Label aktualisieren und anzeigen
@@ -526,7 +526,7 @@ class PdvmGenerellerDialog(QWidget):
         
         try:
             # Aktiven Tab speichern
-            self.dialogdaten_db.set_value(self.dialog_guid, 'ROOT', 'active_tab', index)
+            self.dialogdaten_db.set_value('ROOT', 'active_tab', index)
             self.dialogdaten_db.save_all_values()
             
         except Exception as e:
