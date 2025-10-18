@@ -13,12 +13,17 @@ Architektur:
 - Tab 2+: Edit-Bereiche (stichtagsgenau, basierend auf ausgewähltem Datensatz)
 
 Features:
-- ✅ Framedaten-basierte Konfiguration
+- ✅ Framedaten-basierte Konfiguration (framedaten.db)
 - ✅ View-Integration
 - ✅ Datensatz-Auswahl → Edit-Bereiche
 - ✅ Stichtagsgenau
 - ✅ GCS-Integration
-- ✅ Persistierung aller Tab-Einstellungen
+- ✅ Persistierung in dialogdaten.db (NICHT anwendungsdaten!)
+
+Datenbank-Nutzung:
+- framedaten.db: Frame-Konfiguration (ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
+- dialogdaten.db: Dialog-Status (Tab-Einstellungen, selected_guid)
+- anwendungsdaten.db: NUR über GCS für User-bezogene Daten (View-Filter, etc.)
 
 Version: 1.0.0 (Grundgerüst)
 """
@@ -257,8 +262,9 @@ class PdvmGenerellerDialog(QWidget):
                 logger.info("  💾 DIALOG_GUID in Framedaten gespeichert")
             
             # Dialogdaten-DB Instanz erstellen
-            # WICHTIG: Verwende 'anwendungsdaten' Datenbank mit DIALOG_GUID
-            self.dialogdaten_db = PdvmCentralDatenbank('anwendungsdaten', self.dialog_guid)
+            # WICHTIG: Verwende 'dialogdaten' Datenbank mit DIALOG_GUID
+            # NICHT 'anwendungsdaten' - das ist nur für User-bezogene Daten über GCS!
+            self.dialogdaten_db = PdvmCentralDatenbank('dialogdaten', self.dialog_guid)
             
             # Prüfen ob ROOT-Gruppe existiert (via get_value - wenn None dann nicht vorhanden)
             active_tab_test, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
