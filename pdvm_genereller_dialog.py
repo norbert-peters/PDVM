@@ -183,8 +183,8 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("📂 Lade Framedaten...")
         
         try:
-            # Framedaten-DB Instanz erstellen
-            self.framedaten_db = PdvmCentralDatenbank('framedaten')
+            # Framedaten-DB Instanz erstellen mit frame_guid
+            self.framedaten_db = PdvmCentralDatenbank('framedaten', self.frame_guid)
             
             # ROOT-Gruppe lesen
             gruppe = 'ROOT'
@@ -260,8 +260,9 @@ class PdvmGenerellerDialog(QWidget):
             # WICHTIG: Verwende 'anwendungsdaten' Datenbank mit DIALOG_GUID
             self.dialogdaten_db = PdvmCentralDatenbank('anwendungsdaten', self.dialog_guid)
             
-            # Prüfen ob ROOT-Gruppe existiert
-            root_exists = self.dialogdaten_db.has_group(self.dialog_guid, 'ROOT')
+            # Prüfen ob ROOT-Gruppe existiert (via get_value - wenn None dann nicht vorhanden)
+            active_tab_test, _ = self.dialogdaten_db.get_value(self.dialog_guid, 'ROOT', 'active_tab')
+            root_exists = (active_tab_test is not None)
             
             if not root_exists:
                 logger.info("  🆕 Erstelle initiale Dialogdaten...")
