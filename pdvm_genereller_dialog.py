@@ -467,24 +467,25 @@ class PdvmGenerellerDialog(QWidget):
         Handler wenn Datensatz in View ausgewählt wird
         
         Args:
-            row_data: Dictionary mit Zeilen-Daten (muss 'guid' enthalten)
+            row_data: Dictionary mit Zeilen-Daten (muss 'uid_original' enthalten)
         """
         logger.info("🎯 Datensatz ausgewählt in View")
         
         try:
             # GUID aus row_data extrahieren
-            # WICHTIG: Annahme dass View row_data mit 'guid' Feld liefert
+            # PDVM-Standard: uid_original
             selected_guid = None
             
             if isinstance(row_data, dict):
-                # Versuche verschiedene GUID-Felder
-                for key in ['guid', 'GUID', 'id', 'ID']:
+                # Versuche GUID-Felder (uid_original zuerst!)
+                for key in ['uid_original', 'guid', 'GUID', 'uid', 'UID', 'id', 'ID']:
                     if key in row_data:
                         selected_guid = row_data[key]
                         break
             
             if not selected_guid:
-                logger.warning(f"⚠️ Keine GUID in row_data gefunden: {row_data}")
+                logger.warning(f"⚠️ Keine GUID in row_data gefunden!")
+                logger.warning(f"  📂 Verfügbare Felder: {list(row_data.keys())[:10] if isinstance(row_data, dict) else 'Kein Dict'}")
                 return
             
             logger.info(f"  📋 Ausgewählte GUID: {selected_guid}")

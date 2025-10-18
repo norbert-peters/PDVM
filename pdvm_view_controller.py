@@ -689,6 +689,7 @@ class PdvmViewController(QObject):
         Reload bei Stichtag-Änderung
         
         MATRIX-PIPELINE KOMPLETT NEU DURCHLAUFEN:
+        0. Instanzen NEU laden (wichtig für historische Daten!)
         1. BasisMatrix neu erstellen (mit neuem Stichtag)
         2. Filter anwenden
         3. Sort anwenden
@@ -699,12 +700,20 @@ class PdvmViewController(QObject):
             new_stichtag: Neuer Stichtag als float (z.B. 2025043.0)
         """
         logger.info(f"🗓️ === STICHTAG-RELOAD: {new_stichtag} ===")
+        logger.info(f"  🔔 Signal empfangen! View-GUID: {self.view_guid}")
+        logger.info(f"  📋 View-Titel: {self.title}")
         
         try:
-            # GCS Stichtag sollte bereits aktualisiert sein durch StichtagManager
-            # Wir prüfen nur zur Sicherheit
+            # GCS Stichtag sollte bereits aktualisiert sein durch update_stichtag()
             if self.gcs and hasattr(self.gcs, 'stichtag'):
                 logger.info(f"  📅 GCS Stichtag: {self.gcs.stichtag}")
+                logger.info(f"  📅 GCS st_inst.PdvmDateTime: {self.gcs.st_inst.PdvmDateTime}")
+            
+            # SCHRITT 0: Instanzen NEU laden (wichtig für Stichtag-Änderungen!)
+            # Daten in PdvmCentralDatenbank sind historisch → müssen NEU geladen werden!
+            logger.info("  🔧 SCHRITT 0: Instanzen NEU laden...")
+            self._load_data()
+            logger.info(f"  ✅ {len(self.optimized_instances)} Instanzen neu geladen")
             
             # SCHRITT 1: BasisMatrix komplett neu erstellen mit neuem Stichtag
             logger.info("  🔧 SCHRITT 1: BasisMatrix neu erstellen...")
@@ -1207,19 +1216,27 @@ class PdvmViewController(QObject):
         logger.info("🖱️ Datensatz doppelt geklickt")
         
         try:
-            # GUID extrahieren (versuche verschiedene Varianten)
-            guid = row_data.get('guid')
+            # GUID extrahieren (PDVM-Standard: uid_original)
+            guid = row_data.get('uid_original')
+            if not guid:
+                # Fallback: Versuche andere Varianten
+                guid = row_data.get('guid')
             if not guid:
                 guid = row_data.get('GUID')
+            if not guid:
+                guid = row_data.get('uid')
+            if not guid:
+                guid = row_data.get('UID')
             if not guid:
                 guid = row_data.get('id')
             if not guid:
                 guid = row_data.get('ID')
             
             if guid:
-                logger.info(f"  📋 GUID: {guid}")
+                logger.info(f"  📋 GUID (uid_original): {guid}")
             else:
                 logger.warning("  ⚠️ Keine GUID im Datensatz gefunden!")
+                logger.warning(f"  📂 Verfügbare Felder: {list(row_data.keys())[:10]}...")
             
             # Signal weiterleiten an Parent (z.B. GenerellerDialog)
             self.row_double_clicked.emit(row_data)
