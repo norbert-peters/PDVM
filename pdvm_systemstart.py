@@ -760,91 +760,6 @@ class MainAppComplete(QMainWindow):
         except Exception as e:
             logger.error(f"❌ Fehler beim Ersetzen des Menüs: {e}")
 
-    def pdvm_modern_view(self, frame_guid, title=None):
-        """
-        🔧 FINALE VERSION: Moderne View-Dialog Integration für finale GCS
-        
-        Vereinfachte Dialog-basierte View-Architektur ohne set_menu_command.
-        """
-        if not frame_guid:
-            logger.error("❌ Es wurde keine frame_guid übergeben!")
-            self.show_text("❌ Fehler: Keine Frame-GUID übergeben")
-            return
-
-        try:
-            logger.info(f"🚀 Starte moderne View für Frame: {frame_guid}")
-            
-            # Frame-Daten laden
-            from pdvm_central_datenbank import PdvmCentralDatenbank
-            framedaten_db = PdvmCentralDatenbank(
-                table_name="framedaten", 
-                guid=frame_guid
-            )
-            
-            # View-GUID aus Frame-Daten ermitteln
-            view_guid = framedaten_db.get_static_value("ROOT", "VIEW_GUID")
-            if not view_guid:
-                logger.error(f"❌ Keine view_guid in Frame-Daten gefunden für Frame: {frame_guid}")
-                self.show_text(f"❌ Fehler: Keine View-GUID für Frame {frame_guid} gefunden")
-                return
-
-            logger.info(f"📋 View-GUID ermittelt: {view_guid}")
-            
-            # 🔧 TITEL-ERSTELLUNG aus Frame-Daten oder Parameter
-            view_title = title
-            if not view_title:
-                # Versuche Titel aus Frame-Daten zu holen
-                try:
-                    view_header = framedaten_db.get_static_value("ROOT", "VIEW_HEADER")
-                    if view_header:
-                        view_title = view_header
-                    else:
-                        view_title = f"Personalstamm Verwaltung"
-                        logger.info(f"📝 Standard-Titel verwendet: {view_title}")
-                except Exception as title_error:
-                    logger.warning(f"⚠️ Fehler beim Titel-Laden: {title_error}")
-                    view_title = f"View: {view_guid}"
-
-            # call_daten für neuen Dialog vorbereiten - ALLE ERFORDERLICHEN Daten
-            call_daten = {
-                "view_guid": view_guid,
-                "frame_guid": frame_guid,  # Für View-Neustart bei Reset!
-                "title": "Persönliche Daten",  # Immer einen Titel setzen!
-                "first_call": True,  # Initialer Aufruf
-            }
-            
-            logger.info(f"📋 Call-Daten vorbereitet: view_guid={view_guid}, user_guid={gcs._user_guid}, title='{view_title}'")
-
-            # Vereinfachte Architektur ohne set_menu_command - direkte View-Dialog Erstellung
-            try:
-                from pdvm_view_dialog import PdvmViewDialog
-                
-                view_dialog = PdvmViewDialog(call_daten, parent=self)
-                
-                # Widget für Arbeitsbereich holen und integrieren
-                view_widget = view_dialog.get_display_widget()
-                
-                # Altes Content löschen und neues Widget hinzufügen
-                self.clear_content_layout()
-                self.content_layout.addWidget(view_widget)
-                
-                # ViewDialog für Stichtag-Refresh speichern (nicht nur das Display-Widget!)
-                self.current_view_widget = view_dialog  # Das Dialog hat die reload() Methode
-                self.current_display_widget = view_widget  # Für spätere Verwendung
-                
-                logger.info(f"✅ Moderne View-Dialog gestartet: {view_guid} mit Titel '{view_title}'")
-                
-            except ImportError as import_error:
-                logger.error(f"❌ PdvmViewDialog nicht verfügbar: {import_error}")
-                self.show_text(f"🔧 View-Dialog wird geladen...\n\nView-GUID: {view_guid}\nTitel: {view_title}\n\n(PdvmViewDialog nicht verfügbar)")
-            
-        except Exception as e:
-            logger.error(f"❌ Fehler beim Starten der modernen View: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            # Benutzerfreundliche Fehlermeldung anzeigen
-            self.show_text(f"❌ Fehler beim Laden der View:\n\n{str(e)}")
-
     def test_pdvm_view(self, frame_guid, title=None):
         """
         🧪 TEST-METHODE für SAUBERE ARCHITEKTUR-MIGRATION
@@ -988,6 +903,83 @@ class MainAppComplete(QMainWindow):
             
             self.show_text([
                 "❌ TEST FEHLER beim View-Laden",
+                "",
+                f"Frame-GUID: {frame_guid}",
+                f"Fehler: {str(e)}",
+                "",
+                "Siehe main.log für Details"
+            ], small=True)
+
+    def start_dialog(self, frame_guid):
+        """
+        🎯 GENERELLER DIALOG - Herzstück für alle Datenänderungen
+        
+        Startet den universellen Dialog mit:
+        - Tab 1: View (Datensatz-Übersicht)
+        - Tab 2+: Edit-Bereiche (Inputcontrols, Menü-Editor, etc.)
+        
+        Der Dialog lädt die Konfiguration aus den Framedaten und zeigt
+        die View an. Bei Auswahl eines Datensatzes werden die Edit-Bereiche
+        mit den Daten befüllt.
+        
+        Args:
+            frame_guid: GUID der Frame-Konfiguration
+            
+        Aufruf aus Menü:
+            main_app.start_dialog("frame-guid-hier")
+            
+        Features:
+        - ✅ Framedaten-basierte Konfiguration
+        - ✅ View-Integration (Tab 1)
+        - ✅ Datensatz-Auswahl → Edit-Bereiche
+        - ✅ Stichtagsgenau
+        - ✅ GCS-Integration
+        """
+        logger.info("🎯 === GENERELLER DIALOG - START ===")
+        logger.info(f"📋 Frame-GUID: {frame_guid}")
+        
+        if not frame_guid:
+            logger.error("❌ Keine frame_guid übergeben!")
+            self.show_text([
+                "❌ DIALOG FEHLER: Keine Frame-GUID",
+                "",
+                "Bitte frame_guid als Parameter übergeben:",
+                "start_dialog('frame-guid-hier')"
+            ], small=True)
+            return
+
+        try:
+            logger.info("🔧 Initialisiere Generellen Dialog...")
+            
+            # 🔒 LAZY IMPORT: Dialog erst bei Bedarf laden
+            from pdvm_genereller_dialog import PdvmGenerellerDialog
+            
+            # Inhalt löschen
+            self.clear_content_layout()
+            
+            # Dialog erstellen mit frame_guid und Parent (Arbeitsbereich)
+            dialog = PdvmGenerellerDialog(
+                frame_guid=frame_guid,
+                parent=self.content_frame
+            )
+            
+            # Dialog in Arbeitsbereich anzeigen
+            self.content_layout.addWidget(dialog)
+            
+            # Dialog-Instanz speichern für spätere Operationen
+            self.current_dialog = dialog
+            
+            logger.info(f"✅ GENERELLER DIALOG gestartet")
+            logger.info(f"📊 Frame-GUID: {frame_guid}")
+            logger.info(f"🏗️ Dialog-Instanz: {type(dialog).__name__}")
+            
+        except Exception as e:
+            logger.error(f"❌ DIALOG FEHLER: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            self.show_text([
+                "❌ FEHLER beim Dialog-Laden",
                 "",
                 f"Frame-GUID: {frame_guid}",
                 f"Fehler: {str(e)}",
