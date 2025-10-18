@@ -1310,9 +1310,13 @@ class PdvmViewUI(QWidget):
             from pdvm_pipeline import get_pipeline
             pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
             
+            # ✅ WICHTIG: matrix_sort verwenden, NICHT matrix_project!
+            # matrix_project enthält nur sichtbare Felder (SHOW)
+            # matrix_sort enthält ALLE Felder inkl. uid_original!
+            
             # Finde die entsprechende Zeile in der Matrix (ohne Gruppen-Header)
             data_row_index = 0
-            for matrix_row in pipeline.matrix_project:
+            for matrix_row in pipeline.matrix_sort:
                 row_type = matrix_row.get('row_type')
                 
                 # Überspringe Gruppen-Header
@@ -1321,7 +1325,7 @@ class PdvmViewUI(QWidget):
                 
                 # Ist das die gesuchte Zeile?
                 if data_row_index == row:
-                    # Signal mit row_data emittieren
+                    # Signal mit row_data emittieren (enthält ALLE Felder!)
                     logger.info(f"🖱️ Doppelklick auf Zeile {row} → Signal emittiert")
                     self.row_double_clicked.emit(matrix_row)
                     return
