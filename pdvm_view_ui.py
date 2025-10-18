@@ -1062,6 +1062,9 @@ class PdvmViewUI(QWidget):
         # UI komplett neu rendern (einfachster Weg)
         self.controller.refresh_ui_from_pipeline()
         
+        # 🎯 WICHTIG: Nach Rendering müssen Zeilen basierend auf collapsed-Status ausgeblendet werden
+        self._apply_collapsed_state_to_ui()
+        
         logger.info("✅ Alle Gruppen zugeklappt")
     
     def _expand_all_groups(self):
@@ -1091,7 +1094,84 @@ class PdvmViewUI(QWidget):
         # UI komplett neu rendern (einfachster Weg)
         self.controller.refresh_ui_from_pipeline()
         
+        # 🎯 WICHTIG: Nach Rendering müssen Zeilen basierend auf collapsed-Status eingeblendet werden
+        self._apply_collapsed_state_to_ui()
+        
         logger.info("✅ Alle Gruppen aufgeklappt")
+    
+    def _apply_collapsed_state_to_ui(self):
+        """
+        Wendet collapsed-Status aus Matrix auf UI-Zeilen an
+        
+        Diese Methode wird NACH refresh_ui_from_pipeline() aufgerufen,
+        um die Zeilen-Sichtbarkeit basierend auf dem collapsed-Status zu setzen.
+        
+        Workflow:
+        1. Collapsed-Status Map aus Matrix erstellen {group_id: collapsed}
+        2. Durch alle Tabellen-Zeilen iterieren
+        3. Bei GROUP_HEADER: Aktuelle Gruppe identifizieren
+        4. Bei normalen Zeilen: setRowHidden() basierend auf collapsed-Status
+        5. Bei SUM_ROW oder neuem Header: Gruppen-Kontext zurücksetzen
+        """
+        logger.info("🔧 === APPLY COLLAPSED STATE TO UI ===")
+        
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        
+        # SCHRITT 1: Collapsed-Status Map erstellen
+        collapsed_groups = {}
+        for row_data in pipeline.matrix_project:
+            row_type = row_data.get('row_type')
+            if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                group_id = row_type.get('group_id')
+                collapsed = row_type.get('collapsed', False)
+                collapsed_groups[group_id] = collapsed
+        
+        logger.info(f"  📊 Collapsed-Status Map: {len(collapsed_groups)} Gruppen")
+        for gid, collapsed in collapsed_groups.items():
+            status = "zugeklappt" if collapsed else "aufgeklappt"
+            logger.info(f"    • {gid}: {status}")
+        
+        # SCHRITT 2: Durch Tabelle iterieren und Zeilen-Sichtbarkeit setzen
+        total_rows = self.table_widget.rowCount()
+        current_group_id = None
+        current_group_collapsed = False
+        hidden_count = 0
+        visible_count = 0
+        
+        for row_idx in range(total_rows):
+            item = self.table_widget.item(row_idx, 0)
+            if not item:
+                continue
+            
+            item_type = item.data(Qt.UserRole + 1)
+            
+            # SCHRITT 3: Neuer Gruppen-Header?
+            if item_type == 'GROUP_HEADER':
+                current_group_id = item.data(Qt.UserRole)
+                current_group_collapsed = collapsed_groups.get(current_group_id, False)
+                logger.info(f"  📂 Row {row_idx}: Header für Gruppe '{current_group_id}' "
+                           f"({'collapsed' if current_group_collapsed else 'expanded'})")
+                continue
+            
+            # SCHRITT 4: Summen-Zeile erreicht?
+            if item_type == 'SUM_ROW':
+                logger.info(f"  📊 Row {row_idx}: Summen-Zeile - Gruppen-Kontext zurückgesetzt")
+                current_group_id = None
+                current_group_collapsed = False
+                continue
+            
+            # SCHRITT 5: Normale Zeile - Ausblenden wenn in collapsed Gruppe
+            if current_group_id and current_group_collapsed:
+                self.table_widget.setRowHidden(row_idx, True)
+                hidden_count += 1
+            else:
+                self.table_widget.setRowHidden(row_idx, False)
+                visible_count += 1
+        
+        logger.info(f"  ✅ Sichtbarkeit aktualisiert: {hidden_count} ausgeblendet, "
+                   f"{visible_count} sichtbar")
+        logger.info("✅ Collapsed-Status auf UI angewendet")
     
     def _toggle_expert_mode(self, checked):
         """Expert Mode ein/ausschalten - PERSISTENT in GCS - PIPELINE-PROJEKTION NEU DURCHLAUFEN"""
