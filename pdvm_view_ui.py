@@ -332,6 +332,9 @@ class PdvmViewUI(QWidget):
         # Sortierung durch Klick
         table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
         
+        # 🔗 Gruppen-Collapse/Expand durch Klick auf Gruppen-Header
+        table.cellClicked.connect(self._on_cell_clicked)
+        
         # Vertikaler Header
         table.verticalHeader().setVisible(True)
         table.verticalHeader().setDefaultSectionSize(25)
@@ -1062,6 +1065,136 @@ class PdvmViewUI(QWidget):
         else:
             logger.warning(f"❌ Spalten-Index {logical_index} außerhalb von visible_columns ({len(self.visible_columns)} Spalten)")
             logger.warning(f"📋 Visible columns: {[c.get('key', '?') for c in self.visible_columns]}")
+    
+    def _on_cell_clicked(self, row, column):
+        """
+        Cell-Klick Handler → Prüft ob Gruppen-Header geklickt wurde
+        
+        Args:
+            row: Zeilen-Index
+            column: Spalten-Index
+        """
+        # Item holen
+        item = self.table_widget.item(row, column)
+        if not item:
+            return
+        
+        # Prüfen ob es ein Gruppen-Header ist
+        item_type = item.data(Qt.UserRole + 1)
+        if item_type != 'GROUP_HEADER':
+            return  # Normale Zeile, nichts tun
+        
+        # Group-ID holen
+        group_id = item.data(Qt.UserRole)
+        if not group_id:
+            logger.warning("⚠️ Gruppen-Header ohne group_id geklickt")
+            return
+        
+        logger.info(f"📂 Gruppen-Header geklickt: {group_id} (Zeile {row})")
+        
+        # Collapse/Expand Toggle
+        self._toggle_group_collapse(group_id, row)
+    
+    def _toggle_group_collapse(self, group_id: str, header_row: int):
+        """
+        Klappt eine Gruppe ein/aus
+        
+        Args:
+            group_id: Eindeutige Gruppen-ID
+            header_row: Zeilen-Index des Gruppen-Headers
+        """
+        logger.info(f"🔄 Toggle Collapse für Gruppe: {group_id}")
+        
+        # Aktuellen collapsed-Status aus matrix_project holen
+        if not hasattr(self.controller, 'matrix_manager'):
+            logger.error("❌ Matrix Manager nicht verfügbar!")
+            return
+        
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        
+        # Finde die Header-Zeile in der Matrix
+        collapsed_state = {}  # {group_id: collapsed}
+        header_found = False
+        
+        for row_data in pipeline.matrix_project:
+            row_type = row_data.get('row_type')
+            if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                current_id = row_type.get('group_id')
+                if current_id == group_id:
+                    # Toggle den Status
+                    current_collapsed = row_type.get('collapsed', False)
+                    new_collapsed = not current_collapsed
+                    row_type['collapsed'] = new_collapsed
+                    header_found = True
+                    logger.info(f"  ▶️ Status geändert: {'zugeklappt' if new_collapsed else 'aufgeklappt'}")
+                    break
+        
+        if not header_found:
+            logger.warning(f"⚠️ Gruppen-Header {group_id} nicht in Matrix gefunden!")
+            return
+        
+        # UI neu rendern (nur die betroffenen Zeilen)
+        self._update_group_visibility(group_id, header_row)
+    
+    def _update_group_visibility(self, group_id: str, header_row: int):
+        """
+        Aktualisiert die Sichtbarkeit der Gruppen-Mitglieder
+        
+        Args:
+            group_id: Gruppen-ID
+            header_row: Zeilen-Index des Headers
+        """
+        from pdvm_pipeline import get_pipeline
+        pipeline = get_pipeline(self.controller.view_guid, self.controller.matrix_manager)
+        
+        # Collapsed-Status holen
+        is_collapsed = False
+        for row_data in pipeline.matrix_project:
+            row_type = row_data.get('row_type')
+            if isinstance(row_type, dict) and row_type.get('type') == 'group_header':
+                if row_type.get('group_id') == group_id:
+                    is_collapsed = row_type.get('collapsed', False)
+                    break
+        
+        logger.info(f"  🔄 Update Visibility: {group_id} → {'collapsed' if is_collapsed else 'expanded'}")
+        
+        # Icon im Header aktualisieren
+        header_item = self.table_widget.item(header_row, 0)
+        if header_item:
+            current_text = header_item.text()
+            # Icon ersetzen (▼ → ▶ oder umgekehrt)
+            if is_collapsed:
+                new_text = current_text.replace("▼", "▶")
+            else:
+                new_text = current_text.replace("▶", "▼")
+            header_item.setText(new_text)
+        
+        # Zeilen ein/ausblenden
+        # Finde alle Zeilen die zur Gruppe gehören (bis zum nächsten Header oder Ende)
+        total_rows = self.table_widget.rowCount()
+        current_row = header_row + 1
+        
+        while current_row < total_rows:
+            item = self.table_widget.item(current_row, 0)
+            if not item:
+                break
+            
+            # Prüfen ob nächster Header erreicht
+            item_type = item.data(Qt.UserRole + 1)
+            if item_type == 'GROUP_HEADER':
+                break  # Nächste Gruppe beginnt
+            
+            # Zeile ein/ausblenden
+            if is_collapsed:
+                self.table_widget.setRowHidden(current_row, True)
+            else:
+                self.table_widget.setRowHidden(current_row, False)
+            
+            current_row += 1
+        
+        hidden_count = current_row - header_row - 1
+        logger.info(f"  ✅ {hidden_count} Zeilen {'ausgeblendet' if is_collapsed else 'eingeblendet'}")
     
     def _header_context_menu(self, pos):
         """Rechtsklick auf Header → Spalten-Menü"""
