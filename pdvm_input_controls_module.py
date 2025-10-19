@@ -20,13 +20,14 @@ Version: 1.0.0 (Neu - Modularer Ansatz)
 import logging
 from typing import Optional, Dict, Any, List
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QLineEdit
 )
 from PyQt5.QtCore import Qt
 
 from global_gcs import gcs  # ← Globaler GCS-Import!
 from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_datetime import Pdvm_DateTime
+from pdvm_date_time_picker import PdvmDateTimePicker
 
 logger = logging.getLogger(__name__)
 
@@ -122,21 +123,64 @@ class PdvmInputControl(QWidget):
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(label)
         
-        # === WERT ===
-        wert_text = str(self.wert) if self.wert is not None else ""
-        wert_label = QLabel(wert_text)
-        wert_label.setStyleSheet("""
-            QLabel {
-                color: #34495e;
-                padding: 5px;
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-                min-width: 200px;
-            }
-        """)
-        wert_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(wert_label)
+        # === WERT (abhängig vom Type) ===
+        field_type = self.field_config.get('type', 'text')
+        
+        if field_type == 'text':
+            # Type: text → QLineEdit (editierbar)
+            wert_text = str(self.wert) if self.wert is not None else ""
+            wert_edit = QLineEdit(wert_text)
+            wert_edit.setStyleSheet("""
+                QLineEdit {
+                    color: #34495e;
+                    padding: 5px;
+                    background-color: white;
+                    border: 1px solid #3498db;
+                    border-radius: 3px;
+                    min-width: 200px;
+                }
+            """)
+            wert_edit.textChanged.connect(self._on_value_changed)
+            layout.addWidget(wert_edit)
+            self.value_widget = wert_edit
+            
+        elif field_type == 'date':
+            # Type: date → PdvmDateTimePicker
+            dt_instance = Pdvm_DateTime(gcs.field_value('country'))
+            if self.wert:
+                try:
+                    dt_instance.PdvmDateTime = float(self.wert)
+                except:
+                    pass
+            
+            # display_val aus Config holen (z.B. "only_date", "all")
+            display_val = self.field_config.get('display_val', 'only_date')
+            
+            date_picker = PdvmDateTimePicker(
+                parent=self,
+                pdvm_datetime=dt_instance,
+                display=display_val
+            )
+            layout.addWidget(date_picker)
+            self.value_widget = date_picker
+            
+        else:
+            # Andere Types: Read-Only Label (vorerst)
+            wert_text = str(self.wert) if self.wert is not None else ""
+            wert_label = QLabel(wert_text)
+            wert_label.setStyleSheet("""
+                QLabel {
+                    color: #34495e;
+                    padding: 5px;
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 3px;
+                    min-width: 200px;
+                }
+            """)
+            wert_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            layout.addWidget(wert_label)
+            self.value_widget = wert_label
         
         # === ABDATUM ===
         if self.abdatum:
@@ -160,6 +204,11 @@ class PdvmInputControl(QWidget):
             layout.addWidget(abdatum_label)
         
         layout.addStretch()
+    
+    def _on_value_changed(self, new_value):
+        """Wird aufgerufen wenn Wert geändert wird"""
+        logger.debug(f"🔹 Wert geändert: {self.field_key} → {new_value}")
+        # Später: Validierung + Markierung als "dirty"
 
 
 class PdvmInputControlsModule:
@@ -368,6 +417,9 @@ class PdvmInputControlsModule:
             field_key = control_meta['field_key']
             field_config = control_meta['field_config']
             
+            logger.info(f"  🔍 Processing Control: {field_key}")
+            logger.info(f"     source_path: {source_path}")
+            
             # Tabelle aus Field-Key extrahieren
             parts = field_key.split('_')
             if len(parts) < 3:
@@ -376,6 +428,8 @@ class PdvmInputControlsModule:
             
             table_name = parts[0]  # z.B. "FINANZWESEN"
             gruppe = parts[1].upper()  # z.B. "FINANZWESEN"
+            
+            logger.info(f"     table: {table_name}, gruppe: {gruppe}")
             
             if source_path == 'root':
                 # ROOT-Instanz verwenden (bereits vorhanden)
@@ -551,7 +605,7 @@ class PdvmInputControlsModule:
         """
         Gibt Widget mit Input-Controls zurück
         
-        PHASE 2: Input-Controls rendern
+        PHASE 3: Input-Controls rendern
         
         Returns:
             QWidget mit vollständigem Edit-Bereich
@@ -586,6 +640,68 @@ class PdvmInputControlsModule:
             separator.setFrameShadow(QFrame.Sunken)
             separator.setStyleSheet("background-color: #bdc3c7;")
             main_layout.addWidget(separator)
+            
+            # === NEUES ABDATUM (Kopfzeile) ===
+            abdatum_container = QWidget()
+            abdatum_layout = QHBoxLayout(abdatum_container)
+            abdatum_layout.setContentsMargins(10, 10, 10, 10)
+            abdatum_layout.setSpacing(10)
+            
+            abdatum_label = QLabel("🕒 Neues Abdatum:")
+            abdatum_label.setStyleSheet("""
+                QLabel {
+                    font-weight: bold;
+                    color: #2c3e50;
+                    font-size: 12px;
+                }
+            """)
+            abdatum_layout.addWidget(abdatum_label)
+            
+            # Abdatum aus GCS Systemsteuerung laden oder aktuellen Timestamp
+            neues_abdatum_value = None
+            try:
+                neues_abdatum_value, _ = gcs._db.get_value('EDIT', 'NEUES_ABDATUM')
+            except:
+                pass
+            
+            # Pdvm_DateTime Instanz für DateTimePicker
+            self.neues_abdatum_dt = Pdvm_DateTime(gcs.field_value('country'))
+            
+            if neues_abdatum_value:
+                # Gespeicherter Wert aus Systemsteuerung
+                try:
+                    self.neues_abdatum_dt.PdvmDateTime = float(neues_abdatum_value)
+                    logger.info(f"✅ Neues Abdatum aus GCS geladen: {self.neues_abdatum_dt.FormTimeStamp}")
+                except Exception as e:
+                    logger.error(f"❌ Fehler beim Laden des Abdatums: {e}")
+                    # Fallback: Aktueller Timestamp
+                    from pdvm_datetime import PdvmDateTimeUtils
+                    self.neues_abdatum_dt.PdvmDateTime = PdvmDateTimeUtils.PdvmDateTimeNow
+                    logger.info(f"✅ Fallback auf aktuellen Timestamp: {self.neues_abdatum_dt.FormTimeStamp}")
+            else:
+                # Kein gespeicherter Wert → Aktueller Timestamp
+                from pdvm_datetime import PdvmDateTimeUtils
+                self.neues_abdatum_dt.PdvmDateTime = PdvmDateTimeUtils.PdvmDateTimeNow
+                logger.info(f"✅ Neues Abdatum initialisiert mit aktuellem Timestamp: {self.neues_abdatum_dt.FormTimeStamp}")
+            
+            # DateTimePicker mit "Jetzt" Button
+            self.abdatum_picker = PdvmDateTimePicker(
+                parent=abdatum_container,
+                pdvm_datetime=self.neues_abdatum_dt,
+                display="all",
+                display_time_short=False
+            )
+            abdatum_layout.addWidget(self.abdatum_picker)
+            abdatum_layout.addStretch()
+            
+            main_layout.addWidget(abdatum_container)
+            
+            # Trennlinie nach Abdatum
+            separator2 = QFrame()
+            separator2.setFrameShape(QFrame.HLine)
+            separator2.setFrameShadow(QFrame.Sunken)
+            separator2.setStyleSheet("background-color: #bdc3c7;")
+            main_layout.addWidget(separator2)
             
             # === GUID ANZEIGE ===
             guid_container = QWidget()
@@ -691,3 +807,48 @@ class PdvmInputControlsModule:
             error_label.setStyleSheet("color: red; padding: 20px;")
             error_layout.addWidget(error_label)
             return error_widget
+    
+    def save_neues_abdatum(self):
+        """
+        Speichert das "Neues Abdatum" in GCS Systemsteuerung
+        
+        Sollte aufgerufen werden:
+        - Beim Schließen des Dialogs
+        - Vor dem Speichern von Änderungen
+        """
+        if not hasattr(self, 'abdatum_picker'):
+            return
+        
+        try:
+            # Abdatum aus DateTimePicker holen
+            self.abdatum_picker.save()  # Speichert von initial → pdvm_datetime
+            abdatum_value = self.neues_abdatum_dt.PdvmDateTime
+            
+            # In GCS Systemsteuerung speichern
+            gcs._db.set_value('EDIT', 'NEUES_ABDATUM', abdatum_value)
+            gcs._db.save_all_values()
+            
+            logger.info(f"✅ Neues Abdatum gespeichert: {self.neues_abdatum_dt.FormTimeStamp}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern des Abdatums: {e}")
+    
+    def get_neues_abdatum(self) -> float:
+        """
+        Gibt das aktuelle "Neues Abdatum" als Float zurück
+        
+        Returns:
+            Pdvm_DateTime als Float (z.B. 20250605.123456)
+        """
+        if not hasattr(self, 'abdatum_picker'):
+            # Fallback: Aktueller Timestamp
+            from pdvm_datetime import PdvmDateTimeUtils
+            return PdvmDateTimeUtils.PdvmDateTimeNow
+        
+        try:
+            self.abdatum_picker.save()
+            return self.neues_abdatum_dt.PdvmDateTime
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Abrufen des Abdatums: {e}")
+            from pdvm_datetime import PdvmDateTimeUtils
+            return PdvmDateTimeUtils.PdvmDateTimeNow

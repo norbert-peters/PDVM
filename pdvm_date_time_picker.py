@@ -1,5 +1,5 @@
 # pdvm_date_time_picker.py
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QDateEdit, QTimeEdit, QAbstractSpinBox
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QDateEdit, QTimeEdit, QAbstractSpinBox, QPushButton
 from PyQt5.QtCore import QDate, QTime
 from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 
@@ -50,10 +50,10 @@ class PdvmDateTimePicker(QWidget):
                 self.initial.PdvmDateTime = float(default_date)
                 logger.debug(f"🔹 Sentinel erkannt, verwende default_date {self.initial.FormTimeStamp} zur Initialisierung")
             else:
-                # kein default_date → PdvmDateTimeNow()
-                now_val = PdvmDateTimeUtils.PdvmDateTimeNow()
+                # kein default_date → PdvmDateTimeNow
+                now_val = PdvmDateTimeUtils.PdvmDateTimeNow
                 self.initial.PdvmDateTime = now_val
-                logger.debug(f"🔹 Sentinel erkannt, verwende PdvmDateTimeNow() = {self.initial.FormTimeStamp} zur Initialisierung")
+                logger.debug(f"🔹 Sentinel erkannt, verwende PdvmDateTimeNow = {self.initial.FormTimeStamp} zur Initialisierung")
         else:
             # kein Sentinel → sofort aus dem existierenden Wert befüllen
             self.initial.PdvmDateTime = raw_val
@@ -88,6 +88,44 @@ class PdvmDateTimePicker(QWidget):
             time_edit.timeChanged.connect(self._on_time_changed)
             lo.addWidget(time_edit)
             self._time_edit = time_edit
+        
+        # ─── 4) "JETZT" Button hinzufügen ─────────────────────────────────────
+        jetzt_button = QPushButton("Jetzt", self)
+        jetzt_button.setToolTip("Setzt aktuellen Timestamp")
+        jetzt_button.setMaximumWidth(60)
+        jetzt_button.clicked.connect(self._set_current_timestamp)
+        lo.addWidget(jetzt_button)
+        self._jetzt_button = jetzt_button
+        
+        # ─── 5) "00:00" Button hinzufügen (nur bei Zeitanzeige) ──────────────
+        if self.display in ("all", "only_time"):
+            midnight_button = QPushButton("00:00", self)
+            midnight_button.setToolTip("Setzt Uhrzeit auf 00:00:00")
+            midnight_button.setMaximumWidth(60)
+            midnight_button.clicked.connect(self._set_midnight)
+            lo.addWidget(midnight_button)
+            self._midnight_button = midnight_button
+    
+    def _set_current_timestamp(self):
+        """Setzt aktuellen Timestamp in den DateTimePicker"""
+        now_val = PdvmDateTimeUtils.PdvmDateTimeNow
+        self.initial.PdvmDateTime = now_val
+        self.update_display()
+        logger.debug(f"🔹 Jetzt-Button geklickt → {self.initial.FormTimeStamp}")
+    
+    def _set_midnight(self):
+        """Setzt Uhrzeit auf 00:00:00 (Mitternacht)"""
+        # Aktuelles Datum behalten, nur Zeit auf 00:00:00 setzen
+        current_date = (self.initial.Year, self.initial.Month, self.initial.Day)
+        
+        # Datum setzen (behält das aktuelle Datum)
+        self.initial.PdvmDateT = current_date
+        
+        # Zeit auf 00:00:00 setzen
+        self.initial.PdvmTimeT = (0, 0, 0, 0)  # Stunde, Minute, Sekunde, Mikrosekunde
+        
+        self.update_display()
+        logger.debug(f"🔹 00:00-Button geklickt → {self.initial.FormTimeStamp}")
 
     def refresh_from_instance(self):
         """
@@ -207,10 +245,10 @@ class PdvmDateTimePicker(QWidget):
                 if isinstance(self.default_date, (int, float)):
                     self.initial.PdvmDateTime = float(self.default_date)
                 else:
-                    now_val = PdvmDateTimeUtils.PdvmDateTimeNow()
+                    now_val = PdvmDateTimeUtils.PdvmDateTimeNow
                     self.initial.PdvmDateTime = now_val
             else:
-                now_val = PdvmDateTimeUtils.PdvmDateTimeNow()
+                now_val = PdvmDateTimeUtils.PdvmDateTimeNow
                 self.initial.PdvmDateTime = now_val
         else:
             # Kein Sentinel → aus der neuen Instanz übernehmen
