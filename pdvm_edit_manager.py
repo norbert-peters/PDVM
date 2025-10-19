@@ -152,8 +152,13 @@ class PdvmEditManager:
             
             logger.info(f"  📏 Widths: Label={self.width_label}, Control={self.width_control}")
             
-            # Metadaten aus Gruppe "Metadaten" laden (NEUE METHODE!)
-            self.metadaten = self.framedaten_db.get_gruppe('Metadaten')
+            # Metadaten aus Gruppe "METADATEN" laden (GROSSBUCHSTABEN!)
+            self.metadaten = self.framedaten_db.get_gruppe('METADATEN')
+            
+            # Fallback: Versuche auch lowercase
+            if not self.metadaten:
+                logger.warning("  ⚠️ Gruppe 'METADATEN' nicht gefunden, versuche 'Metadaten'...")
+                self.metadaten = self.framedaten_db.get_gruppe('Metadaten')
             
             if not self.metadaten:
                 logger.warning("⚠️ Keine Metadaten in Framedaten gefunden!")
@@ -187,7 +192,7 @@ class PdvmEditManager:
                 root_table=self.root_table,
                 root_guid=guid,
                 stichtag=self.gcs.st_inst.PdvmDateTime,
-                metadaten=self.metadaten
+                framedaten=self.metadaten  # ← framedaten, nicht metadaten!
             )
             logger.info(f"  ✅ InstanceManager erstellt (Stichtag: {self.gcs.stichtag})")
             
