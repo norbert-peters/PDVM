@@ -366,6 +366,7 @@ class PdvmInputControlsModule:
         for control_meta in self.controls_meta:
             source_path = control_meta['source_path']
             field_key = control_meta['field_key']
+            field_config = control_meta['field_config']
             
             # Tabelle aus Field-Key extrahieren
             parts = field_key.split('_')
@@ -391,10 +392,18 @@ class PdvmInputControlsModule:
             # Gruppe aus source_path extrahieren
             source_gruppe = source_path[5:]  # Nach "root_"
             
-            # GUID aus ROOT-Instanz holen
-            # Feldschlüssel-Format: {GRUPPE}-{TABELLE} (uppercase!)
-            feld_schluessel = f"{gruppe}-{table_name}".upper()
+            # FELDSCHLÜSSEL aus field_config holen (falls vorhanden)
+            # Fallback: {GRUPPE}-{TABELLE} aus field_key
+            feld_schluessel = field_config.get('feld_schluessel')
             
+            if not feld_schluessel:
+                # Fallback: Aus field_key berechnen
+                feld_schluessel = f"{gruppe}-{table_name}".upper()
+                logger.debug(f"  📝 Kein feld_schluessel in Config, verwende Fallback: {feld_schluessel}")
+            else:
+                logger.debug(f"  📝 feld_schluessel aus Config: {feld_schluessel}")
+            
+            # GUID aus ROOT-Instanz holen
             try:
                 root_instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
                 root_instance = self.db_instances.get(root_instance_key)
@@ -414,7 +423,39 @@ class PdvmInputControlsModule:
                 
                 if not guid:
                     logger.warning(f"  ⚠️ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
-                    continue
+                    
+                    # INTELLIGENTER FALLBACK: Suche nach ähnlichem Feldschlüssel
+                    logger.info(f"  🔍 Suche nach alternativen Feldschlüsseln in {source_gruppe}...")
+                    
+                    # Alle Felder in der source_gruppe holen
+                    gruppe_data = root_instance.get_gruppe(source_gruppe)
+                    
+                    if gruppe_data:
+                        # Suche nach Schlüsseln, die die Tabelle enthalten
+                        # z.B. "FINANZDATEN-FINANZDATEN" wenn wir "FINANZWESEN" suchen
+                        table_lower = table_name.lower()
+                        found_key = None
+                        
+                        for key in gruppe_data.keys():
+                            # Prüfe ob Key eine GUID enthält (UUID-Format)
+                            key_value, _ = root_instance.get_value(source_gruppe, key, stichtag)
+                            if key_value and isinstance(key_value, str) and '-' in key_value and len(key_value) == 36:
+                                # Könnte eine GUID sein
+                                logger.info(f"  💡 Gefunden: {key} = {key_value}")
+                                # Prüfe ob der Key zur Tabelle passt (ähnlicher Name)
+                                if table_lower in key.lower() or key.lower() in table_lower:
+                                    found_key = key
+                                    guid = key_value
+                                    logger.info(f"  ✅ Verwende alternativen Feldschlüssel: {found_key}")
+                                    break
+                        
+                        if not found_key:
+                            # Zeige alle verfügbaren Keys
+                            logger.warning(f"  ⚠️ Verfügbare Feldschlüssel in {source_gruppe}: {list(gruppe_data.keys())}")
+                            continue
+                    else:
+                        logger.warning(f"  ⚠️ Gruppe {source_gruppe} in ROOT nicht gefunden!")
+                        continue
                 
                 # Instance-Key: TABELLE_GUID
                 instance_key = f"{table_name.upper()}_{guid}"
@@ -456,6 +497,7 @@ class PdvmInputControlsModule:
         """
         field_key = control_meta['field_key']
         source_path = control_meta['source_path']
+        field_config = control_meta['field_config']
         
         # Tabelle aus Field-Key
         parts = field_key.split('_')
@@ -477,7 +519,12 @@ class PdvmInputControlsModule:
             return None
         
         source_gruppe = source_path[5:]
-        feld_schluessel = f"{gruppe}-{table_name}".upper()
+        
+        # FELDSCHLÜSSEL aus field_config holen (falls vorhanden)
+        feld_schluessel = field_config.get('feld_schluessel')
+        if not feld_schluessel:
+            # Fallback: Aus field_key berechnen
+            feld_schluessel = f"{gruppe}-{table_name}".upper()
         
         try:
             # GUID aus ROOT holen
