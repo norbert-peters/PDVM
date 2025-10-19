@@ -328,13 +328,29 @@ class PdvmGenerellerDialog(QWidget):
             # Tab 2: Edit-Bereich (Phase 1: nur GUID-Anzeige)
             self._create_edit_tab()
             
-            # Aktiven Tab wiederherstellen
-            active_tab, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
-            if active_tab is not None:
-                active_tab = int(active_tab)
-                if 0 <= active_tab < self.tab_widget.count():
-                    self.tab_widget.setCurrentIndex(active_tab)
-                    logger.info(f"  ✅ Aktiver Tab wiederhergestellt: {active_tab}")
+            # === FEATURE: Letzte GUID aus Systemsteuerung laden ===
+            # Wenn eine GUID für diese View gespeichert ist → direkt Edit öffnen
+            last_guid_key = f"{self.view_guid}_last_selected_guid"
+            last_guid, _ = self.gcs._db.get_value('DIALOG', last_guid_key)
+            
+            if last_guid:
+                logger.info(f"🔍 Letzte ausgewählte GUID gefunden: {last_guid}")
+                logger.info(f"  → Öffne direkt Edit-Tab für diese GUID")
+                
+                # GUID setzen und Edit-Bereich laden
+                self._on_datensatz_ausgewaehlt(last_guid)
+                
+                # Direkt zu Tab 2 (Edit) wechseln
+                self.tab_widget.setCurrentIndex(1)
+                logger.info("  ✅ Edit-Tab direkt geöffnet mit letzter GUID")
+            else:
+                # Kein Last-GUID → Aktiven Tab wiederherstellen (Standard)
+                active_tab, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
+                if active_tab is not None:
+                    active_tab = int(active_tab)
+                    if 0 <= active_tab < self.tab_widget.count():
+                        self.tab_widget.setCurrentIndex(active_tab)
+                        logger.info(f"  ✅ Aktiver Tab wiederhergestellt: {active_tab}")
             
             # Signal bei Tab-Wechsel
             self.tab_widget.currentChanged.connect(self._on_tab_changed)
@@ -533,6 +549,14 @@ class PdvmGenerellerDialog(QWidget):
             # GUID in Dialogdaten speichern
             self.dialogdaten_db.set_value('Tab02', 'selected_guid', selected_guid)
             self.dialogdaten_db.save_all_values()
+            
+            # === FEATURE: GUID in Systemsteuerung speichern ===
+            # Speichere die zuletzt ausgewählte GUID für diese View
+            # → Beim nächsten Öffnen des Dialogs wird diese GUID direkt geladen
+            last_guid_key = f"{self.view_guid}_last_selected_guid"
+            self.gcs._db.set_value('DIALOG', last_guid_key, selected_guid)
+            self.gcs._db.save_all_values()
+            logger.info(f"  💾 GUID in Systemsteuerung gespeichert: {last_guid_key} = {selected_guid}")
             
             # === SCHRITT 1: edit_type aus Framedaten laden ===
             logger.info("  🔧 Lade edit_type aus Framedaten...")
