@@ -92,7 +92,19 @@ class PdvmGenerellerDialog(QWidget):
         # UI-Komponenten
         self.tab_widget = None
         self.view_controller = None
+        # Current selected GUID (wird bei Datensatz-Auswahl gesetzt)
         self.current_selected_guid = None
+        
+        # MODUL-REGISTRY: edit_type → Modul-Klasse
+        # Einfache Erweiterbarkeit: Neues Modul einfach hier eintragen!
+        self.edit_modules = {
+            'input_controls': 'pdvm_input_controls_module.PdvmInputControlsModule',
+            # Weitere Module können hier hinzugefügt werden:
+            # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
+            # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
+        }
+        
+        logger.info(f"  📋 {len(self.edit_modules)} Edit-Module registriert")
         
         # Signal-Verbindung
         self.datensatz_ausgewaehlt.connect(self._on_datensatz_ausgewaehlt)
@@ -502,6 +514,12 @@ class PdvmGenerellerDialog(QWidget):
         """
         Handler für datensatz_ausgewaehlt Signal
         
+        MODULARER ANSATZ:
+        1. edit_type aus Framedaten lesen
+        2. Modul aus Registry holen
+        3. Modul initialisieren
+        4. Widget holen und anzeigen
+        
         Args:
             selected_guid: GUID des ausgewählten Datensatzes
         """
@@ -515,40 +533,69 @@ class PdvmGenerellerDialog(QWidget):
             self.dialogdaten_db.set_value('Tab02', 'selected_guid', selected_guid)
             self.dialogdaten_db.save_all_values()
             
-            # Edit-Manager initialisieren mit PdvmEditManager
-            logger.info("  🔧 Initialisiere PdvmEditManager...")
-            from pdvm_edit_manager import PdvmEditManager
+            # === SCHRITT 1: edit_type aus Framedaten laden ===
+            logger.info("  🔧 Lade edit_type aus Framedaten...")
+            edit_type, _ = self.framedaten_db.get_value('ROOT', 'edit_type')
             
-            self.edit_manager = PdvmEditManager(
-                frame_guid=self.frame_guid,
-                root_table=self.root_table,
-                framedaten_db=self.framedaten_db,  # ← PdvmCentralDatenbank übergeben
+            # Fallback: lowercase
+            if not edit_type:
+                logger.warning("    ⚠️ 'edit_type' nicht gefunden, versuche Fallback...")
+                edit_type, _ = self.framedaten_db.get_value('ROOT', 'EDIT_TYPE')
+            
+            # Default: input_controls
+            if not edit_type:
+                edit_type = 'input_controls'
+                logger.warning(f"    ⚠️ Kein edit_type gefunden, verwende Default: {edit_type}")
+            
+            logger.info(f"  � Edit-Type: {edit_type}")
+            
+            # === SCHRITT 2: Modul aus Registry holen ===
+            if edit_type not in self.edit_modules:
+                error_msg = (
+                    f"❌ Edit-Modul '{edit_type}' nicht gefunden!\n\n"
+                    f"Verfügbare Module:\n" +
+                    "\n".join(f"  - {key}" for key in self.edit_modules.keys())
+                )
+                logger.error(error_msg)
+                
+                # Fehler-Widget anzeigen
+                error_widget = QWidget()
+                error_layout = QVBoxLayout(error_widget)
+                error_label = QLabel(error_msg)
+                error_label.setStyleSheet("color: red; padding: 20px; font-family: monospace;")
+                error_layout.addWidget(error_label)
+                
+                self._replace_edit_widget(error_widget)
+                self.tab_widget.setCurrentIndex(1)
+                return
+            
+            module_path = self.edit_modules[edit_type]
+            logger.info(f"  📦 Modul gefunden: {module_path}")
+            
+            # === SCHRITT 3: Modul importieren und initialisieren ===
+            logger.info("  🔧 Importiere und initialisiere Modul...")
+            
+            # Dynamischer Import
+            module_name, class_name = module_path.rsplit('.', 1)
+            import importlib
+            module = importlib.import_module(module_name)
+            ModuleClass = getattr(module, class_name)
+            
+            # Modul initialisieren mit EINFACHER API
+            edit_module = ModuleClass(
+                framedaten_db=self.framedaten_db,
+                selected_guid=selected_guid,
                 gcs=self.gcs
             )
             
-            # Datensatz laden
-            logger.info("  📂 Lade Datensatz in EditManager...")
-            self.edit_manager.load_datensatz(selected_guid)
+            logger.info("  ✅ Modul erfolgreich initialisiert")
             
-            # Edit-Widget erstellen
+            # === SCHRITT 4: Widget holen und anzeigen ===
             logger.info("  🎨 Erstelle Edit-Widget...")
-            new_edit_widget = self.edit_manager.get_widget()
+            new_edit_widget = edit_module.get_widget()
             
-            # Altes Widget entfernen (Platzhalter oder vorheriges Edit-Widget)
-            if self.edit_placeholder:
-                self.edit_layout.removeWidget(self.edit_placeholder)
-                self.edit_placeholder.setParent(None)
-                self.edit_placeholder.deleteLater()
-                self.edit_placeholder = None
-            
-            if self.edit_widget:
-                self.edit_layout.removeWidget(self.edit_widget)
-                self.edit_widget.setParent(None)
-                self.edit_widget.deleteLater()
-            
-            # Neues Widget hinzufügen
-            self.edit_widget = new_edit_widget
-            self.edit_layout.addWidget(self.edit_widget)
+            # Widget ersetzen
+            self._replace_edit_widget(new_edit_widget)
             
             # Tab 2 öffnen
             self.tab_widget.setCurrentIndex(1)
@@ -559,6 +606,29 @@ class PdvmGenerellerDialog(QWidget):
             logger.error(f"❌ Fehler bei Datensatz-Auswahl-Verarbeitung: {e}")
             import traceback
             logger.error(traceback.format_exc())
+    
+    def _replace_edit_widget(self, new_widget):
+        """
+        Ersetzt das aktuelle Edit-Widget durch ein neues
+        
+        Args:
+            new_widget: Neues QWidget zum Anzeigen
+        """
+        # Altes Widget entfernen (Platzhalter oder vorheriges Edit-Widget)
+        if self.edit_placeholder:
+            self.edit_layout.removeWidget(self.edit_placeholder)
+            self.edit_placeholder.setParent(None)
+            self.edit_placeholder.deleteLater()
+            self.edit_placeholder = None
+        
+        if self.edit_widget:
+            self.edit_layout.removeWidget(self.edit_widget)
+            self.edit_widget.setParent(None)
+            self.edit_widget.deleteLater()
+        
+        # Neues Widget hinzufügen
+        self.edit_widget = new_widget
+        self.edit_layout.addWidget(self.edit_widget)
     
     def _on_tab_changed(self, index):
         """Handler für Tab-Wechsel"""
