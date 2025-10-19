@@ -4,10 +4,10 @@
 🎯 PDVM INPUT CONTROLS MODULE - Erstes Edit-Modul für GenerellerDialog
 
 MODULARER ANSATZ:
-- Einfache API: __init__(framedaten_db, selected_guid, gcs)
+- Einfache API: __init__(framedaten_db, selected_guid)
 - Eigenständiges Widget mit get_widget()
 - Linear und übersichtlich
-- Keine Abhängigkeiten von alter Architektur
+- GCS via globalen Import (nicht als Parameter!)
 
 VERANTWORTLICHKEITEN:
 - Header anzeigen
@@ -22,6 +22,8 @@ from typing import Optional
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
 from PyQt5.QtCore import Qt
 
+from global_gcs import gcs  # ← Globaler GCS-Import!
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,28 +32,28 @@ class PdvmInputControlsModule:
     Input-Controls Modul für GenerellerDialog
     
     EINFACHE API:
-    - __init__(framedaten_db, selected_guid, gcs)
+    - __init__(framedaten_db, selected_guid)
     - get_widget() → QWidget
+    - GCS via globalen Import
     
     PHASE 1: Header + GUID anzeigen
     PHASE 2: Input-Controls aufbauen (später)
     """
     
-    def __init__(self, framedaten_db, selected_guid: str, gcs):
+    def __init__(self, framedaten_db, selected_guid: str):
         """
         Initialisiert Input-Controls Modul
         
         Args:
             framedaten_db: PdvmCentralDatenbank Instanz für Framedaten
             selected_guid: GUID des ausgewählten Datensatzes
-            gcs: Globale Systemsteuerung
         """
         logger.info("🎯 === PDVM INPUT CONTROLS MODULE INITIALISIERUNG ===")
         logger.info(f"  📋 Selected GUID: {selected_guid}")
         
         self.framedaten_db = framedaten_db
         self.selected_guid = selected_guid
-        self.gcs = gcs
+        # gcs via globalen Import verfügbar!
         
         # Header-Text aus Framedaten laden
         self._load_header()

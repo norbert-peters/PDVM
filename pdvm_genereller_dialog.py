@@ -97,6 +97,7 @@ class PdvmGenerellerDialog(QWidget):
         
         # MODUL-REGISTRY: edit_type → Modul-Klasse
         # Einfache Erweiterbarkeit: Neues Modul einfach hier eintragen!
+        # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
             'input_controls': 'pdvm_input_controls_module.PdvmInputControlsModule',
             # Weitere Module können hier hinzugefügt werden:
@@ -581,11 +582,10 @@ class PdvmGenerellerDialog(QWidget):
             module = importlib.import_module(module_name)
             ModuleClass = getattr(module, class_name)
             
-            # Modul initialisieren mit EINFACHER API
+            # Modul initialisieren mit EINFACHER API (GCS via globalen Import!)
             edit_module = ModuleClass(
                 framedaten_db=self.framedaten_db,
-                selected_guid=selected_guid,
-                gcs=self.gcs
+                selected_guid=selected_guid
             )
             
             logger.info("  ✅ Modul erfolgreich initialisiert")
