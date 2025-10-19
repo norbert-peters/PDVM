@@ -392,16 +392,11 @@ class PdvmInputControlsModule:
             # Gruppe aus source_path extrahieren
             source_gruppe = source_path[5:]  # Nach "root_"
             
-            # FELDSCHLÜSSEL aus field_config holen (falls vorhanden)
-            # Fallback: {GRUPPE}-{TABELLE} aus field_key
-            feld_schluessel = field_config.get('feld_schluessel')
+            # FELDSCHLÜSSEL: {GRUPPE}-{TABELLE} (aus field_key berechnet)
+            # Beispiel: FINANZDATEN_FINANZDATEN_KONTOINHABER → FINANZDATEN-FINANZDATEN
+            feld_schluessel = f"{gruppe}-{table_name}".upper()
             
-            if not feld_schluessel:
-                # Fallback: Aus field_key berechnen
-                feld_schluessel = f"{gruppe}-{table_name}".upper()
-                logger.debug(f"  📝 Kein feld_schluessel in Config, verwende Fallback: {feld_schluessel}")
-            else:
-                logger.debug(f"  📝 feld_schluessel aus Config: {feld_schluessel}")
+            logger.debug(f"  � Suche GUID: {source_gruppe}.{feld_schluessel}")
             
             # GUID aus ROOT-Instanz holen
             try:
@@ -422,40 +417,9 @@ class PdvmInputControlsModule:
                     guid = result
                 
                 if not guid:
-                    logger.warning(f"  ⚠️ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
-                    
-                    # INTELLIGENTER FALLBACK: Suche nach ähnlichem Feldschlüssel
-                    logger.info(f"  🔍 Suche nach alternativen Feldschlüsseln in {source_gruppe}...")
-                    
-                    # Alle Felder in der source_gruppe holen
-                    gruppe_data = root_instance.get_gruppe(source_gruppe)
-                    
-                    if gruppe_data:
-                        # Suche nach Schlüsseln, die die Tabelle enthalten
-                        # z.B. "FINANZDATEN-FINANZDATEN" wenn wir "FINANZWESEN" suchen
-                        table_lower = table_name.lower()
-                        found_key = None
-                        
-                        for key in gruppe_data.keys():
-                            # Prüfe ob Key eine GUID enthält (UUID-Format)
-                            key_value, _ = root_instance.get_value(source_gruppe, key, stichtag)
-                            if key_value and isinstance(key_value, str) and '-' in key_value and len(key_value) == 36:
-                                # Könnte eine GUID sein
-                                logger.info(f"  💡 Gefunden: {key} = {key_value}")
-                                # Prüfe ob der Key zur Tabelle passt (ähnlicher Name)
-                                if table_lower in key.lower() or key.lower() in table_lower:
-                                    found_key = key
-                                    guid = key_value
-                                    logger.info(f"  ✅ Verwende alternativen Feldschlüssel: {found_key}")
-                                    break
-                        
-                        if not found_key:
-                            # Zeige alle verfügbaren Keys
-                            logger.warning(f"  ⚠️ Verfügbare Feldschlüssel in {source_gruppe}: {list(gruppe_data.keys())}")
-                            continue
-                    else:
-                        logger.warning(f"  ⚠️ Gruppe {source_gruppe} in ROOT nicht gefunden!")
-                        continue
+                    logger.error(f"  ❌ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
+                    logger.error(f"     → Prüfe ob Feld in ROOT-Tabelle existiert!")
+                    continue
                 
                 # Instance-Key: TABELLE_GUID
                 instance_key = f"{table_name.upper()}_{guid}"
@@ -520,11 +484,8 @@ class PdvmInputControlsModule:
         
         source_gruppe = source_path[5:]
         
-        # FELDSCHLÜSSEL aus field_config holen (falls vorhanden)
-        feld_schluessel = field_config.get('feld_schluessel')
-        if not feld_schluessel:
-            # Fallback: Aus field_key berechnen
-            feld_schluessel = f"{gruppe}-{table_name}".upper()
+        # FELDSCHLÜSSEL: {GRUPPE}-{TABELLE} (aus field_key berechnet)
+        feld_schluessel = f"{gruppe}-{table_name}".upper()
         
         try:
             # GUID aus ROOT holen
@@ -532,6 +493,7 @@ class PdvmInputControlsModule:
             root_instance = self.db_instances.get(root_instance_key)
             
             if not root_instance:
+                logger.error(f"❌ ROOT-Instanz nicht gefunden: {root_instance_key}")
                 return None
             
             stichtag = gcs.st_inst.PdvmDateTime
@@ -543,6 +505,7 @@ class PdvmInputControlsModule:
                 guid = result
             
             if not guid:
+                logger.error(f"❌ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
                 return None
             
             # Instanz holen
