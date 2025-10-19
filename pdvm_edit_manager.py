@@ -22,7 +22,7 @@ import logging
 from typing import Dict, Any, Optional
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
 
-from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_datenbank import PdvmDatenbank  # ← Für Framedaten (hat lesen())
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_input_manager import FieldMeta
 from pdvm_instance_manager import PdvmInstanceManager
@@ -137,14 +137,15 @@ class PdvmEditManager:
         logger.info("📂 Lade Framedaten...")
         
         try:
-            # Framedaten-DB öffnen
-            framedaten_db = PdvmCentralDatenbank(
+            # Framedaten-DB öffnen (PdvmDatenbank für lesen())
+            framedaten_db = PdvmDatenbank(
+                db_name='PdvmManager.db',
                 table_name='framedaten',
-                guid=self.frame_guid
+                hist=False
             )
             
-            # Framedaten lesen
-            self.framedaten = framedaten_db.lesen()
+            # Framedaten lesen (lesen() gibt Dict zurück)
+            self.framedaten = framedaten_db.lesen(self.frame_guid)
             
             if not self.framedaten:
                 raise ValueError(f"Keine Framedaten gefunden für GUID: {self.frame_guid}")
