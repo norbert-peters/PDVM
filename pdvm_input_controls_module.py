@@ -18,7 +18,7 @@ Version: 1.0.0 (Neu - Modularer Ansatz)
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea
 )
@@ -191,7 +191,11 @@ class PdvmInputControlsModule:
         # gcs via globalen Import verfügbar!
         
         # Instanzen-Manager für dynamische DB-Zugriffe
+        # Key-Format: {TABELLE}_{GUID} für eindeutige Zuordnung
         self.db_instances: Dict[str, PdvmCentralDatenbank] = {}
+        
+        # Controls-Metadaten mit Order (für Sortierung)
+        self.controls_meta: List[Dict[str, Any]] = []
         
         # ROOT-Tabelle und Metadaten
         self.root_table = None
@@ -208,6 +212,17 @@ class PdvmInputControlsModule:
         
         # Metadaten laden
         self._load_metadaten()
+        
+        # === 3-PHASEN LINEARE VERARBEITUNG ===
+        logger.info("🔄 Starte 3-Phasen-Verarbeitung...")
+        
+        # PHASE 1: Controls mit Order aufbauen
+        self._prepare_controls()
+        
+        # PHASE 2: Alle benötigten Instanzen erstellen
+        self._prepare_instances()
+        
+        # PHASE 3: Rendern erfolgt in get_widget()
         
         logger.info("✅ InputControlsModule initialisiert")
     
@@ -243,10 +258,13 @@ class PdvmInputControlsModule:
                 guid=self.selected_guid
             )
             
-            # In Instanzen-Manager speichern (Großbuchstaben als Key!)
-            self.db_instances[self.root_table.upper()] = root_instance
+            # In Instanzen-Manager speichern
+            # Key-Format: {TABELLE}_{GUID} (wie alle anderen Instanzen)
+            instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
+            self.db_instances[instance_key] = root_instance
             
-            logger.info(f"  ✅ ROOT-Instanz erstellt: {self.root_table.upper()} ({table_name}.{self.selected_guid})")
+            logger.info(f"  ✅ ROOT-Instanz erstellt: {instance_key}")
+            logger.info(f"     Tabelle: {table_name} | GUID: {self.selected_guid}")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Erstellen der ROOT-Instanz: {e}")
@@ -275,46 +293,228 @@ class PdvmInputControlsModule:
             logger.error(f"❌ Fehler beim Laden der Metadaten: {e}")
             self.metadaten = {}
     
-    def _get_or_create_instance(self, table_name: str) -> Optional[PdvmCentralDatenbank]:
+    # ========================================================================
+    # 3-PHASEN LINEARE VERARBEITUNG
+    # ========================================================================
+    
+    def _prepare_controls(self):
         """
-        Holt oder erstellt Instanz für Tabelle (dynamisch)
+        PHASE 1: Baut Control-Metadaten mit Order auf
+        
+        Logik:
+        - source_path = 'root' → Order 1000
+        - source_path = 'root_GRUPPE' → Order 2000, 2001, 2002...
+        - Später: User kann Order ändern (Expert Mode)
+        """
+        logger.info("📋 PHASE 1: Controls mit Order aufbauen...")
+        
+        if not self.metadaten:
+            logger.warning("  ⚠️ Keine Metadaten vorhanden!")
+            return
+        
+        base_order = 1000  # ROOT-Controls
+        extended_order = 2000  # Andere Controls
+        
+        for field_key, field_config in self.metadaten.items():
+            # Source-Path aus Config (Default: 'root')
+            source_path = field_config.get('source_path', 'root')
+            
+            # Order berechnen
+            if source_path == 'root':
+                order = base_order
+                base_order += 1  # Nächstes ROOT-Control
+            else:
+                # root_GRUPPE → höhere Order
+                order = extended_order
+                extended_order += 1
+            
+            # Control-Metadaten speichern
+            control_meta = {
+                'field_key': field_key,
+                'field_config': field_config,
+                'source_path': source_path,
+                'order': order
+            }
+            self.controls_meta.append(control_meta)
+            
+            logger.debug(f"  📝 Control: {field_key} | source_path: {source_path} | order: {order}")
+        
+        # Nach Order sortieren
+        self.controls_meta.sort(key=lambda x: x['order'])
+        
+        logger.info(f"  ✅ {len(self.controls_meta)} Controls vorbereitet (sortiert nach Order)")
+    
+    def _prepare_instances(self):
+        """
+        PHASE 2: Baut alle benötigten DB-Instanzen auf
+        
+        Logik:
+        - ROOT-Instanz bereits vorhanden (mit selected_guid)
+        - Für jedes Control: Prüfe source_path
+          * source_path = 'root' → ROOT-Instanz verwenden
+          * source_path = 'root_GRUPPE' → GUID aus ROOT holen → Neue Instanz
+        - Instance-Key: {TABELLE}_{GUID}
+        """
+        logger.info("🔧 PHASE 2: DB-Instanzen aufbauen...")
+        
+        if not self.controls_meta:
+            logger.warning("  ⚠️ Keine Controls vorhanden!")
+            return
+        
+        instances_created = 0
+        
+        for control_meta in self.controls_meta:
+            source_path = control_meta['source_path']
+            field_key = control_meta['field_key']
+            
+            # Tabelle aus Field-Key extrahieren
+            parts = field_key.split('_')
+            if len(parts) < 3:
+                logger.warning(f"  ⚠️ Ungültiger field_key: {field_key}")
+                continue
+            
+            table_name = parts[0]  # z.B. "FINANZWESEN"
+            gruppe = parts[1].upper()  # z.B. "FINANZWESEN"
+            
+            if source_path == 'root':
+                # ROOT-Instanz verwenden (bereits vorhanden)
+                instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
+                logger.debug(f"  🔗 {field_key} → ROOT-Instanz ({instance_key})")
+                continue
+            
+            # source_path = 'root_GRUPPE' → GUID holen
+            # Format: root_PERSDATEN
+            if not source_path.startswith('root_'):
+                logger.warning(f"  ⚠️ Ungültiger source_path: {source_path}")
+                continue
+            
+            # Gruppe aus source_path extrahieren
+            source_gruppe = source_path[5:]  # Nach "root_"
+            
+            # GUID aus ROOT-Instanz holen
+            # Feldschlüssel-Format: {GRUPPE}-{TABELLE} (uppercase!)
+            feld_schluessel = f"{gruppe}-{table_name}".upper()
+            
+            try:
+                root_instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
+                root_instance = self.db_instances.get(root_instance_key)
+                
+                if not root_instance:
+                    logger.error(f"  ❌ ROOT-Instanz nicht gefunden: {root_instance_key}")
+                    continue
+                
+                # GUID aus ROOT holen
+                stichtag = gcs.st_inst.PdvmDateTime
+                result = root_instance.get_value(source_gruppe, feld_schluessel, stichtag)
+                
+                if isinstance(result, tuple):
+                    guid, abdatum = result
+                else:
+                    guid = result
+                
+                if not guid:
+                    logger.warning(f"  ⚠️ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
+                    continue
+                
+                # Instance-Key: TABELLE_GUID
+                instance_key = f"{table_name.upper()}_{guid}"
+                
+                # Prüfe ob Instanz bereits existiert
+                if instance_key in self.db_instances:
+                    logger.debug(f"  ♻️ Instanz bereits vorhanden: {instance_key}")
+                    continue
+                
+                # Neue Instanz erstellen
+                instance = PdvmCentralDatenbank(
+                    table_name=table_name.lower(),
+                    guid=guid
+                )
+                
+                self.db_instances[instance_key] = instance
+                instances_created += 1
+                
+                logger.info(f"  ✅ Instanz erstellt: {instance_key}")
+                logger.debug(f"     source_path: {source_path} | Feld: {source_gruppe}.{feld_schluessel}")
+                
+            except Exception as e:
+                logger.error(f"  ❌ Fehler bei Instanz-Erstellung: {field_key}")
+                logger.error(f"     {e}")
+                continue
+        
+        logger.info(f"  ✅ {instances_created} neue Instanzen erstellt")
+        logger.info(f"  📊 Gesamt: {len(self.db_instances)} Instanzen verfügbar")
+    
+    def _get_instance_for_control(self, control_meta: Dict[str, Any]) -> Optional[PdvmCentralDatenbank]:
+        """
+        Holt die passende DB-Instanz für ein Control
         
         Args:
-            table_name: Tabellenname (in GROSSBUCHSTABEN!)
+            control_meta: Control-Metadaten (field_key, source_path, etc.)
         
         Returns:
             PdvmCentralDatenbank Instanz oder None
         """
-        # Prüfe ob bereits vorhanden
-        if table_name in self.db_instances:
-            return self.db_instances[table_name]
+        field_key = control_meta['field_key']
+        source_path = control_meta['source_path']
         
-        logger.info(f"  🔧 Erstelle neue Instanz für Tabelle: {table_name}")
+        # Tabelle aus Field-Key
+        parts = field_key.split('_')
+        if len(parts) < 3:
+            logger.warning(f"⚠️ Ungültiger field_key: {field_key}")
+            return None
+        
+        table_name = parts[0]
+        gruppe = parts[1].upper()
+        
+        if source_path == 'root':
+            # ROOT-Instanz
+            instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
+            return self.db_instances.get(instance_key)
+        
+        # Andere Instanz → GUID aus source_path holen
+        if not source_path.startswith('root_'):
+            logger.warning(f"⚠️ Ungültiger source_path: {source_path}")
+            return None
+        
+        source_gruppe = source_path[5:]
+        feld_schluessel = f"{gruppe}-{table_name}".upper()
         
         try:
-            # Tabelle in Kleinbuchstaben für DB
-            table_lower = table_name.lower()
+            # GUID aus ROOT holen
+            root_instance_key = f"{self.root_table.upper()}_{self.selected_guid}"
+            root_instance = self.db_instances.get(root_instance_key)
             
-            # GUID für neue Tabelle (vorerst None - wird später implementiert)
-            # TODO: GUID aus Verknüpfungen/Relationen holen
-            instance_guid = None
+            if not root_instance:
+                return None
             
-            # Instanz erstellen
-            instance = PdvmCentralDatenbank(
-                table_name=table_lower,
-                guid=instance_guid
-            )
+            stichtag = gcs.st_inst.PdvmDateTime
+            result = root_instance.get_value(source_gruppe, feld_schluessel, stichtag)
             
-            # Speichern
-            self.db_instances[table_name] = instance
+            if isinstance(result, tuple):
+                guid, _ = result
+            else:
+                guid = result
             
-            logger.info(f"  ✅ Instanz erstellt: {table_name} ({table_lower}.{instance_guid})")
+            if not guid:
+                return None
             
-            return instance
+            # Instanz holen
+            instance_key = f"{table_name.upper()}_{guid}"
+            return self.db_instances.get(instance_key)
             
         except Exception as e:
-            logger.error(f"  ❌ Fehler beim Erstellen der Instanz für {table_name}: {e}")
+            logger.error(f"❌ Fehler beim Holen der Instanz: {e}")
             return None
+    
+    # ========================================================================
+    # ALTE METHODE (wird nicht mehr verwendet)
+    # ========================================================================
+    
+    # _get_or_create_instance() ENTFERNT - ersetzt durch _prepare_instances()
+    
+    # ========================================================================
+    # UI HELPER METHODEN
+    # ========================================================================
     
     def _load_header(self):
         """Lädt Header-Text aus Framedaten"""
@@ -422,33 +622,27 @@ class PdvmInputControlsModule:
             content_layout.setSpacing(10)
             
             # === INPUT-CONTROLS RENDERN ===
-            if not self.metadaten:
-                # Keine Metadaten
+            # PHASE 3: Controls in sortierter Reihenfolge rendern
+            if not self.controls_meta:
+                # Keine Controls
                 no_data_label = QLabel("⚠️ Keine Input-Controls in Metadaten gefunden.")
                 no_data_label.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
                 content_layout.addWidget(no_data_label)
-                logger.warning("  ⚠️ Keine Metadaten zum Rendern vorhanden")
+                logger.warning("  ⚠️ Keine Controls zum Rendern vorhanden")
             else:
-                # Controls rendern (sortiert nach Key)
+                logger.info(f"🎨 PHASE 3: Rendern von {len(self.controls_meta)} Controls...")
                 rendered_count = 0
-                sorted_keys = sorted(self.metadaten.keys())
                 
-                for field_key in sorted_keys:
-                    field_config = self.metadaten[field_key]
+                # Controls BEREITS SORTIERT (nach Order)!
+                for control_meta in self.controls_meta:
+                    field_key = control_meta['field_key']
+                    field_config = control_meta['field_config']
                     
-                    # Key parsen: TABELLE_GRUPPE_FELD
-                    parts = field_key.split('_')
-                    if len(parts) < 3:
-                        logger.warning(f"  ⚠️ Ungültiger Field-Key: {field_key}")
-                        continue
-                    
-                    table_name = parts[0].upper()  # GROSSBUCHSTABEN!
-                    
-                    # Instanz holen oder erstellen
-                    db_instance = self._get_or_create_instance(table_name)
+                    # Passende Instanz holen
+                    db_instance = self._get_instance_for_control(control_meta)
                     
                     if not db_instance:
-                        logger.warning(f"  ⚠️ Keine Instanz für {field_key} (table={table_name})")
+                        logger.warning(f"  ⚠️ Keine Instanz für {field_key}")
                         continue
                     
                     # Input-Control erstellen
@@ -460,11 +654,11 @@ class PdvmInputControlsModule:
                         )
                         content_layout.addWidget(control)
                         rendered_count += 1
-                        logger.debug(f"  ✅ Control gerendert: {field_key}")
+                        logger.debug(f"  ✅ Control gerendert: {field_key} (Order: {control_meta['order']})")
                     except Exception as e:
                         logger.error(f"  ❌ Fehler beim Rendern von {field_key}: {e}")
                 
-                logger.info(f"  ✅ {rendered_count} Input-Controls gerendert")
+                logger.info(f"  ✅ {rendered_count} Input-Controls gerendert (sortiert nach Order)")
             
             content_layout.addStretch()
             
