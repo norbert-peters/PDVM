@@ -22,7 +22,6 @@ import logging
 from typing import Dict, Any, Optional
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel
 
-from pdvm_datenbank import PdvmDatenbank  # ← Für Framedaten (hat lesen())
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_input_manager import FieldMeta
 from pdvm_instance_manager import PdvmInstanceManager
@@ -94,19 +93,21 @@ class PdvmEditManager:
     - Linear und einfach
     """
     
-    def __init__(self, frame_guid: str, root_table: str, gcs):
+    def __init__(self, frame_guid: str, root_table: str, framedaten_db, gcs):
         """
         Initialisiert EditManager
         
         Args:
             frame_guid: GUID der Framedaten
             root_table: Name der Root-Tabelle (z.B. "persondaten")
+            framedaten_db: PdvmCentralDatenbank Instanz für Framedaten
             gcs: Globale Systemsteuerung (für Stichtag, User-GUID, etc.)
         """
         logger.info("🎯 === PDVM EDIT MANAGER INITIALISIERUNG ===")
         
         self.frame_guid = frame_guid
         self.root_table = root_table
+        self.framedaten_db = framedaten_db
         self.gcs = gcs
         
         # Datensatz-GUID (wird bei load_datensatz gesetzt)
@@ -133,36 +134,26 @@ class PdvmEditManager:
         logger.info(f"✅ EditManager initialisiert: frame_guid={frame_guid}, root_table={root_table}")
     
     def _load_framedaten(self):
-        """Lädt Framedaten aus framedaten.db"""
+        """Lädt Framedaten aus framedaten_db (Gruppe/Feld-weise)"""
         logger.info("📂 Lade Framedaten...")
         
         try:
-            # Framedaten-DB öffnen (PdvmDatenbank für lesen())
-            framedaten_db = PdvmDatenbank(
-                db_name='PdvmManager.db',
-                table_name='framedaten',
-                hist=False
-            )
+            # UI-Defaults aus ROOT-Gruppe laden
+            self.width_label, _ = self.framedaten_db.get_value('ROOT', 'width_label')
+            self.width_control, _ = self.framedaten_db.get_value('ROOT', 'width_control')
+            self.width_button, _ = self.framedaten_db.get_value('ROOT', 'width_button')
+            self.width_indent_ab, _ = self.framedaten_db.get_value('ROOT', 'width_indent_ab')
             
-            # Framedaten lesen (lesen() gibt Dict zurück)
-            self.framedaten = framedaten_db.lesen(self.frame_guid)
+            # Defaults falls nicht gefunden
+            self.width_label = self.width_label or 150
+            self.width_control = self.width_control or 200
+            self.width_button = self.width_button or 100
+            self.width_indent_ab = self.width_indent_ab or 50
             
-            if not self.framedaten:
-                raise ValueError(f"Keine Framedaten gefunden für GUID: {self.frame_guid}")
-            
-            # ROOT-Parameter extrahieren
-            root = self.framedaten.get('ROOT', {})
-            self.width_label = root.get('width_label', 150)
-            self.width_control = root.get('width_control', 200)
-            self.width_button = root.get('width_button', 100)
-            self.width_indent_ab = root.get('width_indent_ab', 50)
-            
-            logger.info(f"  📋 Root-Table: {root.get('root_table')}")
-            logger.info(f"  📋 View-GUID: {root.get('view_guid')}")
             logger.info(f"  📏 Widths: Label={self.width_label}, Control={self.width_control}")
             
-            # Metadaten extrahieren
-            self.metadaten = self.framedaten.get('Metadaten', {})
+            # Metadaten aus Gruppe "Metadaten" laden (NEUE METHODE!)
+            self.metadaten = self.framedaten_db.get_gruppe('Metadaten')
             
             if not self.metadaten:
                 logger.warning("⚠️ Keine Metadaten in Framedaten gefunden!")

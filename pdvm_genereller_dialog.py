@@ -522,6 +522,7 @@ class PdvmGenerellerDialog(QWidget):
             self.edit_manager = PdvmEditManager(
                 frame_guid=self.frame_guid,
                 root_table=self.root_table,
+                framedaten_db=self.framedaten_db,  # ← PdvmCentralDatenbank übergeben
                 gcs=self.gcs
             )
             

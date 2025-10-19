@@ -266,6 +266,38 @@ class PdvmCentralDatenbank:
         # Direkter Wert - für nicht-historische Daten
         return feld_data, None
 
+    def get_gruppe(self, gruppe: str) -> Dict[str, Any]:
+        """
+        Liest alle Felder einer Gruppe als Dictionary.
+        
+        Args:
+            gruppe: Name der Gruppe
+            
+        Returns:
+            Dict[str, Any]: Dictionary mit allen Feldern der Gruppe
+                           Format: {feld_name: wert, ...}
+                           Für historische Daten: {feld_name: {timestamp: wert, ...}, ...}
+            
+        Beispiel:
+            >>> db = PdvmCentralDatenbank('framedaten', 'abc-123')
+            >>> metadaten = db.get_gruppe('Metadaten')
+            >>> for feld_name, feld_config in metadaten.items():
+            >>>     print(f"{feld_name}: {feld_config}")
+        """
+        self._ensure_data_loaded()
+        
+        if gruppe not in self.data:
+            logger.warning(f"Gruppe '{gruppe}' nicht gefunden in {self.table_name}.{self.guid}")
+            return {}
+        
+        gruppe_data = self.data[gruppe]
+        
+        if not isinstance(gruppe_data, dict):
+            logger.warning(f"Gruppe '{gruppe}' ist kein Dictionary: {type(gruppe_data)}")
+            return {}
+        
+        return gruppe_data
+
     def get_static_value(self, gruppe: str, feld: str) -> Any:
         """
         Vereinfachte statische Wertabfrage nur für nicht-historische Daten.
