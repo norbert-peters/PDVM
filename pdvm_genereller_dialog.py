@@ -344,13 +344,9 @@ class PdvmGenerellerDialog(QWidget):
                 self.tab_widget.setCurrentIndex(1)
                 logger.info("  ✅ Edit-Tab direkt geöffnet mit letzter GUID")
             else:
-                # Kein Last-GUID → Aktiven Tab wiederherstellen (Standard)
-                active_tab, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
-                if active_tab is not None:
-                    active_tab = int(active_tab)
-                    if 0 <= active_tab < self.tab_widget.count():
-                        self.tab_widget.setCurrentIndex(active_tab)
-                        logger.info(f"  ✅ Aktiver Tab wiederhergestellt: {active_tab}")
+                # Kein Last-GUID → IMMER Tab 0 (View) öffnen
+                self.tab_widget.setCurrentIndex(0)
+                logger.info("  ✅ Keine gespeicherte GUID → Tab 0 (View) geöffnet")
             
             # Signal bei Tab-Wechsel
             self.tab_widget.currentChanged.connect(self._on_tab_changed)
