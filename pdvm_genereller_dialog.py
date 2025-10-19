@@ -405,7 +405,7 @@ class PdvmGenerellerDialog(QWidget):
             self.tab_widget.addTab(error_widget, "⚠️ Fehler")
     
     def _create_edit_tab(self):
-        """Erstellt Tab 2 mit Edit-Bereich (Phase 1: nur GUID-Anzeige)"""
+        """Erstellt Tab 2 mit Edit-Bereich (Phase 2.2: PdvmEditManager Integration)"""
         logger.info("🔧 Erstelle Edit-Tab...")
         
         try:
@@ -413,12 +413,15 @@ class PdvmGenerellerDialog(QWidget):
             tab_title, _ = self.dialogdaten_db.get_value('Tab02', 'tab_title')
             tab_title = tab_title or 'Bearbeiten'
             
-            # Edit-Container
-            edit_container = QWidget()
-            edit_layout = QVBoxLayout(edit_container)
-            edit_layout.setContentsMargins(20, 20, 20, 20)
+            # Edit-Container (wird später befüllt)
+            self.edit_container = QWidget()
+            self.edit_layout = QVBoxLayout(self.edit_container)
+            self.edit_layout.setContentsMargins(20, 20, 20, 20)
             
-            # Phase 1: Nur GUID-Anzeige
+            # Platzhalter-Widget (angezeigt bis Datensatz ausgewählt)
+            self.edit_placeholder = QWidget()
+            placeholder_layout = QVBoxLayout(self.edit_placeholder)
+            
             info_label = QLabel(
                 "ℹ️ Edit-Bereich\n\n"
                 "Wählen Sie einen Datensatz in der Übersicht aus,\n"
@@ -432,31 +435,20 @@ class PdvmGenerellerDialog(QWidget):
                     padding: 40px;
                 }
             """)
-            edit_layout.addWidget(info_label)
+            placeholder_layout.addWidget(info_label)
+            placeholder_layout.addStretch()
             
-            # GUID-Anzeige (versteckt bis Auswahl)
-            self.selected_guid_label = QLabel()
-            self.selected_guid_label.setAlignment(Qt.AlignCenter)
-            self.selected_guid_label.setStyleSheet("""
-                QLabel {
-                    font-size: 16px;
-                    font-weight: bold;
-                    color: #2c3e50;
-                    background-color: #ecf0f1;
-                    padding: 20px;
-                    border-radius: 5px;
-                    border: 2px solid #3498db;
-                }
-            """)
-            self.selected_guid_label.setVisible(False)
-            edit_layout.addWidget(self.selected_guid_label)
+            # Platzhalter initial anzeigen
+            self.edit_layout.addWidget(self.edit_placeholder)
             
-            edit_layout.addStretch()
+            # Edit-Manager (wird bei Datensatz-Auswahl erstellt)
+            self.edit_manager = None
+            self.edit_widget = None
             
             # Tab hinzufügen
-            self.tab_widget.addTab(edit_container, tab_title)
+            self.tab_widget.addTab(self.edit_container, tab_title)
             
-            logger.info(f"✅ Edit-Tab erstellt: '{tab_title}' (Phase 1: GUID-Anzeige)")
+            logger.info(f"✅ Edit-Tab erstellt: '{tab_title}' (Phase 2.2: EditManager-Integration)")
             
         except Exception as e:
             logger.error(f"❌ Fehler bei Edit-Tab-Erstellung: {e}")
@@ -523,19 +515,49 @@ class PdvmGenerellerDialog(QWidget):
             self.dialogdaten_db.set_value('Tab02', 'selected_guid', selected_guid)
             self.dialogdaten_db.save_all_values()
             
-            # GUID-Label aktualisieren und anzeigen
-            self.selected_guid_label.setText(
-                f"✅ Ausgewählter Datensatz:\n\n{selected_guid}"
+            # Edit-Manager initialisieren mit PdvmEditManager
+            logger.info("  🔧 Initialisiere PdvmEditManager...")
+            from pdvm_edit_manager import PdvmEditManager
+            
+            self.edit_manager = PdvmEditManager(
+                frame_guid=self.frame_guid,
+                root_table=self.root_table,
+                gcs=self.gcs
             )
-            self.selected_guid_label.setVisible(True)
+            
+            # Datensatz laden
+            logger.info("  📂 Lade Datensatz in EditManager...")
+            self.edit_manager.load_datensatz(selected_guid)
+            
+            # Edit-Widget erstellen
+            logger.info("  🎨 Erstelle Edit-Widget...")
+            new_edit_widget = self.edit_manager.get_widget()
+            
+            # Altes Widget entfernen (Platzhalter oder vorheriges Edit-Widget)
+            if self.edit_placeholder:
+                self.edit_layout.removeWidget(self.edit_placeholder)
+                self.edit_placeholder.setParent(None)
+                self.edit_placeholder.deleteLater()
+                self.edit_placeholder = None
+            
+            if self.edit_widget:
+                self.edit_layout.removeWidget(self.edit_widget)
+                self.edit_widget.setParent(None)
+                self.edit_widget.deleteLater()
+            
+            # Neues Widget hinzufügen
+            self.edit_widget = new_edit_widget
+            self.edit_layout.addWidget(self.edit_widget)
             
             # Tab 2 öffnen
             self.tab_widget.setCurrentIndex(1)
             
-            logger.info("✅ Edit-Bereich aktualisiert mit GUID")
+            logger.info("✅ Edit-Bereich aktualisiert mit Datensatz")
             
         except Exception as e:
             logger.error(f"❌ Fehler bei Datensatz-Auswahl-Verarbeitung: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _on_tab_changed(self, index):
         """Handler für Tab-Wechsel"""
