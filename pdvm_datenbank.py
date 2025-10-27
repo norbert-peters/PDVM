@@ -120,11 +120,22 @@ class PdvmDatenbank:
         create_table_query = f'''
         CREATE TABLE IF NOT EXISTS {self.table_name} (
             uid TEXT PRIMARY KEY,
+            name TEXT DEFAULT '',
             daten TEXT NOT NULL,
             last_modified TEXT NOT NULL DEFAULT ''
         )'''
         
         cursor.execute(create_table_query)
+        
+        # Prüfe ob 'name' Spalte existiert (für bestehende Tabellen)
+        cursor.execute(f"PRAGMA table_info({self.table_name})")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        if 'name' not in columns:
+            # Füge 'name' Spalte zu bestehender Tabelle hinzu
+            cursor.execute(f"ALTER TABLE {self.table_name} ADD COLUMN name TEXT DEFAULT ''")
+            logger.info(f"'name' Spalte zu {self.table_name} hinzugefügt")
+        
         conn.commit()
         conn.close()
         
@@ -392,3 +403,69 @@ class PdvmDatenbank:
             'total_size_bytes': total_size,
             'historisch': self.historisch
         }
+
+    def get_name(self, guid):
+        """
+        Liest den 'name' Wert für eine GUID.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            
+        Returns:
+            str|None: Name-Wert oder None wenn nicht gefunden
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute(f'SELECT name FROM {self.table_name} WHERE uid = ?', (guid,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            name = result[0]
+            logger.debug(f"Name gelesen: {guid} → '{name}'")
+            return name if name else ""
+        else:
+            logger.debug(f"Datensatz nicht gefunden: {guid}")
+            return None
+
+    def set_name(self, guid, name_value):
+        """
+        Setzt den 'name' Wert für eine GUID.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            name_value (str): Neuer Name-Wert
+            
+        Returns:
+            bool: True wenn erfolgreich, False wenn GUID nicht existiert
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
+        # Sicherstellen dass name_value ein String ist
+        name_str = str(name_value) if name_value is not None else ""
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # Prüfe ob GUID existiert
+        cursor.execute(f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?', (guid,))
+        exists = cursor.fetchone()[0] > 0
+        
+        if exists:
+            cursor.execute(
+                f'UPDATE {self.table_name} SET name = ? WHERE uid = ?',
+                (name_str, guid)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Name gesetzt: {guid} → '{name_str}'")
+            return True
+        else:
+            conn.close()
+            logger.warning(f"set_name fehlgeschlagen: GUID {guid} nicht gefunden")
+            return False

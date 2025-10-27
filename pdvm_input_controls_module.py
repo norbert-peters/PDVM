@@ -20,9 +20,9 @@ Version: 1.0.0 (Neu - Modularer Ansatz)
 import logging
 from typing import Optional, Dict, Any, List
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QLineEdit
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QLineEdit, QPushButton
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal, QObject
 
 from global_gcs import gcs  # ← Globaler GCS-Import!
 from pdvm_central_datenbank import PdvmCentralDatenbank
@@ -71,6 +71,17 @@ class PdvmInputControl(QWidget):
             logger.error(f"❌ Ungültiger Field-Key: {field_key}")
             self.table = self.gruppe = self.feld = "UNKNOWN"
         
+        # AUTONOME DATENHALTUNG
+        self.original_value = None   # Aus DB geladen (roh)
+        self.current_value = None    # Aktueller Wert (roh)
+        self.is_dirty = False        # Geändert?
+        
+        # STATISCHE ABDATUM-INSTANZ (wird nur beim Init erstellt!)
+        from pdvm_datetime import Pdvm_DateTime
+        self.abdatum_instanz = Pdvm_DateTime(gcs.field_value('country'))
+        self.abdatum_instanz.PdvmDateTime = gcs.st_inst.PdvmDateTime  # Stichtag
+        logger.debug(f"  📅 Abdatum-Instanz erstellt für {self.field_key}: {self.abdatum_instanz.FormTimeStamp}")
+        
         # Wert und Abdatum aus DB laden
         self.wert = None
         self.abdatum = None
@@ -80,21 +91,36 @@ class PdvmInputControl(QWidget):
         self._create_ui()
     
     def _load_value(self):
-        """Lädt Wert und Abdatum aus Datenbank"""
+        """
+        Lädt Wert und Abdatum aus Datenbank (AUTONOM)
+        
+        Verwendet die STATISCHE Abdatum-Instanz (self.abdatum_instanz)
+        Diese wird nur beim __init__ erstellt und ändert sich nie!
+        
+        get_value() gibt zurück:
+        - wert: Der Wert zu diesem Abdatum
+        - abdatum: Das TATSÄCHLICHE Abdatum, wann der Wert gespeichert wurde
+        """
         if not self.db_instance:
-            logger.warning(f"⚠️ Keine DB-Instanz für {self.field_key}")
+            logger.warning(f"⚠️ Keine DB-Instanz für {self.field_key} → Control wird schreibgeschützt")
+            self.wert = None
+            self.abdatum = None
+            self.original_value = None
+            self.current_value = None
             return
         
         try:
-            # Stichtag von GCS holen
-            stichtag = gcs.st_inst.PdvmDateTime
-            
-            # Wert laden (stichtagsgenau!)
+            # Wert laden mit STATISCHER Abdatum-Instanz!
+            # Diese enthält den Stichtag und ändert sich nie!
             self.wert, self.abdatum = self.db_instance.get_value(
                 self.gruppe,
                 self.feld,
-                stichtag
+                self.abdatum_instanz.PdvmDateTime  # ← STATISCH (Stichtag)!
             )
+            
+            # AUTONOMIE: Original-Werte speichern
+            self.original_value = self.wert
+            self.current_value = self.wert
             
             logger.debug(f"  📊 {self.field_key}: wert={str(self.wert)[:30]}, abdatum={self.abdatum}")
             
@@ -102,6 +128,40 @@ class PdvmInputControl(QWidget):
             logger.error(f"❌ Fehler beim Laden von {self.field_key}: {e}")
             self.wert = None
             self.abdatum = None
+            self.original_value = None
+            self.current_value = None
+    
+    def refresh(self):
+        """
+        REFRESH-Kommando: Wert aus Instanz neu laden und UI aktualisieren
+        
+        Wird vom Manager aufgerufen nach save_all_values()
+        """
+        logger.debug(f"  🔄 Refresh: {self.field_key}")
+        
+        # Wert neu laden (aus Instanz)
+        self._load_value()
+        
+        # UI aktualisieren
+        if hasattr(self, 'value_label'):
+            # Wert formatieren
+            display_value = str(self.wert) if self.wert is not None else "(leer)"
+            if len(display_value) > 50:
+                display_value = display_value[:47] + "..."
+            
+            self.value_label.setText(display_value)
+            
+            # Tooltip mit Abdatum aktualisieren
+            if self.abdatum:
+                from pdvm_datetime import Pdvm_DateTime
+                dt = Pdvm_DateTime(gcs.field_value('country'))
+                dt.PdvmDateTime = float(self.abdatum)
+                tooltip = f"Abdatum: {dt.FormTimeStamp}"
+                self.value_label.setToolTip(tooltip)
+            
+        # is_dirty zurücksetzen (da neu geladen)
+        self.is_dirty = False
+        logger.debug(f"  ✅ Refresh abgeschlossen: {self.field_key}")
     
     def _create_ui(self):
         """Erstellt UI für Input-Control"""
@@ -126,21 +186,42 @@ class PdvmInputControl(QWidget):
         # === WERT (abhängig vom Type) ===
         field_type = self.field_config.get('type', 'text')
         
+        # SCHREIBSCHUTZ: Wenn keine DB-Instanz vorhanden
+        is_readonly = (self.db_instance is None)
+        
         if field_type == 'text':
-            # Type: text → QLineEdit (editierbar)
+            # Type: text → QLineEdit (editierbar oder schreibgeschützt)
             wert_text = str(self.wert) if self.wert is not None else ""
             wert_edit = QLineEdit(wert_text)
-            wert_edit.setStyleSheet("""
-                QLineEdit {
-                    color: #34495e;
-                    padding: 5px;
-                    background-color: white;
-                    border: 1px solid #3498db;
-                    border-radius: 3px;
-                    min-width: 200px;
-                }
-            """)
-            wert_edit.textChanged.connect(self._on_value_changed)
+            
+            if is_readonly:
+                # SCHREIBGESCHÜTZT
+                wert_edit.setReadOnly(True)
+                wert_edit.setStyleSheet("""
+                    QLineEdit {
+                        color: #95a5a6;
+                        padding: 5px;
+                        background-color: #ecf0f1;
+                        border: 1px solid #bdc3c7;
+                        border-radius: 3px;
+                        min-width: 200px;
+                    }
+                """)
+                wert_edit.setPlaceholderText("(keine Zuordnung)")
+            else:
+                # EDITIERBAR
+                wert_edit.setStyleSheet("""
+                    QLineEdit {
+                        color: #34495e;
+                        padding: 5px;
+                        background-color: white;
+                        border: 1px solid #3498db;
+                        border-radius: 3px;
+                        min-width: 200px;
+                    }
+                """)
+                wert_edit.textChanged.connect(self._on_value_changed)
+            
             layout.addWidget(wert_edit)
             self.value_widget = wert_edit
             
@@ -156,13 +237,31 @@ class PdvmInputControl(QWidget):
             # display_val aus Config holen (z.B. "only_date", "all")
             display_val = self.field_config.get('display_val', 'only_date')
             
-            date_picker = PdvmDateTimePicker(
-                parent=self,
-                pdvm_datetime=dt_instance,
-                display=display_val
-            )
-            layout.addWidget(date_picker)
-            self.value_widget = date_picker
+            if is_readonly:
+                # SCHREIBGESCHÜTZT: Nur als Label anzeigen
+                wert_text = dt_instance.FormTimeStamp if self.wert else "(keine Zuordnung)"
+                wert_label = QLabel(wert_text)
+                wert_label.setStyleSheet("""
+                    QLabel {
+                        color: #95a5a6;
+                        padding: 5px;
+                        background-color: #ecf0f1;
+                        border: 1px solid #bdc3c7;
+                        border-radius: 3px;
+                        min-width: 200px;
+                    }
+                """)
+                layout.addWidget(wert_label)
+                self.value_widget = wert_label
+            else:
+                # EDITIERBAR: DateTimePicker
+                date_picker = PdvmDateTimePicker(
+                    parent=self,
+                    pdvm_datetime=dt_instance,
+                    display=display_val
+                )
+                layout.addWidget(date_picker)
+                self.value_widget = date_picker
             
         else:
             # Andere Types: Read-Only Label (vorerst)
@@ -181,6 +280,43 @@ class PdvmInputControl(QWidget):
             wert_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             layout.addWidget(wert_label)
             self.value_widget = wert_label
+        
+        # === SCHREIBSCHUTZ-HINWEIS ===
+        if is_readonly:
+            readonly_hint = QLabel("🔒")
+            readonly_hint.setStyleSheet("""
+                QLabel {
+                    color: #95a5a6;
+                    font-size: 16px;
+                }
+            """)
+            readonly_hint.setToolTip("Keine Zuordnung vorhanden - Feld ist schreibgeschützt")
+            layout.addWidget(readonly_hint)
+        
+        # === RESET-BUTTON (pro Control) ===
+        if not is_readonly:
+            self.reset_button = QPushButton("↶")
+            self.reset_button.setToolTip("Änderungen zurücksetzen")
+            self.reset_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #95a5a6;
+                    color: white;
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 3px;
+                    padding: 5px;
+                    max-width: 30px;
+                    min-width: 30px;
+                }
+                QPushButton:hover {
+                    background-color: #7f8c8d;
+                }
+            """)
+            self.reset_button.setVisible(False)  # Initial versteckt
+            self.reset_button.clicked.connect(self.reset_to_original)
+            layout.addWidget(self.reset_button)
+        else:
+            self.reset_button = None
         
         # === ABDATUM ===
         if self.abdatum:
@@ -205,13 +341,157 @@ class PdvmInputControl(QWidget):
         
         layout.addStretch()
     
-    def _on_value_changed(self, new_value):
-        """Wird aufgerufen wenn Wert geändert wird"""
-        logger.debug(f"🔹 Wert geändert: {self.field_key} → {new_value}")
-        # Später: Validierung + Markierung als "dirty"
+    def _on_value_changed(self, new_value=None):
+        """
+        Wird aufgerufen wenn Wert geändert wird
+        
+        AUTONOME Dirty-Tracking-Logik:
+        - Aktualisiert current_value
+        - Setzt is_dirty Flag
+        - Zeigt visuelles Feedback
+        """
+        # Storage-Wert holen (type-spezifisch)
+        self.current_value = self.get_storage_value()
+        
+        # Dirty-Flag setzen
+        self.is_dirty = (self.current_value != self.original_value)
+        
+        # Visuelles Feedback
+        self._update_visual_dirty_state()
+        
+        logger.debug(f"  🔄 {self.field_key}: dirty={self.is_dirty}, current={str(self.current_value)[:30]}")
+    
+    # ========================================================================
+    # AUTONOME METHODEN (Type-spezifisch)
+    # ========================================================================
+    
+    def get_display_value(self):
+        """
+        Holt ANGEZEIGTEN Wert aus Widget
+        
+        Type-spezifisch:
+        - text: QLineEdit.text()
+        - date: PdvmDateTimePicker → PdvmDateTime
+        - dropdown: QComboBox.currentText()
+        """
+        if isinstance(self.value_widget, QLineEdit):
+            return self.value_widget.text()
+        
+        elif hasattr(self.value_widget, 'get_pdvm_datetime'):
+            # PdvmDateTimePicker
+            self.value_widget.save()  # Initial → pdvm_datetime
+            return self.value_widget.get_pdvm_datetime().PdvmDateTime
+        
+        # Weitere Types später...
+        else:
+            # Fallback: text()
+            if hasattr(self.value_widget, 'text'):
+                return self.value_widget.text()
+            return None
+    
+    def get_storage_value(self):
+        """
+        Konvertiert Display → Storage (falls nötig)
+        
+        Bei den meisten Types ist Display == Storage
+        """
+        return self.get_display_value()
+    
+    def set_display_value(self, value):
+        """
+        Setzt ANGEZEIGTEN Wert im Widget
+        
+        Type-spezifisch:
+        - text: QLineEdit.setText()
+        - date: PdvmDateTimePicker aktualisieren
+        - dropdown: QComboBox.setCurrentIndex()
+        """
+        if isinstance(self.value_widget, QLineEdit):
+            self.value_widget.setText(str(value) if value is not None else "")
+        
+        elif hasattr(self.value_widget, 'get_pdvm_datetime'):
+            # PdvmDateTimePicker
+            if value:
+                dt = self.value_widget.get_pdvm_datetime()
+                dt.PdvmDateTime = float(value)
+                self.value_widget.refresh_from_instance()
+        
+        # Weitere Types später...
+    
+    def save_to_db(self, neues_abdatum):
+        """
+        AUTONOMES SPEICHERN
+        
+        Nur aufrufen wenn is_dirty == True!
+        
+        Returns:
+            bool: Erfolg
+        """
+        if not self.db_instance:
+            logger.warning(f"⚠️ {self.field_key}: Kein Speichern möglich (schreibgeschützt)")
+            return False
+        
+        try:
+            storage_value = self.get_storage_value()
+            
+            # In DB speichern (noch nicht committen!)
+            self.db_instance.set_value(
+                self.gruppe,
+                self.feld,
+                storage_value,
+                neues_abdatum
+            )
+            
+            # Nach Speichern: Original aktualisieren
+            self.original_value = storage_value
+            self.current_value = storage_value
+            self.is_dirty = False
+            
+            # Visuelles Feedback zurücksetzen
+            self._update_visual_dirty_state()
+            
+            logger.info(f"  💾 {self.field_key}: Gespeichert mit Abdatum {neues_abdatum}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern von {self.field_key}: {e}")
+            return False
+    
+    def reset_to_original(self):
+        """AUTONOMES ZURÜCKSETZEN"""
+        logger.info(f"  ↶ {self.field_key}: Zurücksetzen auf Original")
+        
+        # Widget auf Original-Wert setzen
+        self.set_display_value(self.original_value)
+        
+        # Status zurücksetzen
+        self.current_value = self.original_value
+        self.is_dirty = False
+        
+        # Visuelles Feedback
+        self._update_visual_dirty_state()
+    
+    def _update_visual_dirty_state(self):
+        """Visuelles Feedback für Dirty-Status"""
+        if self.is_dirty:
+            # Gelber Hintergrund
+            self.setStyleSheet("""
+                QWidget {
+                    background-color: #fff3cd;
+                    border-left: 3px solid #ffc107;
+                    padding-left: 5px;
+                }
+            """)
+            if self.reset_button:
+                self.reset_button.setVisible(True)
+        else:
+            # Normal
+            self.setStyleSheet("")
+            if self.reset_button:
+                self.reset_button.setVisible(False)
 
 
-class PdvmInputControlsModule:
+class PdvmInputControlsModule(QObject):
     """
     Input-Controls Modul für GenerellerDialog
     
@@ -222,7 +502,13 @@ class PdvmInputControlsModule:
     
     PHASE 1: Header + GUID anzeigen
     PHASE 2: Input-Controls aufbauen (später)
+    
+    SIGNALS:
+    - refresh_requested: Wird emittiert, wenn Dialog refreshed werden soll
     """
+    
+    # Signal für Refresh-Request
+    refresh_requested = pyqtSignal()
     
     def __init__(self, framedaten_db, selected_guid: str):
         """
@@ -232,6 +518,8 @@ class PdvmInputControlsModule:
             framedaten_db: PdvmCentralDatenbank Instanz für Framedaten
             selected_guid: GUID des ausgewählten Datensatzes
         """
+        super().__init__()  # QObject initialisieren
+        
         logger.info("🎯 === PDVM INPUT CONTROLS MODULE INITIALISIERUNG ===")
         logger.info(f"  📋 Selected GUID: {selected_guid}")
         
@@ -245,6 +533,9 @@ class PdvmInputControlsModule:
         
         # Controls-Metadaten mit Order (für Sortierung)
         self.controls_meta: List[Dict[str, Any]] = []
+        
+        # AUTONOME CONTROLS-LISTE
+        self.controls: List[PdvmInputControl] = []  # Alle erstellten Controls
         
         # ROOT-Tabelle und Metadaten
         self.root_table = None
@@ -471,8 +762,12 @@ class PdvmInputControlsModule:
                     guid = result
                 
                 if not guid:
-                    logger.error(f"  ❌ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
-                    logger.error(f"     → Prüfe ob Feld in ROOT-Tabelle existiert!")
+                    logger.warning(f"  ⚠️ Keine GUID gefunden: {source_gruppe}.{feld_schluessel}")
+                    logger.warning(f"     → Control wird schreibgeschützt angezeigt (keine Zuordnung)")
+                    # WICHTIG: NICHT continue - Control soll trotzdem angezeigt werden!
+                    # Stattdessen merken, dass keine Instanz verfügbar ist
+                    # → In _get_instance_for_control() wird dann None zurückgegeben
+                    # → In PdvmInputControl wird das Control schreibgeschützt
                     continue
                 
                 # Instance-Key: TABELLE_GUID
@@ -616,37 +911,17 @@ class PdvmInputControlsModule:
             # Haupt-Container
             container = QWidget()
             main_layout = QVBoxLayout(container)
-            main_layout.setContentsMargins(20, 20, 20, 20)
-            main_layout.setSpacing(15)
+            main_layout.setContentsMargins(20, 10, 20, 5)  # Oben: 10, Unten: 5 statt 20
+            main_layout.setSpacing(10)  # 10 statt 15
             
-            # === HEADER ===
-            header_label = QLabel(self.header_text)
-            header_label.setStyleSheet("""
-                QLabel {
-                    font-size: 18px;
-                    font-weight: bold;
-                    color: #2c3e50;
-                    padding: 10px;
-                    background-color: #ecf0f1;
-                    border-radius: 5px;
-                }
-            """)
-            header_label.setAlignment(Qt.AlignCenter)
-            main_layout.addWidget(header_label)
+            # === KOPFZEILE: NEUES ABDATUM + AUSGEWÄHLTER DATENSATZ ===
+            # Alles in einer horizontalen Zeile für mehr Platz
+            header_container = QWidget()
+            header_layout = QHBoxLayout(header_container)
+            header_layout.setContentsMargins(5, 5, 5, 5)  # Kompaktere Margins
+            header_layout.setSpacing(20)
             
-            # === TRENNLINIE ===
-            separator = QFrame()
-            separator.setFrameShape(QFrame.HLine)
-            separator.setFrameShadow(QFrame.Sunken)
-            separator.setStyleSheet("background-color: #bdc3c7;")
-            main_layout.addWidget(separator)
-            
-            # === NEUES ABDATUM (Kopfzeile) ===
-            abdatum_container = QWidget()
-            abdatum_layout = QHBoxLayout(abdatum_container)
-            abdatum_layout.setContentsMargins(10, 10, 10, 10)
-            abdatum_layout.setSpacing(10)
-            
+            # LINKS: Neues Abdatum
             abdatum_label = QLabel("🕒 Neues Abdatum:")
             abdatum_label.setStyleSheet("""
                 QLabel {
@@ -655,86 +930,72 @@ class PdvmInputControlsModule:
                     font-size: 12px;
                 }
             """)
-            abdatum_layout.addWidget(abdatum_label)
+            header_layout.addWidget(abdatum_label)
             
-            # Abdatum aus GCS Systemsteuerung laden oder aktuellen Timestamp
-            neues_abdatum_value = None
-            try:
-                neues_abdatum_value, _ = gcs._db.get_value('EDIT', 'NEUES_ABDATUM')
-            except:
-                pass
+            # === NEUES ABDATUM (ZENTRAL AUS GCS - WIE STICHTAG!) ===
+            logger.info("  📅 === NEUES ABDATUM INITIALISIERUNG ===")
             
-            # Pdvm_DateTime Instanz für DateTimePicker
-            self.neues_abdatum_dt = Pdvm_DateTime(gcs.field_value('country'))
+            # ZENTRALE INSTANZ: Direkt aus GCS verwenden (systemweit gültig!)
+            # Die Instanz wurde bereits in GCS.__init__() initialisiert und geladen
+            # Keine lokale Instanz mehr - nur noch Referenz!
+            logger.info(f"    ✅ Verwende zentrale GCS-Instanz: gcs.neues_abdatum_inst")
+            logger.info(f"       📅 Aktueller Wert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+            logger.info(f"       🔢 Raw PdvmDateTime: {gcs.neues_abdatum_inst.PdvmDateTime}")
             
-            if neues_abdatum_value:
-                # Gespeicherter Wert aus Systemsteuerung
-                try:
-                    self.neues_abdatum_dt.PdvmDateTime = float(neues_abdatum_value)
-                    logger.info(f"✅ Neues Abdatum aus GCS geladen: {self.neues_abdatum_dt.FormTimeStamp}")
-                except Exception as e:
-                    logger.error(f"❌ Fehler beim Laden des Abdatums: {e}")
-                    # Fallback: Aktueller Timestamp
-                    from pdvm_datetime import PdvmDateTimeUtils
-                    self.neues_abdatum_dt.PdvmDateTime = PdvmDateTimeUtils.PdvmDateTimeNow
-                    logger.info(f"✅ Fallback auf aktuellen Timestamp: {self.neues_abdatum_dt.FormTimeStamp}")
-            else:
-                # Kein gespeicherter Wert → Aktueller Timestamp
-                from pdvm_datetime import PdvmDateTimeUtils
-                self.neues_abdatum_dt.PdvmDateTime = PdvmDateTimeUtils.PdvmDateTimeNow
-                logger.info(f"✅ Neues Abdatum initialisiert mit aktuellem Timestamp: {self.neues_abdatum_dt.FormTimeStamp}")
-            
-            # DateTimePicker mit "Jetzt" Button
+            # DateTimePicker mit ZENTRALER INSTANZ erstellen
             self.abdatum_picker = PdvmDateTimePicker(
-                parent=abdatum_container,
-                pdvm_datetime=self.neues_abdatum_dt,
+                parent=header_container,
+                pdvm_datetime=gcs.neues_abdatum_inst,  # ← ZENTRALE INSTANZ!
                 display="all",
-                display_time_short=False
+                display_time_short=False,
+                default_date=gcs.neues_abdatum_inst.PdvmDateTime
             )
-            abdatum_layout.addWidget(self.abdatum_picker)
-            abdatum_layout.addStretch()
+            logger.info(f"    ✅ DateTimePicker mit zentraler GCS-Instanz initialisiert")
+            logger.info("  ✅ Neues Abdatum Initialisierung abgeschlossen")
+            header_layout.addWidget(self.abdatum_picker)
             
-            main_layout.addWidget(abdatum_container)
-            
-            # Trennlinie nach Abdatum
-            separator2 = QFrame()
-            separator2.setFrameShape(QFrame.HLine)
-            separator2.setFrameShadow(QFrame.Sunken)
-            separator2.setStyleSheet("background-color: #bdc3c7;")
-            main_layout.addWidget(separator2)
-            
-            # === GUID ANZEIGE ===
-            guid_container = QWidget()
-            guid_layout = QVBoxLayout(guid_container)
-            guid_layout.setContentsMargins(10, 10, 10, 10)
-            guid_layout.setSpacing(5)
+            # RECHTS: Ausgewählter Datensatz (GUID)
+            guid_inner_container = QWidget()
+            guid_inner_layout = QVBoxLayout(guid_inner_container)
+            guid_inner_layout.setContentsMargins(0, 0, 0, 0)
+            guid_inner_layout.setSpacing(2)
             
             guid_label_header = QLabel("📋 Ausgewählter Datensatz:")
             guid_label_header.setStyleSheet("""
                 QLabel {
-                    font-size: 14px;
+                    font-size: 11px;
                     font-weight: bold;
                     color: #34495e;
                 }
             """)
-            guid_layout.addWidget(guid_label_header)
+            guid_inner_layout.addWidget(guid_label_header)
             
             guid_label_value = QLabel(self.selected_guid)
             guid_label_value.setStyleSheet("""
                 QLabel {
-                    font-size: 12px;
+                    font-size: 10px;
                     color: #7f8c8d;
                     font-family: 'Courier New', monospace;
-                    padding: 10px;
+                    padding: 5px;
                     background-color: #f8f9fa;
                     border: 1px solid #dee2e6;
                     border-radius: 3px;
                 }
             """)
             guid_label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            guid_layout.addWidget(guid_label_value)
+            guid_inner_layout.addWidget(guid_label_value)
             
-            main_layout.addWidget(guid_container)
+            header_layout.addWidget(guid_inner_container)
+            header_layout.addStretch()
+            
+            main_layout.addWidget(header_container)
+            
+            # Trennlinie nach Header
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setFrameShadow(QFrame.Sunken)
+            separator.setStyleSheet("background-color: #bdc3c7;")
+            main_layout.addWidget(separator)
             
             # === SCROLL-AREA FÜR INPUT-CONTROLS ===
             scroll = QScrollArea()
@@ -764,23 +1025,32 @@ class PdvmInputControlsModule:
                     field_key = control_meta['field_key']
                     field_config = control_meta['field_config']
                     
-                    # Passende Instanz holen
+                    # Passende Instanz holen (kann None sein!)
                     db_instance = self._get_instance_for_control(control_meta)
                     
                     if not db_instance:
-                        logger.warning(f"  ⚠️ Keine Instanz für {field_key}")
-                        continue
+                        logger.warning(f"  ⚠️ Keine Instanz für {field_key} → Control wird SCHREIBGESCHÜTZT angezeigt")
+                        # WICHTIG: Trotzdem Control erstellen, aber ohne Instanz!
+                        # → PdvmInputControl wird schreibgeschützt sein
                     
-                    # Input-Control erstellen
+                    # Input-Control erstellen (IMMER, auch ohne Instanz!)
                     try:
                         control = PdvmInputControl(
                             field_key=field_key,
                             field_config=field_config,
-                            db_instance=db_instance
+                            db_instance=db_instance  # Kann None sein!
                         )
                         content_layout.addWidget(control)
+                        
+                        # WICHTIG: Control in Liste speichern!
+                        self.controls.append(control)
+                        
                         rendered_count += 1
-                        logger.debug(f"  ✅ Control gerendert: {field_key} (Order: {control_meta['order']})")
+                        
+                        if db_instance:
+                            logger.debug(f"  ✅ Control gerendert: {field_key} (Order: {control_meta['order']})")
+                        else:
+                            logger.debug(f"  🔒 Control gerendert (schreibgeschützt): {field_key} (Order: {control_meta['order']})")
                     except Exception as e:
                         logger.error(f"  ❌ Fehler beim Rendern von {field_key}: {e}")
                 
@@ -791,6 +1061,97 @@ class PdvmInputControlsModule:
             # Content in ScrollArea
             scroll.setWidget(content)
             main_layout.addWidget(scroll)
+            
+            # === TRENNLINIE VOR BUTTONS ===
+            separator_bottom = QFrame()
+            separator_bottom.setFrameShape(QFrame.HLine)
+            separator_bottom.setFrameShadow(QFrame.Sunken)
+            separator_bottom.setStyleSheet("background-color: #bdc3c7;")
+            main_layout.addWidget(separator_bottom)
+            
+            # === BUTTON-LEISTE ===
+            button_container = QWidget()
+            button_layout = QHBoxLayout(button_container)
+            button_layout.setContentsMargins(10, 5, 10, 5)  # Oben/Unten: 5 statt 10
+            button_layout.setSpacing(10)
+            
+            # SPEICHERN Button
+            speichern_btn = QPushButton("💾 Speichern")
+            speichern_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #27ae60;
+                    color: white;
+                    font-weight: bold;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    min-width: 120px;
+                }
+                QPushButton:hover {
+                    background-color: #229954;
+                }
+                QPushButton:pressed {
+                    background-color: #1e8449;
+                }
+            """)
+            # DEBUG: Signal-Verbindung
+            logger.info("  🔗 Verbinde Speichern-Button Signal...")
+            try:
+                speichern_btn.clicked.connect(self._on_speichern_clicked)
+                logger.info("  ✅ Speichern-Button Signal verbunden")
+            except Exception as e:
+                logger.error(f"  ❌ Fehler beim Verbinden des Speichern-Buttons: {e}")
+            button_layout.addWidget(speichern_btn)
+            
+            # ABBRECHEN Button
+            abbrechen_btn = QPushButton("❌ Abbrechen")
+            abbrechen_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e74c3c;
+                    color: white;
+                    font-weight: bold;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    min-width: 120px;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                }
+                QPushButton:pressed {
+                    background-color: #a93226;
+                }
+            """)
+            abbrechen_btn.clicked.connect(self._on_abbrechen_clicked)
+            button_layout.addWidget(abbrechen_btn)
+            
+            button_layout.addStretch()
+            
+            # EINSTELLUNGEN Button (nur bei Admin-Mode)
+            if gcs.mode == 'admin':
+                einstellungen_btn = QPushButton("⚙️ Einstellungen")
+                einstellungen_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #34495e;
+                        color: white;
+                        font-weight: bold;
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 5px;
+                        min-width: 120px;
+                    }
+                    QPushButton:hover {
+                        background-color: #2c3e50;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1c2833;
+                    }
+                """)
+                einstellungen_btn.clicked.connect(self._on_einstellungen_clicked)
+                button_layout.addWidget(einstellungen_btn)
+                logger.info("  ⚙️ Einstellungen-Button hinzugefügt (Admin-Mode)")
+            
+            main_layout.addWidget(button_container)
             
             logger.info("✅ Input-Controls Widget erstellt (Phase 2: Controls mit Wert + Abdatum)")
             return container
@@ -824,11 +1185,12 @@ class PdvmInputControlsModule:
             self.abdatum_picker.save()  # Speichert von initial → pdvm_datetime
             abdatum_value = self.neues_abdatum_dt.PdvmDateTime
             
-            # In GCS Systemsteuerung speichern
-            gcs._db.set_value('EDIT', 'NEUES_ABDATUM', abdatum_value)
+            # In GCS Systemsteuerung speichern - USER-SPEZIFISCH!
+            user_guid = gcs.user_guid
+            gcs._db.set_value(user_guid, 'neues_abdatum', abdatum_value)
             gcs._db.save_all_values()
             
-            logger.info(f"✅ Neues Abdatum gespeichert: {self.neues_abdatum_dt.FormTimeStamp}")
+            logger.info(f"✅ Neues Abdatum gespeichert: {self.neues_abdatum_dt.FormTimeStamp} ({user_guid}.neues_abdatum)")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern des Abdatums: {e}")
@@ -837,18 +1199,302 @@ class PdvmInputControlsModule:
         """
         Gibt das aktuelle "Neues Abdatum" als Float zurück
         
+        ZENTRALE INSTANZ: Holt Wert direkt aus GCS (systemweit gültig!)
+        
         Returns:
             Pdvm_DateTime als Float (z.B. 20250605.123456)
         """
         if not hasattr(self, 'abdatum_picker'):
-            # Fallback: Aktueller Timestamp
-            from pdvm_datetime import PdvmDateTimeUtils
-            return PdvmDateTimeUtils.PdvmDateTimeNow
+            # Fallback: Direkt aus GCS
+            logger.warning("  ⚠️ Picker nicht initialisiert - Wert direkt aus GCS")
+            return gcs.neues_abdatum
         
         try:
-            self.abdatum_picker.save()
-            return self.neues_abdatum_dt.PdvmDateTime
+            # Wert aus ZENTRALER GCS-Instanz holen
+            abdatum_value = gcs.neues_abdatum_inst.PdvmDateTime
+            
+            logger.debug(f"    🔍 get_neues_abdatum(): {abdatum_value} ({gcs.neues_abdatum_inst.FormTimeStamp})")
+            
+            return abdatum_value
         except Exception as e:
             logger.error(f"❌ Fehler beim Abrufen des Abdatums: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             from pdvm_datetime import PdvmDateTimeUtils
             return PdvmDateTimeUtils.PdvmDateTimeNow
+    
+    # ========================================================================
+    # BUTTON HANDLER
+    # ========================================================================
+    
+    def _on_speichern_clicked(self):
+        """
+        Handler für SPEICHERN Button
+        
+        LINEARE SPEICHERUNG:
+        1. Durchlaufe dirty Controls
+        2. Jedes Control speichert sich selbst
+        3. Batch-Commit auf alle Instanzen
+        4. Bestätigungsfenster
+        5. Refresh
+        """
+        # ULTRA SICHTBARES DEBUG-LOG
+        print("\n" + "="*80)
+        print("🚨 🚨 🚨 SPEICHERN-BUTTON WURDE GEKLICKT! 🚨 🚨 🚨")
+        print("="*80 + "\n")
+        
+        logger.info("💾 === SPEICHERN GESTARTET ===")
+        logger.info(f"  📋 self.controls vorhanden: {hasattr(self, 'controls')}")
+        if hasattr(self, 'controls'):
+            logger.info(f"  📋 Anzahl Controls: {len(self.controls)}")
+        
+        try:
+            # [1] Neues Abdatum holen UND in GCS speichern (IMMER - auch ohne Änderungen!)
+            # WIE BEIM STICHTAG: picker.save() → gcs.update_neues_abdatum()
+            logger.info("  📅 === SCHRITT 1: NEUES ABDATUM VERARBEITEN ===")
+            
+            # 1a: Picker → GCS-Instanz übertragen
+            if hasattr(self, 'abdatum_picker'):
+                logger.info(f"    🔹 VOR save():")
+                logger.info(f"       - GCS PdvmDateTime = {gcs.neues_abdatum_inst.PdvmDateTime}")
+                logger.info(f"       - GCS FormTimeStamp = {gcs.neues_abdatum_inst.FormTimeStamp}")
+                logger.info(f"       - Picker.initial   = {self.abdatum_picker.initial.PdvmDateTime}")
+                
+                # KRITISCH: save() überträgt von Picker.initial → gcs.neues_abdatum_inst
+                self.abdatum_picker.save()
+                
+                logger.info(f"    🔹 NACH save():")
+                logger.info(f"       - GCS PdvmDateTime = {gcs.neues_abdatum_inst.PdvmDateTime}")
+                logger.info(f"       - GCS FormTimeStamp = {gcs.neues_abdatum_inst.FormTimeStamp}")
+                logger.info(f"       - Picker.initial   = {self.abdatum_picker.initial.PdvmDateTime}")
+            else:
+                logger.warning("    ⚠️ abdatum_picker nicht vorhanden!")
+            
+            # 1b: Wert aus GCS-Instanz holen
+            neues_abdatum = self.get_neues_abdatum()
+            logger.info(f"  🕒 Neues Abdatum für Speicherung: {neues_abdatum}")
+            logger.info(f"     Formatiert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+            
+            # 1c: In GCS persistent speichern (WIE update_stichtag()!)
+            try:
+                logger.info(f"  💾 Speichere in GCS via update_neues_abdatum()...")
+                gcs.update_neues_abdatum()
+                logger.info(f"  ✅ Neues Abdatum in GCS persistent gespeichert!")
+            except Exception as e:
+                logger.error(f"  ❌ Fehler beim Speichern in GCS: {e}")
+            
+            # [2] Dirty Controls sammeln (OHNE Abdatum-Picker!)
+            # Der abdatum_picker wird separat behandelt und zählt NICHT als Datenänderung
+            dirty_controls = [c for c in self.controls if c.is_dirty and c != self.abdatum_picker]
+            
+            logger.info(f"  📝 {len(dirty_controls)} geänderte Datenfelder gefunden (Abdatum nicht mitgezählt)")
+            
+            if not dirty_controls:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    None,
+                    "Keine Datenänderungen",
+                    "Es wurden keine Datenänderungen vorgenommen.\n\n"
+                    f"✅ Das Neue Abdatum wurde jedoch gesetzt:\n{gcs.neues_abdatum_inst.FormTimeStamp}"
+                )
+                logger.info("  ℹ️ Keine Datenänderungen, aber Abdatum wurde persistent gespeichert")
+                return
+            
+            # [3] Jedes Control speichert sich selbst
+            changes = []
+            for control in dirty_controls:
+                success = control.save_to_db(neues_abdatum)
+                if success:
+                    changes.append({
+                        'label': control.field_config.get('label', control.feld),
+                        'field': control.field_key,
+                        'old': control.original_value,
+                        'new': control.current_value
+                    })
+            
+            # [4] BATCH: Alle Instanzen committen
+            logger.info(f"  💾 === SCHRITT 4: BATCH-COMMIT ===")
+            logger.info(f"    📦 Committe {len(self.db_instances)} Instanzen...")
+            for instance_key, instance in self.db_instances.items():
+                instance.save_all_values()
+                logger.debug(f"    ✅ {instance_key}")
+            
+            # [5] Bestätigungsfenster
+            logger.info(f"  📋 === SCHRITT 5: BESTÄTIGUNG ===")
+            self._show_save_confirmation(changes, neues_abdatum)
+            
+            # [6] Refresh (AUTONOM - ohne Dialog-Refresh!)
+            logger.info(f"  🔄 === SCHRITT 6: REFRESH ===")
+            self.refresh_controls()  # ← Nur Controls refreshen, NICHT Dialog!
+            
+            logger.info("✅ === SPEICHERN ABGESCHLOSSEN ===")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                None,
+                "Fehler beim Speichern",
+                f"Beim Speichern ist ein Fehler aufgetreten:\n\n{str(e)}"
+            )
+    
+    def _on_abbrechen_clicked(self):
+        """
+        Handler für ABBRECHEN Button
+        
+        LINEARES ABBRECHEN:
+        1. Bestätigung einholen
+        2. Jedes dirty Control setzt sich selbst zurück
+        3. Fertig (kein Refresh nötig, Controls aktualisieren sich selbst)
+        """
+        logger.info("❌ === ABBRECHEN GESTARTET ===")
+        
+        try:
+            # [1] Dirty Controls zählen
+            dirty_controls = [c for c in self.controls if c.is_dirty]
+            
+            if not dirty_controls:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    None,
+                    "Keine Änderungen",
+                    "Es wurden keine Änderungen vorgenommen."
+                )
+                return
+            
+            # [2] Bestätigung einholen
+            from PyQt5.QtWidgets import QMessageBox
+            result = QMessageBox.question(
+                None,
+                "Änderungen verwerfen?",
+                f"Möchten Sie {len(dirty_controls)} geänderte Feld(er) zurücksetzen?\n\n"
+                "Alle Änderungen gehen verloren!",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if result != QMessageBox.Yes:
+                logger.info("  ℹ️ Abbrechen vom Benutzer abgelehnt")
+                return
+            
+            # [3] Jedes Control setzt sich selbst zurück
+            logger.info(f"  ↶ Setze {len(dirty_controls)} Controls zurück...")
+            for control in dirty_controls:
+                control.reset_to_original()
+            
+            logger.info("✅ === ABBRECHEN ABGESCHLOSSEN ===")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Abbrechen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def refresh_controls(self):
+        """
+        REFRESH-Kommando: Alle Controls neu laden (nach save_all_values)
+        
+        LINEAR DURCHLAUF:
+        1. Neues Abdatum aus GCS neu laden
+        2. Neues Abdatum Picker aktualisieren
+        3. Alle Controls durchlaufen → refresh()
+        
+        Wird aufgerufen nach:
+        - save_all_values() (nach Speichern)
+        - Stichtag-Änderung
+        """
+        logger.info("🔄 === REFRESH CONTROLS ===")
+        
+        try:
+            # [1] Neues Abdatum aus GCS aktualisieren (ZENTRALE INSTANZ!)
+            # Die Instanz ist bereits in GCS - kein Load nötig, Referenz ist live!
+            logger.info("  📅 SCHRITT 1: Neues Abdatum aus GCS (zentrale Instanz)")
+            logger.info(f"    ✅ Aktueller Wert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+            
+            # [2] Picker aktualisieren (refresh)
+            if hasattr(self, 'abdatum_picker'):
+                logger.info("  🔄 SCHRITT 2: Picker aktualisieren...")
+                # Picker hat Referenz auf GCS-Instanz - nur Display refreshen
+                self.abdatum_picker.update_display()
+                logger.info(f"    ✅ Picker aktualisiert")
+            
+            # [3] Alle Controls durchlaufen (LINEAR!)
+            logger.info(f"  🔄 SCHRITT 3: {len(self.controls)} Controls aktualisieren...")
+            for control in self.controls:
+                control.refresh()  # Jedes Control lädt Wert neu aus Instanz
+            
+            logger.info("✅ === REFRESH ABGESCHLOSSEN ===")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Refresh: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _on_einstellungen_clicked(self):
+        """
+        Handler für EINSTELLUNGEN Button (nur Admin-Mode)
+        
+        TODO: Implementierung in separatem Schritt
+        - Dialog für Feld-Einstellungen
+        - Sichtbarkeit, Reihenfolge, Validierung
+        - Metadaten bearbeiten
+        """
+        logger.info("⚙️ EINSTELLUNGEN Button geklickt (Admin-Mode)")
+        logger.info("  ⚠️ Funktionalität wird in separatem Schritt implementiert")
+        
+        # Platzhalter: Zeige Info-Message
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(
+            None,
+            "Einstellungen (Admin)",
+            "Diese Funktionalität wird im nächsten Schritt implementiert.\n\n"
+            "Geplant:\n"
+            "- Feld-Reihenfolge ändern\n"
+            "- Sichtbarkeit konfigurieren\n"
+            "- Validierungs-Regeln festlegen\n"
+            "- Metadaten bearbeiten"
+        )
+    
+    def _show_save_confirmation(self, changes, neues_abdatum):
+        """
+        Zeigt Bestätigungsfenster nach erfolgreichem Speichern
+        
+        Args:
+            changes: Liste von Änderungen
+            neues_abdatum: Verwendetes Abdatum
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        
+        # Abdatum formatieren
+        dt = Pdvm_DateTime(gcs.field_value('country'))
+        dt.PdvmDateTime = float(neues_abdatum)
+        abdatum_formatted = dt.FormTimeStamp
+        
+        # Nachricht zusammenbauen
+        message = f"✅ {len(changes)} Feld(er) erfolgreich gespeichert!\n\n"
+        message += f"🕒 Abdatum: {abdatum_formatted}\n\n"
+        message += "Geänderte Felder:\n"
+        
+        for change in changes[:10]:  # Max 10 anzeigen
+            message += f"  • {change['label']}\n"
+        
+        if len(changes) > 10:
+            message += f"  ... und {len(changes) - 10} weitere\n"
+        
+        QMessageBox.information(
+            None,
+            "Erfolgreich gespeichert",
+            message
+        )
+    
+    def _trigger_refresh(self):
+        """
+        Triggert Refresh des gesamten Dialogs
+        
+        Emittiert refresh_requested Signal, das vom Dialog empfangen wird
+        """
+        logger.info("  🔄 Emittiere refresh_requested Signal...")
+        self.refresh_requested.emit()
+        logger.info("  ✅ Signal emittiert")

@@ -99,7 +99,7 @@ class PdvmGenerellerDialog(QWidget):
         # Einfache Erweiterbarkeit: Neues Modul einfach hier eintragen!
         # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
-            'input_controls': 'pdvm_input_controls_module.PdvmInputControlsModule',
+            'input_controls': 'pdvm_input_controls_manager_v3_autonom.PdvmInputControlsManagerV3',  # ✅ V3 AUTONOM (sauber & linear!)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
@@ -231,6 +231,14 @@ class PdvmGenerellerDialog(QWidget):
             )
             logger.info(f"  📋 HEADER_TEXT: {self.header_text}")
             
+            # EDIT_TYPE
+            self.edit_type, _ = self.framedaten_db.get_value(
+                gruppe, 'EDIT_TYPE'
+            )
+            if not self.edit_type:
+                self.edit_type = 'input_controls'  # Default
+            logger.info(f"  📋 EDIT_TYPE: {self.edit_type}")
+            
             # Validierung
             if not self.root_table:
                 raise ValueError("ROOT_TABLE ist leer!")
@@ -329,9 +337,8 @@ class PdvmGenerellerDialog(QWidget):
             self._create_edit_tab()
             
             # === FEATURE: Letzte GUID aus Systemsteuerung laden ===
-            # Wenn eine GUID für diese View gespeichert ist → direkt Edit öffnen
-            last_guid_key = f"{self.view_guid}_last_selected_guid"
-            last_guid, _ = self.gcs._db.get_value('DIALOG', last_guid_key)
+            # Wenn eine GUID für diesen Frame gespeichert ist → direkt Edit öffnen
+            last_guid, _ = self.gcs._db.get_value(self.frame_guid, 'LAST_SELECTION')
             
             if last_guid:
                 logger.info(f"🔍 Letzte ausgewählte GUID gefunden: {last_guid}")
@@ -542,38 +549,20 @@ class PdvmGenerellerDialog(QWidget):
             # GUID speichern
             self.current_selected_guid = selected_guid
             
-            # GUID in Dialogdaten speichern
-            self.dialogdaten_db.set_value('Tab02', 'selected_guid', selected_guid)
-            self.dialogdaten_db.save_all_values()
-            
             # === FEATURE: GUID in Systemsteuerung speichern ===
-            # Speichere die zuletzt ausgewählte GUID für diese View
+            # Speichere die zuletzt ausgewählte GUID für diesen Frame
             # → Beim nächsten Öffnen des Dialogs wird diese GUID direkt geladen
-            last_guid_key = f"{self.view_guid}_last_selected_guid"
-            self.gcs._db.set_value('DIALOG', last_guid_key, selected_guid)
+            self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', selected_guid)
             self.gcs._db.save_all_values()
-            logger.info(f"  💾 GUID in Systemsteuerung gespeichert: {last_guid_key} = {selected_guid}")
+            logger.info(f"  💾 GUID in Systemsteuerung gespeichert: {self.frame_guid}.LAST_SELECTION = {selected_guid}")
             
-            # === SCHRITT 1: edit_type aus Framedaten laden ===
-            logger.info("  🔧 Lade edit_type aus Framedaten...")
-            edit_type, _ = self.framedaten_db.get_value('ROOT', 'edit_type')
-            
-            # Fallback: lowercase
-            if not edit_type:
-                logger.warning("    ⚠️ 'edit_type' nicht gefunden, versuche Fallback...")
-                edit_type, _ = self.framedaten_db.get_value('ROOT', 'EDIT_TYPE')
-            
-            # Default: input_controls
-            if not edit_type:
-                edit_type = 'input_controls'
-                logger.warning(f"    ⚠️ Kein edit_type gefunden, verwende Default: {edit_type}")
-            
-            logger.info(f"  � Edit-Type: {edit_type}")
+            # === SCHRITT 1: edit_type verwenden (bereits in __init__ geladen) ===
+            logger.info(f"  📋 Edit-Type: {self.edit_type}")
             
             # === SCHRITT 2: Modul aus Registry holen ===
-            if edit_type not in self.edit_modules:
+            if self.edit_type not in self.edit_modules:
                 error_msg = (
-                    f"❌ Edit-Modul '{edit_type}' nicht gefunden!\n\n"
+                    f"❌ Edit-Modul '{self.edit_type}' nicht gefunden!\n\n"
                     f"Verfügbare Module:\n" +
                     "\n".join(f"  - {key}" for key in self.edit_modules.keys())
                 )
@@ -590,7 +579,7 @@ class PdvmGenerellerDialog(QWidget):
                 self.tab_widget.setCurrentIndex(1)
                 return
             
-            module_path = self.edit_modules[edit_type]
+            module_path = self.edit_modules[self.edit_type]
             logger.info(f"  📦 Modul gefunden: {module_path}")
             
             # === SCHRITT 3: Modul importieren und initialisieren ===
@@ -603,16 +592,29 @@ class PdvmGenerellerDialog(QWidget):
             ModuleClass = getattr(module, class_name)
             
             # Modul initialisieren mit EINFACHER API (GCS via globalen Import!)
-            edit_module = ModuleClass(
+            # WICHTIG: Als Instanzvariable speichern, damit es nicht garbage-collected wird!
+            self.current_edit_module = ModuleClass(
                 framedaten_db=self.framedaten_db,
                 selected_guid=selected_guid
             )
+            
+            # Signal verbinden: refresh_requested → Dialog.refresh()
+            if hasattr(self.current_edit_module, 'refresh_requested'):
+                self.current_edit_module.refresh_requested.connect(self.refresh)
+                logger.info("  🔗 refresh_requested Signal verbunden")
+            
+            # Signal verbinden: save_completed → Edit-Tab neu laden
+            if hasattr(self.current_edit_module, 'save_completed'):
+                self.current_edit_module.save_completed.connect(
+                    lambda: self._on_datensatz_ausgewaehlt(self.current_selected_guid)
+                )
+                logger.info("  🔗 save_completed Signal verbunden → Neuaufbau Edit-Tab")
             
             logger.info("  ✅ Modul erfolgreich initialisiert")
             
             # === SCHRITT 4: Widget holen und anzeigen ===
             logger.info("  🎨 Erstelle Edit-Widget...")
-            new_edit_widget = edit_module.get_widget()
+            new_edit_widget = self.current_edit_module.get_widget()
             
             # Widget ersetzen
             self._replace_edit_widget(new_edit_widget)
@@ -649,6 +651,44 @@ class PdvmGenerellerDialog(QWidget):
         # Neues Widget hinzufügen
         self.edit_widget = new_widget
         self.edit_layout.addWidget(self.edit_widget)
+    
+    def refresh(self):
+        """
+        🔄 Aktualisiert den kompletten Dialog nach Stichtag-Änderung
+        
+        Workflow:
+        1. View aktualisieren (über view_controller.refresh())
+        2. Edit-Bereich neu laden (falls Datensatz ausgewählt)
+        
+        WICHTIG: Wird von MainAppComplete._on_complete_stichtag_refresh() aufgerufen
+        """
+        logger.info("🔄 Dialog-Refresh nach Stichtag-Änderung gestartet...")
+        
+        try:
+            # 1. View aktualisieren
+            if hasattr(self, 'view_controller') and self.view_controller:
+                logger.info("  🔄 Aktualisiere View-Tab...")
+                if hasattr(self.view_controller, 'refresh'):
+                    self.view_controller.refresh()
+                    logger.info("  ✅ View-Tab aktualisiert")
+                else:
+                    logger.warning("  ⚠️ view_controller hat keine refresh()-Methode")
+            
+            # 2. Edit-Bereich neu laden (falls Datensatz ausgewählt)
+            if hasattr(self, 'current_selected_guid') and self.current_selected_guid:
+                logger.info(f"  🔄 Aktualisiere Edit-Tab für GUID: {self.current_selected_guid}")
+                # Edit-Bereich komplett neu laden mit aktueller GUID
+                self._on_datensatz_ausgewaehlt(self.current_selected_guid)
+                logger.info("  ✅ Edit-Tab aktualisiert")
+            else:
+                logger.info("  ℹ️ Kein Datensatz ausgewählt, Edit-Tab übersprungen")
+            
+            logger.info("✅ Dialog-Refresh abgeschlossen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Dialog-Refresh: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _on_tab_changed(self, index):
         """Handler für Tab-Wechsel"""

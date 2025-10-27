@@ -107,7 +107,7 @@ class PdvmViewMatrixManager:
             # === STUFE 1: ORIGINAL-FELDER befüllen - ORIGINAL-LOGIK ===
             logger.info(f"📊 Befülle Original-Felder für Instanz: {instance.guid}")
             
-            # SPEZIALFALL: uid_original - GUID des Datensatzes
+            # SPEZIALFALL 1: uid_original - GUID des Datensatzes
             if 'uid_original' in all_controls:
                 row_data['uid_original'] = instance.guid
                 row_data['uid_original_abdatum'] = None
@@ -119,6 +119,16 @@ class PdvmViewMatrixManager:
                 row_data['uid_original_abdatum'] = None
                 row_data['uid_original_formatiertes_abdatum'] = None
             
+            # SPEZIALFALL 2: name_original - Name aus DB-Spalte 'name'
+            if 'name_original' in all_controls:
+                name_value = instance.get_name(instance.guid)
+                row_data['name_original'] = name_value if name_value else ""
+                row_data['name_original_abdatum'] = None
+                row_data['name_original_formatiertes_abdatum'] = None
+                logger.debug(f"  📝 name_original: {name_value}")
+            else:
+                logger.warning("  ⚠️ name_original nicht in controls_config gefunden")
+            
             # Sortiere Controls: Basis-Felder vor Zusatzfeldern (date_alter, date_jahr etc.)
             def sort_key(control_key):
                 control_config = all_controls.get(control_key, {})
@@ -128,9 +138,9 @@ class PdvmViewMatrixManager:
                 else:
                     return 0  # Basis-Felder zuerst
             
-            # Original-Controls sammeln (ohne uid_original, da bereits behandelt)
+            # Original-Controls sammeln (ohne uid_original und name_original, da bereits behandelt)
             original_controls = [(k, v) for k, v in all_controls.items() 
-                               if v.get('control_type') == 'original' and k != 'uid_original']
+                               if v.get('control_type') == 'original' and k not in ('uid_original', 'name_original')]
             sorted_controls = sorted(original_controls, key=lambda x: sort_key(x[0]))
             
             for control_key, control_config in sorted_controls:
@@ -216,7 +226,7 @@ class PdvmViewMatrixManager:
                     # Original-Feld finden
                     original_key = control_key.replace('_show', '_original')
                     
-                    # SPEZIALFALL: uid_show - ersten 8 Stellen + "..."
+                    # SPEZIALFALL 1: uid_show - ersten 8 Stellen + "..."
                     if control_key == 'uid_show':
                         # ✅ ARRAY: Original-Zelle holen
                         original_cell = row_data.get('uid_original', create_cell(None, None, None))
@@ -229,6 +239,16 @@ class PdvmViewMatrixManager:
                         
                         # ✅ ARRAY: uid_show hat kein Abdatum
                         row_data[control_key] = create_cell(show_value, None, None)
+                        continue
+                    
+                    # SPEZIALFALL 2: name_show - Wert 1:1 aus name_original kopieren
+                    if control_key == 'name_show':
+                        # ✅ ARRAY: Original-Zelle holen (name_original hat kein Abdatum)
+                        original_cell = row_data.get('name_original', create_cell("", None, None))
+                        original_name = get_wert(original_cell)
+                        
+                        # ✅ ARRAY: name_show ohne Abdatum
+                        row_data[control_key] = create_cell(original_name if original_name else "", None, None)
                         continue
                     
                     # SPEZIALFALL: Date-Zusatzfelder - Werte aus Original kopieren

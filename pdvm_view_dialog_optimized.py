@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon
 
 # GLOBALE IMPORTS: Sicherer Zugriff auf zentrale Funktionen
-import pdvm_central_systemsteuerung_global
+from global_gcs import gcs
 import logging
 import time
 import json

@@ -15,7 +15,7 @@ from PyQt5.QtCore import Qt
 # GLOBALE IMPORTS: Einfacher Zugriff auf zentrale Funktionen
 
 # Globale Instanz direkt importieren
-import pdvm_central_systemsteuerung_global
+from global_gcs import gcs
 from pdvm_central_systemsteuerung import is_expert_mode_available
 from pdvm_projection_manager import get_projection_manager
 gcs = pdvm_central_systemsteuerung_global.central_systemsteuerung

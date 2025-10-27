@@ -1,6 +1,6 @@
 # pdvm_date_time_picker.py
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QDateEdit, QTimeEdit, QAbstractSpinBox, QPushButton
-from PyQt5.QtCore import QDate, QTime
+from PyQt5.QtCore import QDate, QTime, pyqtSignal
 from pdvm_datetime import Pdvm_DateTime, PdvmDateTimeUtils
 
 import logging
@@ -8,6 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 class PdvmDateTimePicker(QWidget):
+    """
+    🔹 SIGNAL: valueChanged wird bei Änderungen emittiert (für Dirty-Visualisierung)
+    """
+    valueChanged = pyqtSignal()  # Signal für Input Control
     """
     PyQt5-Widget zum Editieren eines Pdvm_DateTime:
       - display == "all": Datum + Zeit
@@ -37,30 +41,37 @@ class PdvmDateTimePicker(QWidget):
         # ─── 1) temporäre Instanz: "self.initial" ──────────────────────────────
         self.initial = Pdvm_DateTime("DEU")
 
-        # prüfen, ob pdvm_datetime gerade ein Sentinel ist
-        try:
-            raw_val = float(self.pdvm_datetime.PdvmDateTime)
-        except Exception:
-            raw_val = None
-        is_sentinel = (raw_val in (1001.0, 9999365.0))
-
-        if is_sentinel:
-            if default_date is not None:
-                # default_date ist ein Float → ins temporäre Pdvm_DateTime schreiben
-                self.initial.PdvmDateTime = float(default_date)
-                logger.debug(f"🔹 Sentinel erkannt, verwende default_date {self.initial.FormTimeStamp} zur Initialisierung")
-            else:
-                # kein default_date → PdvmDateTimeNow
+        # WICHTIG: default_date hat IMMER Vorrang, wenn übergeben!
+        # Das ermöglicht explizites Setzen von Werten (auch Sentinels wie 1001.0)
+        if default_date is not None:
+            # Expliziter default_date übergeben → verwenden (auch wenn Sentinel!)
+            self.initial.PdvmDateTime = float(default_date)
+            logger.debug(f"🔹 Verwende expliziten default_date: {self.initial.FormTimeStamp} (Wert: {default_date})")
+        else:
+            # Kein default_date → Wert aus pdvm_datetime übernehmen
+            try:
+                raw_val = float(self.pdvm_datetime.PdvmDateTime)
+            except Exception:
+                raw_val = None
+            
+            is_sentinel = (raw_val in (1001.0, 9999365.0))
+            
+            if is_sentinel:
+                # Sentinel ohne default_date → PdvmDateTimeNow als Fallback
                 now_val = PdvmDateTimeUtils.PdvmDateTimeNow
                 self.initial.PdvmDateTime = now_val
-                logger.debug(f"🔹 Sentinel erkannt, verwende PdvmDateTimeNow = {self.initial.FormTimeStamp} zur Initialisierung")
-        else:
-            # kein Sentinel → sofort aus dem existierenden Wert befüllen
-            self.initial.PdvmDateTime = raw_val
-            logger.debug(f"🔹 Kein Sentinel, initialisiere aus pdvm_datetime = {self.initial.FormTimeStamp}")
+                logger.debug(f"🔹 Sentinel erkannt (kein default_date), verwende PdvmDateTimeNow = {self.initial.FormTimeStamp}")
+            else:
+                # Normaler Wert → übernehmen
+                self.initial.PdvmDateTime = raw_val
+                logger.debug(f"🔹 Kein Sentinel, initialisiere aus pdvm_datetime = {self.initial.FormTimeStamp}")
 
         # ─── 2) Read-Only-Status speichern (anfangs False) ───────────────────────
         self._readonly = False
+
+        # ─── 2b) DIRTY-TRACKING: Original-Wert speichern ──────────────────────────
+        self._original_value = self.initial.PdvmDateTime  # Float speichern
+        self._is_dirty = False  # Anfangs nicht dirty
 
         # ─── 3) UI aufbauen ─────────────────────────────────────────────────────
         lo = QHBoxLayout(self)
@@ -139,6 +150,9 @@ class PdvmDateTimePicker(QWidget):
         Speichert das neue Datum in self.initial (Tag/Monat/Jahr).
         """
         self.initial.PdvmDateT = (qdate.year(), qdate.month(), qdate.day())
+        self._is_dirty = True  # 🔹 DIRTY-TRACKING: Änderung erkannt!
+        self.set_dirty_style(True)  # 🔹 ORANGE RAHMEN setzen!
+        self.valueChanged.emit()  # 🔹 SIGNAL: Input Control benachrichtigen!
         logger.debug(f"🔹 _on_date_changed → initial jetzt: {self.initial.FormTimeStamp}")
 
     def _on_time_changed(self, qtime: QTime):
@@ -151,6 +165,9 @@ class PdvmDateTimePicker(QWidget):
             0 if self.display_time_short else qtime.second(),
             0
         )
+        self._is_dirty = True  # 🔹 DIRTY-TRACKING: Änderung erkannt!
+        self.set_dirty_style(True)  # 🔹 ORANGE RAHMEN setzen!
+        self.valueChanged.emit()  # 🔹 SIGNAL: Input Control benachrichtigen!
         logger.debug(f"🔹 _on_time_changed → initial jetzt: {self.initial.FormTimeStamp}")
 
     def get_pdvm_datetime(self) -> Pdvm_DateTime:
@@ -160,16 +177,89 @@ class PdvmDateTimePicker(QWidget):
         """
         return self.pdvm_datetime
 
+    def is_dirty(self) -> bool:
+        """
+        🔹 DIRTY-TRACKING: Gibt True zurück, wenn Änderungen vorliegen.
+        Prüft, ob aktueller Wert vom Original abweicht.
+        """
+        return self._is_dirty
+    
+    def set_dirty_style(self, dirty: bool):
+        """
+        🔹 DIRTY-VISUALISIERUNG: Setzt orange Rahmen für geänderte Werte
+        """
+        if dirty:
+            # Orange Rahmen für dirty
+            style = """
+                QDateEdit, QTimeEdit {
+                    background-color: #fff9e6;
+                    border: 2px solid #f39c12;
+                    border-radius: 3px;
+                    padding: 3px;
+                }
+            """
+        else:
+            # Normal Rahmen
+            style = """
+                QDateEdit, QTimeEdit {
+                    background-color: white;
+                    border: 1px solid #3498db;
+                    border-radius: 3px;
+                    padding: 3px;
+                }
+            """
+        
+        # Style auf interne Widgets anwenden
+        if hasattr(self, '_date_edit'):
+            self._date_edit.setStyleSheet(style)
+        if hasattr(self, '_time_edit'):
+            self._time_edit.setStyleSheet(style)
+
     def save(self):
         """
         Überträgt self.initial.PdvmDateTime endgültig in self.pdvm_datetime.
+        
+        KRITISCH: Zuerst aktuelle Werte aus Widgets in self.initial übertragen!
+        Events (_on_date_changed, _on_time_changed) werden NUR bei User-Interaktion gefeuert.
+        Beim programmatischen Refresh (z.B. Stichtag Apply-Button) müssen wir manuell auslesen.
         """
-        logger.debug("🔹 PdvmDateTimePicker.save() aufgerufen")
+        logger.info(f"🔹 PdvmDateTimePicker.save() AUFGERUFEN")
+        logger.info(f"    VORHER: pdvm_datetime={self.pdvm_datetime.PdvmDateTime}, initial={self.initial.PdvmDateTime}")
+        
+        # ─── SCHRITT 1: Aktuelle Widget-Werte in self.initial übertragen ────────
+        # WICHTIG: Wir müssen Datum UND Zeit ZUSAMMEN setzen, nicht einzeln!
+        # Wenn nur Datum gesetzt wird, wird Zeit auf 00:00:00 zurückgesetzt!
+        
+        # Standardwerte aus self.initial (falls Widgets nicht vorhanden)
+        year, month, day = self.initial.Year, self.initial.Month, self.initial.Day
+        hour, minute, second = self.initial.Hour, self.initial.Minute, self.initial.Second
+        
+        # Datum aus Widget übernehmen (falls vorhanden)
+        if hasattr(self, '_date_edit'):
+            qdate = self._date_edit.date()
+            year, month, day = qdate.year(), qdate.month(), qdate.day()
+            logger.debug(f"    📅 Datum aus Widget übernommen: {year}-{month}-{day}")
+        
+        # Zeit aus Widget übernehmen (falls vorhanden)
+        if hasattr(self, '_time_edit'):
+            qtime = self._time_edit.time()
+            hour = qtime.hour()
+            minute = qtime.minute()
+            second = 0 if self.display_time_short else qtime.second()
+            logger.debug(f"    ⏰ Zeit aus Widget übernommen: {hour}:{minute}:{second}")
+        
+        # ZUSAMMEN setzen mit PdvmDateTimeT (verhindert Korruption!)
+        self.initial.PdvmDateTimeT = (year, month, day, hour, minute, second, 0)
+        logger.info(f"    NACH Widget-Transfer: initial={self.initial.PdvmDateTime}")
+        
+        # ─── SCHRITT 2: Transfer zu pdvm_datetime ────────────────────────────────
         self.pdvm_datetime.PdvmDateTime = self.initial.PdvmDateTime
-        logger.info(
-            "🔹 PdvmDateTimePicker.save(): In pdvm_datetime geschrieben → "
-            f"{self.pdvm_datetime.FormTimeStamp}"
-        )
+        self._is_dirty = False
+        self._original_value = self.initial.PdvmDateTime
+        self.set_dirty_style(False)
+        
+        logger.info(f"    NACHHER: pdvm_datetime={self.pdvm_datetime.PdvmDateTime}")
+        logger.info(f"    FORMATIERT: {self.pdvm_datetime.FormTimeStamp}")
 
     def update_display(self):
         """

@@ -297,6 +297,59 @@ class PdvmCentralDatenbank:
             return {}
         
         return gruppe_data
+    
+    def get_field(self, gruppe: str, feld: str) -> Dict[float, Any]:
+        """
+        Liest ALLE historischen Werte eines Feldes (alle Zeitstempel).
+        
+        Analog zu get_gruppe(), aber für ein einzelnes Feld.
+        Liefert alle historischen Einträge zurück.
+        
+        Args:
+            gruppe: Name der Gruppe
+            feld: Name des Feldes
+            
+        Returns:
+            Dict[float, Any]: Dictionary mit allen historischen Werten
+                             Format: {timestamp: wert, timestamp2: wert2, ...}
+                             Sortiert nach Zeitstempel (neueste zuerst)
+                             
+        Beispiel:
+            >>> db = PdvmCentralDatenbank('persondaten', 'guid-123')
+            >>> historie = db.get_field('PERSDATEN', 'FAMILIENNAME')
+            >>> for timestamp, wert in historie.items():
+            >>>     dt = Pdvm_DateTime("DEU")
+            >>>     dt.PdvmDateTime = timestamp
+            >>>     print(f"{dt.FormTimeStamp}: {wert}")
+        """
+        self._ensure_data_loaded()
+        
+        if gruppe not in self.data:
+            logger.warning(f"Gruppe '{gruppe}' nicht gefunden in {self.table_name}.{self.guid}")
+            return {}
+        
+        gruppe_data = self.data[gruppe]
+        
+        if not isinstance(gruppe_data, dict):
+            logger.warning(f"Gruppe '{gruppe}' ist kein Dictionary: {type(gruppe_data)}")
+            return {}
+        
+        if feld not in gruppe_data:
+            logger.warning(f"Feld '{feld}' nicht in Gruppe '{gruppe}' gefunden")
+            return {}
+        
+        feld_data = gruppe_data[feld]
+        
+        # Wenn historische Tabelle: feld_data ist bereits {timestamp: wert} Dictionary
+        if isinstance(feld_data, dict):
+            # Sortiere nach Zeitstempel (neueste zuerst)
+            sorted_data = dict(sorted(feld_data.items(), key=lambda x: float(x[0]), reverse=True))
+            return sorted_data
+        else:
+            # Nicht-historische Tabelle: Nur ein Wert vorhanden
+            # Gebe trotzdem als Dictionary zurück (mit Dummy-Timestamp 0)
+            logger.warning(f"Feld '{feld}' ist nicht historisch, liefere Einzelwert")
+            return {0.0: feld_data}
 
     def get_static_value(self, gruppe: str, feld: str) -> Any:
         """
@@ -358,9 +411,10 @@ class PdvmCentralDatenbank:
             elif not isinstance(self.data[gruppe][feld], dict):
                 # Bestehenden Wert in historische Struktur konvertieren
                 old_value = self.data[gruppe][feld]
-                self.data[gruppe][feld] = {str(ab_zeit): old_value}
+                self.data[gruppe][feld] = {ab_zeit: old_value}  # Float-Key
             
-            self.data[gruppe][feld][str(ab_zeit)] = wert
+            # WICHTIG: Float-Key verwenden (konsistent mit convert_from_time)
+            self.data[gruppe][feld][ab_zeit] = wert
         else:
             # Direkter Wert
             self.data[gruppe][feld] = wert
@@ -382,7 +436,11 @@ class PdvmCentralDatenbank:
         if not self.guid:
             raise ValueError("GUID muss gesetzt sein um Daten zu speichern")
         
-        self._database.speichern(self.guid, self.data)
+        # Float-Keys → String-Keys für JSON-Speicherung
+        import allgemeines as all
+        data_to_save = all.convert_to_time(self.data)
+        
+        self._database.speichern(self.guid, data_to_save)
         logger.info(f"Alle Daten gespeichert für GUID {self.guid}")
 
     def delete_group(self, gruppe: str):
@@ -490,3 +548,38 @@ class PdvmCentralDatenbank:
             'groups_count': len(self.data) if self._data_loaded else 0
         })
         return base_info
+
+    def get_name(self, guid: Optional[str] = None) -> Optional[str]:
+        """
+        Liest den 'name' Wert für eine GUID.
+        
+        Args:
+            guid: GUID des Datensatzes (falls None, wird self.guid verwendet)
+            
+        Returns:
+            str|None: Name-Wert oder None wenn nicht gefunden
+        """
+        target_guid = guid if guid else self.guid
+        
+        if not target_guid:
+            raise ValueError("GUID muss gesetzt sein (self.guid oder Parameter)")
+        
+        return self._database.get_name(target_guid)
+
+    def set_name(self, name_value: str, guid: Optional[str] = None) -> bool:
+        """
+        Setzt den 'name' Wert für eine GUID.
+        
+        Args:
+            name_value: Neuer Name-Wert
+            guid: GUID des Datensatzes (falls None, wird self.guid verwendet)
+            
+        Returns:
+            bool: True wenn erfolgreich, False wenn GUID nicht existiert
+        """
+        target_guid = guid if guid else self.guid
+        
+        if not target_guid:
+            raise ValueError("GUID muss gesetzt sein (self.guid oder Parameter)")
+        
+        return self._database.set_name(target_guid, name_value)

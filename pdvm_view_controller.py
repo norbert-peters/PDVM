@@ -210,14 +210,28 @@ class PdvmViewController(QObject):
             if 'controls' not in metadaten:
                 raise ValueError("controls nicht in METADATEN gefunden")
             
-            if 'standard_control' not in metadaten or 'dummy' not in metadaten['standard_control']:
-                raise ValueError("standard_control.dummy nicht gefunden")
+            # Standard-Control mit Dummy erstellen falls nicht vorhanden
+            if 'standard_control' not in metadaten or 'dummy' not in metadaten.get('standard_control', {}):
+                logger.warning("⚠️ standard_control.dummy nicht in ViewDaten gefunden - erstelle Standard-Dummy")
+                standard_control = {
+                    'dummy': {
+                        'feld': 'dummy',
+                        'name': 'Dummy',
+                        'type': 'text',
+                        'show': False,
+                        'expert_mode': False,
+                        'display_order': 999,
+                        'expert_order': 999
+                    }
+                }
+            else:
+                standard_control = metadaten['standard_control']
             
             # View-Config zusammenstellen
             self.view_config = {
                 'ROOT': {'view_table': root_data},
                 'controls': metadaten['controls'],
-                'standard_control': metadaten['standard_control']
+                'standard_control': standard_control
             }
             
             logger.info(f"✅ ViewDaten geladen: Tabelle '{root_data}', {len(self.view_config['controls'])} Controls")
@@ -231,6 +245,35 @@ class PdvmViewController(QObject):
         logger.info("🔧 SCHRITT 2: Controls generieren...")
         
         all_controls = {}
+        
+        # SCHRITT 0: SYSTEM-Controls (uid_original, name_original)
+        # uid_original
+        all_controls['uid_original'] = {
+            'feld': 'UID',
+            'name': 'UID',
+            'type': 'string',
+            'gruppe': 'SYSTEM',
+            'control_type': 'original',
+            'show': False,
+            'expert_mode': True,
+            'display_order': 0,
+            'expert_order': 0
+        }
+        
+        # name_original
+        all_controls['name_original'] = {
+            'feld': 'NAME',
+            'name': 'Satzname',
+            'type': 'string',
+            'gruppe': 'SYSTEM',
+            'control_type': 'original',
+            'show': False,
+            'expert_mode': True,
+            'display_order': 1,
+            'expert_order': 1
+        }
+        
+        logger.info("  ✅ 2 System Controls (uid_original, name_original)")
         
         # SCHRITT 1: _original Controls aus ViewDaten
         for control_key, control_data in self.view_config['controls'].items():
@@ -306,7 +349,7 @@ class PdvmViewController(QObject):
         else:
             logger.info("  🔄 Reset-Modus - Benutzer-Werte übersprungen")
         
-        # SCHRITT 5: Controls in beide DBs speichern
+        # SCHRITT 5: Controls NUR in controls Dictionary speichern
         self.gcs.db.set_value(
             gruppe=self.view_guid,
             feld='controls',
@@ -314,16 +357,7 @@ class PdvmViewController(QObject):
         )
         self.gcs.db.save_all_values()
         
-        # In Systemsteuerung-DB speichern
-        import json
-        for control_key, control_config in all_controls.items():
-            try:
-                control_json = json.dumps(control_config, ensure_ascii=False)
-                self.gcs._db.set_value(self.view_guid, control_key, control_json)
-            except Exception as e:
-                logger.warning(f"⚠️ Fehler bei {control_key}: {e}")
-        
-        logger.info(f"  ✅ {len(all_controls)} Controls in beide DBs gespeichert")
+        logger.info(f"  ✅ {len(all_controls)} Controls in 'controls' Dictionary gespeichert")
         
         # Speichere all_controls für Matrix Manager
         self.all_controls = all_controls

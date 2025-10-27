@@ -12,8 +12,8 @@ import copy
 import logging
 logger = logging.getLogger(__name__)
 
-import pdvm_central_systemsteuerung_global
-gcs = pdvm_central_systemsteuerung_global.gcs
+from global_gcs import gcs
+# GCS bereits aus global_gcs importiert
 
 class ColumnSettingsDialog(QDialog):
     def __init__(self, column_controls, parent=None):

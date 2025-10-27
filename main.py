@@ -14,7 +14,7 @@ Produktions-Version mit:
 - Stichtag-Persistierung
 - Vollständiger Menu-Integration
 """
-
+ 
 import sys
 import os
 import logging
@@ -196,8 +196,8 @@ class LinearStartManagerNew:
             logger.info(f"📅 Stichtag: {gcs_instance.stichtag}")
             if gcs_instance.st_inst:
                 logger.info(f"📄 FormTimeStamp: {gcs_instance.st_inst.FormTimeStamp}")
-            logger.info(f"🌍 Country: {gcs_instance.field_value('country')}")
-            logger.info(f"⚙️ Mode: {gcs_instance.field_value('mode')}")
+            logger.info(f"🌍 Country: {gcs_instance.country}")
+            logger.info(f"⚙️ Mode: {gcs_instance.mode}")
             logger.info(f"👤 User GUID: {gcs_instance.user_guid}")
             
             # Speichere GCS-Instanz für MainApp
@@ -227,7 +227,7 @@ class LinearStartManagerNew:
             # Teste finale GCS-Verfügbarkeit
             from pdvm_central_systemsteuerung import get_gcs
             gcs = get_gcs()
-            logger.info(f"🧪 Test finale GCS: Country={gcs.field_value('country')}, Stichtag={gcs.stichtag}")
+            logger.info(f"🧪 Test finale GCS: Country={gcs.country}, Stichtag={gcs.stichtag}")
             logger.info(f"📄 Stichtag FormTimeStamp: {gcs.st_inst.FormTimeStamp}")
             
             # Erstelle und zeige VOLLSTÄNDIGE finale Hauptanwendung - OHNE Benutzerdaten!

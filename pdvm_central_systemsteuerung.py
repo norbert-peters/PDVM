@@ -123,30 +123,74 @@ class PdvmCentralSystemsteuerung(QObject):
         logger.info(f"✅ Anwendungsdatenbank geladen mit GUID: {user_guid}")
 
         # Stichtag-Instanz erstellen und initialisieren
-        country = self._u_db.get_static_value(self.user_guid, 'country') if user_guid in self._u_db.data else 'DEU'
+        # Country aus Benutzerdatenbank holen (Parameter Gruppe)
+        country = self._u_db.get_static_value('Parameter', 'country') or 'DEU'
+        
         self._st_inst = Pdvm_DateTime(country)
+        
+        # NEUES ABDATUM-Instanz erstellen (systemweit wie Stichtag!)
+        self._neues_abdatum_inst = Pdvm_DateTime(country)
         
         # Temporäre Pdvm_DateTime Instanz für Formatierungen erstellen
         self._temp_dt_inst = Pdvm_DateTime(country)
-        logger.info(f"✅ Temporäre Pdvm_DateTime Instanz erstellt für Country: {country}")
+        logger.info(f"✅ Pdvm_DateTime Instanzen erstellt für Country: {country}")
 
         # Stichtag aus Systemsteuerung laden
         stored_stichtag = self._db.get_static_value(self.user_guid, 'stichtag') if user_guid in self._db.data and 'stichtag' in self._db.data[user_guid] else None
+        
+        # Prüfe ob Stichtag vorhanden UND gültig (NICHT Sentinel-Werte!)
+        is_valid_stichtag = False
         if stored_stichtag is not None:
             try:
-                self._st_inst.PdvmDateTime = float(stored_stichtag)
-            except (ValueError, TypeError):
-                logger.warning(f"⚠️ Ungültiger Stichtag aus DB: {stored_stichtag}, verwende Default")
-        else:
-            # Kein Stichtag in DB: Setze den aktuellen DateTime
-            stored_stichtag = self._temp_dt_inst.PdvmDateTimeNow()
-            self._st_inst.PdvmDateTime = stored_stichtag
-            self._db.set_value(user_guid, 'stichtag', stored_stichtag)
-            logger.info(f"💾 Default-Stichtag gesetzt und gespeichert: {stored_stichtag}")
+                stichtag_float = float(stored_stichtag)
+                # SENTINEL-WERTE ABLEHNEN: 1001.0 und 9999365.0 sind NICHT gültig für Stichtag!
+                if stichtag_float != 1001.0 and stichtag_float != 9999365.0 and stichtag_float > 0:
+                    self._st_inst.PdvmDateTime = stichtag_float
+                    is_valid_stichtag = True
+                    logger.info(f"✅ Stichtag aus DB geladen: {self._st_inst.FormTimeStamp}")
+                else:
+                    logger.warning(f"⚠️ Ungültiger Stichtag (Sentinel): {stichtag_float}, verwende aktuellen Timestamp")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ Fehler beim Laden des Stichtags: {e}, verwende aktuellen Timestamp")
+        
+        # Kein gültiger Stichtag: Aktuellen Timestamp setzen und speichern
+        if not is_valid_stichtag:
+            current_timestamp = self._temp_dt_inst.PdvmDateTimeNow()
+            self._st_inst.PdvmDateTime = current_timestamp
+            self._db.set_value(user_guid, 'stichtag', current_timestamp)
+            self._db.save_all_values()  # Sofort speichern!
+            logger.info(f"💾 Stichtag auf aktuellen Timestamp gesetzt: {self._st_inst.FormTimeStamp}")
+        
+        # === NEUES ABDATUM aus Systemsteuerung laden (analog zu Stichtag) ===
+        stored_neues_abdatum = self._db.get_static_value(self.user_guid, 'neues_abdatum') if user_guid in self._db.data and 'neues_abdatum' in self._db.data[user_guid] else None
+        
+        # Prüfe ob Neues Abdatum vorhanden UND gültig
+        is_valid_neues_abdatum = False
+        if stored_neues_abdatum is not None:
+            try:
+                neues_abdatum_float = float(stored_neues_abdatum)
+                # Sentinels sind hier ERLAUBT (können explizit gesetzt werden)
+                if neues_abdatum_float > 0:
+                    self._neues_abdatum_inst.PdvmDateTime = neues_abdatum_float
+                    is_valid_neues_abdatum = True
+                    logger.info(f"✅ Neues Abdatum aus DB geladen: {self._neues_abdatum_inst.FormTimeStamp}")
+                else:
+                    logger.warning(f"⚠️ Ungültiges Neues Abdatum: {neues_abdatum_float}, verwende aktuellen Timestamp")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ Fehler beim Laden des Neuen Abdatums: {e}, verwende aktuellen Timestamp")
+        
+        # Kein gültiges Neues Abdatum: Aktuellen Timestamp setzen und speichern
+        if not is_valid_neues_abdatum:
+            current_timestamp = self._temp_dt_inst.PdvmDateTimeNow()
+            self._neues_abdatum_inst.PdvmDateTime = current_timestamp
+            self._db.set_value(user_guid, 'neues_abdatum', current_timestamp)
+            self._db.save_all_values()  # Sofort speichern!
+            logger.info(f"💾 Neues Abdatum auf aktuellen Timestamp gesetzt: {self._neues_abdatum_inst.FormTimeStamp}")
 
         self._initialized = True
         logger.info(f"✅ Systemsteuerung initialisiert für {user_guid}")
         logger.info(f"📅 Stichtag: {self._st_inst.FormTimeStamp}")
+        logger.info(f"📅 Neues Abdatum: {self._neues_abdatum_inst.FormTimeStamp}")
     
     @property
     def db(self):
@@ -282,9 +326,15 @@ class PdvmCentralSystemsteuerung(QObject):
         self._ensure_initialized()
         
         if value is None:
-            # Getter
+            # Getter - Spezielle Properties verwenden @property statt DB-Zugriff
             if property_name == 'stichtag':
                 return self._st_inst.PdvmDateTime if self._st_inst else None
+            elif property_name == 'country':
+                return self.country  # Verwende @property (liest aus _user_data)
+            elif property_name == 'mode':
+                return self.mode  # Verwende @property (liest aus _user_data)
+            elif property_name == 'language':
+                return self.language  # Verwende @property (liest aus _user_data)
             else:
                 return self.get_property(property_name, 's')
         else:
@@ -292,7 +342,7 @@ class PdvmCentralSystemsteuerung(QObject):
             if property_name == 'stichtag':
                 if self._st_inst:
                     self._st_inst.PdvmDateTime = float(value)
-                    # Speichere direkt über DB-Instanz - kein save_all_values() mehr
+                    # Speichere direkt über DB-Instanz
                     self._db.set_value(self._user_guid, 'stichtag', value)
             else:
                 self.set_property(property_name, value)
@@ -421,6 +471,42 @@ class PdvmCentralSystemsteuerung(QObject):
             logger.info(f"🔔 Signal 'stichtag_changed' emittiert: {current_stichtag}")
         else:
             logger.error("❌ Kann Stichtag nicht speichern - st_inst oder db nicht verfügbar")
+    
+    # ========================================================================
+    # NEUES ABDATUM PROPERTIES & METHODEN (analog zu Stichtag)
+    # ========================================================================
+    
+    @property
+    def neues_abdatum_inst(self):
+        """Neues Abdatum-Instanz für DateTimePicker (systemweit!)"""
+        self._ensure_initialized()
+        return self._neues_abdatum_inst
+    
+    @property
+    def neues_abdatum(self):
+        """Neues Abdatum als Float-Wert (direkter Zugriff)"""
+        self._ensure_initialized()
+        return self._neues_abdatum_inst.PdvmDateTime if self._neues_abdatum_inst else None
+    
+    def update_neues_abdatum(self):
+        """
+        Aktualisiert das Neue Abdatum in der Datenbank aus der aktuellen neues_abdatum_inst.
+        
+        Diese Methode liest den aktuellen Wert aus self._neues_abdatum_inst.PdvmDateTime
+        und speichert ihn in der Systemsteuerungsdatenbank.
+        
+        VERWENDUNG: Nach Änderungen im DateTimePicker (analog zu update_stichtag())
+        """
+        self._ensure_initialized()
+        if self._neues_abdatum_inst and self._db:
+            current_neues_abdatum = self._neues_abdatum_inst.PdvmDateTime
+            # Speichere in Systemsteuerung-DB unter user_guid.neues_abdatum
+            self._db.set_value(self._user_guid, 'neues_abdatum', current_neues_abdatum)
+            # Persistiere alle Änderungen
+            self._db.save_all_values()
+            logger.info(f"💾 Neues Abdatum in GCS gespeichert: {current_neues_abdatum} ({self._neues_abdatum_inst.FormTimeStamp})")
+        else:
+            logger.error("❌ Kann Neues Abdatum nicht speichern - neues_abdatum_inst oder db nicht verfügbar")
     
     @property
     def user_guid(self):

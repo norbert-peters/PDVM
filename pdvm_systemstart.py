@@ -311,14 +311,18 @@ class MainAppComplete(QMainWindow):
             
             # 1. Picker-Änderungen speichern (finale Architektur)
             if hasattr(self, 'stichtag_picker') and self.stichtag_picker:
+                logger.info(f"📊 VOR save(): gcs.st_inst={gcs.st_inst.PdvmDateTime}, picker.initial={self.stichtag_picker.initial.PdvmDateTime}")
+                
                 if hasattr(self.stichtag_picker, 'save'):
                     self.stichtag_picker.save()
                     logger.info("💾 Vollständige Stichtag-Picker Änderungen gespeichert")
+                    logger.info(f"📊 NACH save(): gcs.st_inst={gcs.st_inst.PdvmDateTime}")
                 else:
                     logger.warning("⚠️ Vollständige Stichtag-Picker hat keine save()-Methode")
             
             # 2. Stichtag in finale GCS persistieren
             if gcs and hasattr(gcs, 'update_stichtag'):
+                logger.info(f"📊 VOR update_stichtag(): gcs.st_inst={gcs.st_inst.PdvmDateTime}")
                 gcs.update_stichtag()
                 logger.info("💾 Stichtag erfolgreich in finale GCS persistiert")
             else:
@@ -340,6 +344,18 @@ class MainAppComplete(QMainWindow):
                     logger.warning("⚠️ Controller hat keine refresh()-Methode")
                 
                 logger.info("✅ Vollständige Stichtag-Balken erfolgreich aktualisiert")
+            
+            # 5. Dialog-Aktualisierung (EDIT-BEREICH)
+            # ✅ Falls ein genereller Dialog geöffnet ist, auch diesen aktualisieren
+            if hasattr(self, 'current_dialog') and self.current_dialog:
+                logger.info("🔄 Aktualisiere generellen Dialog nach Stichtag-Änderung...")
+                
+                if hasattr(self.current_dialog, 'refresh'):
+                    # refresh() aktualisiert View UND Edit-Bereich
+                    self.current_dialog.refresh()
+                    logger.info(f"✅ Dialog erfolgreich aktualisiert (Stichtag aus GCS: {gcs.stichtag})")
+                else:
+                    logger.warning("⚠️ Dialog hat keine refresh()-Methode")
             
             # Fallback: Alte Widget-basierte Aktualisierung (für Kompatibilität)
             elif hasattr(self, 'current_view_widget') and self.current_view_widget:
@@ -1274,276 +1290,6 @@ class MainAppComplete(QMainWindow):
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Speichern des Menü-Status: {e}")
-
-    def test_sortier_projektionen_diagnose(self):
-        """
-        🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST
-        
-        Direkt im laufenden System - testet die 3 Debug-Matrizen:
-        1. BASIS_MATRIX (beim Start/Stichtag)
-        2. FILTERED_MATRIX (beim Filter) 
-        3. SORTED_MATRIX (beim Sort)
-        
-        Aufruf über Menü im System - zeigt Live-Debug der Matrix-Pipeline
-        """
-        logger.info("🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST gestartet...")
-        
-        try:
-            self.clear_content_layout()
-            
-            ergebnisse = [
-                "🔧 CLEAN MATRIX-MANAGER SYSTEM-TEST",
-                "=" * 50,
-                "",
-                "Teste die 3 Matrix-Debug-Ausgaben direkt im System:",
-                "• BASIS_MATRIX → beim Start/Stichtag",
-                "• FILTERED_MATRIX → beim Filter", 
-                "• SORTED_MATRIX → beim Sort",
-                "",
-                "SCHRITT 1: Clean Matrix-Manager erstellen",
-                "-" * 50
-            ]
-            
-            # SCHRITT 1: Clean Matrix-Manager erstellen
-            try:
-                from clean_matrix_manager import get_clean_matrix_manager, reset_matrix_managers
-                
-                # Reset für sauberen Test
-                reset_matrix_managers()
-                
-                test_view_guid = "test_debug_view_12345"
-                clean_manager = get_clean_matrix_manager(test_view_guid)
-                
-                ergebnisse.extend([
-                    f"✅ Clean Matrix-Manager erstellt für: {test_view_guid}",
-                    f"   Manager-Typ: {type(clean_manager).__name__}",
-                    f"   View-GUID: {clean_manager.view_guid}",
-                    ""
-                ])
-                
-            except Exception as e:
-                ergebnisse.extend([
-                    f"❌ FEHLER beim Clean Matrix-Manager erstellen:",
-                    f"   Error: {str(e)}",
-                    ""
-                ])
-                self._show_label(ergebnisse, small=True, clear_content=True, max_height=500)
-                return
-            
-            # SCHRITT 2: Test-Daten mit Debug-Spalten erstellen
-            ergebnisse.extend([
-                "SCHRITT 2: Test-Daten mit Debug-Spalten erstellen",
-                "-" * 50
-            ])
-            
-            # Test-Daten mit den kritischen Debug-Spalten
-            test_data = [
-                {
-                    'uid_original': 'test-uid-001',
-                    'vorname_original': 'Anna-Maria',
-                    'vorname_show': 'Anna-Maria',
-                    'geburtsdatum_original': '1985123.0',
-                    'geburtsdatum_show': '03.05.1985',
-                    'familienname': 'Mueller',
-                    'strasse': 'Teststraße 1'
-                },
-                {
-                    'uid_original': 'test-uid-002', 
-                    'vorname_original': 'Peter-Klaus',
-                    'vorname_show': 'Peter-Klaus',
-                    'geburtsdatum_original': '1990067.0',
-                    'geburtsdatum_show': '08.03.1990',
-                    'familienname': 'Schmidt',
-                    'strasse': 'Teststraße 2'
-                },
-                {
-                    'uid_original': 'test-uid-003',
-                    'vorname_original': 'Maria-Elisabeth', 
-                    'vorname_show': 'Maria-Elisabeth',
-                    'geburtsdatum_original': '1975298.0',
-                    'geburtsdatum_show': '25.10.1975',
-                    'familienname': 'Lauer',
-                    'strasse': 'Teststraße 3'
-                }
-            ]
-            
-            test_columns = list(test_data[0].keys())
-            
-            ergebnisse.extend([
-                f"✅ Test-Daten erstellt: {len(test_data)} Zeilen",
-                f"   Spalten: {len(test_columns)} → {test_columns[:3]}...",
-                f"   Debug-Spalten enthalten: uid_original, vorname_original, vorname_show",
-                ""
-            ])
-            
-            # SCHRITT 3: BASIS_MATRIX Test
-            ergebnisse.extend([
-                "SCHRITT 3: BASIS_MATRIX Test (Start/Stichtag)",
-                "-" * 50,
-                "→ Erwarte: DEBUG BASIS_MATRIX im Log mit 3 Zeilen Test-Daten",
-                ""
-            ])
-            
-            try:
-                # BASIS_MATRIX setzen → sollte DEBUG-Ausgabe erzeugen
-                clean_manager.set_basis_data(test_data, test_columns)
-                
-                ergebnisse.extend([
-                    f"✅ BASIS_MATRIX gesetzt → Debug-Ausgabe im Log",
-                    f"   Zeilen: {len(clean_manager.basis_matrix)}",
-                    f"   Spalten: {len(clean_manager.columns)}",
-                    ""
-                ])
-                
-            except Exception as e:
-                ergebnisse.extend([
-                    f"❌ FEHLER bei BASIS_MATRIX:",
-                    f"   Error: {str(e)}",
-                    ""
-                ])
-            
-            # SCHRITT 4: FILTERED_MATRIX Test
-            ergebnisse.extend([
-                "SCHRITT 4: FILTERED_MATRIX Test (Filter-Änderung)",
-                "-" * 50,
-                "→ Erwarte: DEBUG FILTERED_MATRIX im Log (linear!)",
-                ""
-            ])
-            
-            try:
-                # Filter anwenden → sollte nur FILTERED_MATRIX Debug erzeugen
-                clean_manager.apply_filter()
-                
-                ergebnisse.extend([
-                    f"✅ FILTERED_MATRIX angewendet → Debug-Ausgabe im Log",
-                    f"   Gefilterte Zeilen: {len(clean_manager.filtered_matrix)}",
-                    ""
-                ])
-                
-            except Exception as e:
-                ergebnisse.extend([
-                    f"❌ FEHLER bei FILTERED_MATRIX:",
-                    f"   Error: {str(e)}",
-                    ""
-                ])
-            
-            # SCHRITT 5: SORTED_MATRIX Test
-            ergebnisse.extend([
-                "SCHRITT 5: SORTED_MATRIX Test (Sort-Änderung)",
-                "-" * 50,
-                "→ Erwarte: DEBUG SORTED_MATRIX im Log (linear!)",
-                ""
-            ])
-            
-            try:
-                # Sortierung anwenden → sollte nur SORTED_MATRIX Debug erzeugen
-                clean_manager.apply_sort('vorname_original', True)
-                
-                ergebnisse.extend([
-                    f"✅ SORTED_MATRIX angewendet → Debug-Ausgabe im Log",
-                    f"   Sortierte Zeilen: {len(clean_manager.sorted_matrix)}",
-                    f"   Sort-Spalte: vorname_original (aufsteigend)",
-                    ""
-                ])
-                
-            except Exception as e:
-                ergebnisse.extend([
-                    f"❌ FEHLER bei SORTED_MATRIX:",
-                    f"   Error: {str(e)}",
-                    ""
-                ])
-            
-            # SCHRITT 6: Status und finale Daten
-            ergebnisse.extend([
-                "SCHRITT 6: Matrix-Status und finale Daten",
-                "-" * 50
-            ])
-            
-            try:
-                status = clean_manager.get_status()
-                final_data = clean_manager.get_final_data()
-                
-                ergebnisse.extend([
-                    f"📊 Matrix-Status:",
-                    f"   View-GUID: {status['view_guid']}",
-                    f"   BASIS: {status['basis']['rows']} Zeilen, {status['basis']['columns']} Spalten",
-                    f"   FILTERED: {status['filtered']['rows']} Zeilen", 
-                    f"   SORTED: {status['sorted']['rows']} Zeilen",
-                    f"   Erste Spalten: {status['columns']}",
-                    "",
-                    f"🎯 Finale Daten: {len(final_data)} Zeilen für View-Anzeige",
-                    ""
-                ])
-                
-                # Zeige erste sortierte Zeile als Beispiel
-                if final_data:
-                    first_row = final_data[0]
-                    ergebnisse.extend([
-                        f"📋 Erste sortierte Zeile (Beispiel):",
-                        f"   vorname_original: {first_row.get('vorname_original', 'N/A')}",
-                        f"   vorname_show: {first_row.get('vorname_show', 'N/A')}",
-                        f"   geburtsdatum_original: {first_row.get('geburtsdatum_original', 'N/A')}",
-                        f"   geburtsdatum_show: {first_row.get('geburtsdatum_show', 'N/A')}",
-                        ""
-                    ])
-                
-            except Exception as e:
-                ergebnisse.extend([
-                    f"❌ FEHLER bei Status-Abfrage:",
-                    f"   Error: {str(e)}",
-                    ""
-                ])
-            
-            # ZUSAMMENFASSUNG
-            ergebnisse.extend([
-                "ERWARTETE LOG-AUSGABEN:",
-                "=" * 50,
-                "",
-                "Im main.log sollten jetzt erscheinen:",
-                "",
-                "1. DEBUG BASIS_MATRIX (3 Zeilen):",
-                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
-                "   📄 Zeile 1: test-uid-001 | Anna-Maria | Anna-Maria | ...",
-                "   📄 Zeile 2: test-uid-002 | Peter-Klaus | Peter-Klaus | ...",
-                "   📄 Zeile 3: test-uid-003 | Maria-Elisabeth | Maria-Elisabeth | ...",
-                "",
-                "2. DEBUG FILTERED_MATRIX (3 Zeilen):",
-                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
-                "   📄 Zeile 1: [gefilterte Daten]",
-                "   📄 Zeile 2: [gefilterte Daten]", 
-                "   📄 Zeile 3: [gefilterte Daten]",
-                "",
-                "3. DEBUG SORTED_MATRIX (3 Zeilen, sortiert nach vorname_original):",
-                "   📋 Debug-Spalten: uid_original | vorname_original | vorname_show | ...",
-                "   📄 Zeile 1: [sortierte Daten]",
-                "   📄 Zeile 2: [sortierte Daten]",
-                "   📄 Zeile 3: [sortierte Daten]",
-                "",
-                "🎯 LINEAR: Jede Matrix nur bei ihrer Änderung geloggt!",
-                "",
-                "📋 Prüfen Sie das main.log für die Debug-Ausgaben!",
-                "🔧 Falls keine Debug-Ausgaben → Clean Matrix-Manager Problem",
-                "✅ Falls alle 3 Debug-Ausgaben da → Matrix-System funktioniert!"
-            ])
-            
-            # Ergebnisse anzeigen
-            self._show_label(ergebnisse, small=True, clear_content=True, max_height=600)
-            
-            logger.info("✅ CLEAN MATRIX-MANAGER SYSTEM-TEST abgeschlossen - prüfen Sie main.log!")
-            
-        except Exception as e:
-            logger.error(f"❌ Kritischer Fehler im Clean Matrix-Manager System-Test: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            
-            self._show_label([
-                "❌ KRITISCHER FEHLER im Clean Matrix-Manager Test",
-                "",
-                f"Error: {str(e)}",
-                "",
-                "Siehe main.log für Details"
-            ], small=True, clear_content=True)
-
 
 def main():
     """Hauptfunktion für Demo-Zwecke"""
