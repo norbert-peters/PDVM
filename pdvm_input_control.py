@@ -492,17 +492,10 @@ class PdvmInputControlV4(QWidget):
             return
         
         try:
-            # 🆕 TYPE-ABHÄNGIGER IMPORT (schrittweise Migration!)
-            if self.control_type in ('text', 'dropdown', 'datetime', 'viewtable'):
-                # TEXT + DROPDOWN + DATETIME + VIEWTABLE: V2 (Refactored mit Type-Widget)
-                from pdvm_input_control_history_dialog_v2 import PdvmInputControlHistoryDialogV2
-                dialog_class = PdvmInputControlHistoryDialogV2
-                logger.info(f"  🆕 Verwende Historie-Dialog V2 für Type: {self.control_type}")
-            else:
-                # Andere Types: Alte Version (Fallback)
-                from pdvm_input_control_history_dialog import PdvmInputControlHistoryDialog
-                dialog_class = PdvmInputControlHistoryDialog
-                logger.info(f"  📜 Verwende Historie-Dialog V1 für Type: {self.control_type}")
+            # Historie-Dialog V2 (finale Version für alle Types)
+            from pdvm_input_control_history_dialog import PdvmInputControlHistoryDialog
+            dialog_class = PdvmInputControlHistoryDialog
+            logger.info(f"  📜 Verwende Historie-Dialog für Type: {self.control_type}")
             
             # display_val aus field_config extrahieren (für DateTime)
             display_val = self.field_config.get('display_val', 'all') if self.field_config else 'all'

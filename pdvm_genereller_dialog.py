@@ -99,7 +99,7 @@ class PdvmGenerellerDialog(QWidget):
         # Einfache Erweiterbarkeit: Neues Modul einfach hier eintragen!
         # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
-            'input_controls': 'pdvm_input_controls_manager_v3_autonom.PdvmInputControlsManagerV3',  # ✅ V3 AUTONOM (sauber & linear!)
+            'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ FINALE VERSION (konsolidiert)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
