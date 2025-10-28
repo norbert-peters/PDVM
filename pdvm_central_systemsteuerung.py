@@ -378,6 +378,10 @@ class PdvmCentralSystemsteuerung(QObject):
         
         property_name = f"menu_visible_{menu_guid}"
         self.set_property(property_name, visible)
+        
+        # PERSISTENT SPEICHERN (war vorher vergessen!)
+        self._db.save_all_values()
+        
         logger.info(f"💾 Menüpanel-Status gespeichert: {visible} für Menü {menu_guid}")
     
     def get_group(self, group_guid, db_type='s'):
