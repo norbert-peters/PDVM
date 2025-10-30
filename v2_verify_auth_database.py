@@ -32,10 +32,14 @@ def verify_auth_database():
         
         # Daten parsen und schön anzeigen
         daten = json.loads(row['daten'])
+        print(f"   Benutzer: {daten.get('USER', {})}")
+        print(f"   Settings: {daten.get('SETTINGS', {})}")
         print(f"   Rollen: {daten['PERMISSIONS']['ROLES']}")
         print(f"   Security-Profiles: {daten['PERMISSIONS']['SEC_PROFILES']}")
         print(f"   Mandanten: {daten['MANDANTEN']['LIST']}")
         print(f"   Default-Mandant: {daten['MANDANTEN']['DEFAULT']}")
+        print(f"   Start-Menü: {daten.get('MEINEAPPS', {}).get('START')}")
+        print(f"   Anwendungen: {list(daten.get('ANWENDUNGEN', {}).keys())}")
     
     # sys_mandanten
     print("\n" + "=" * 70)

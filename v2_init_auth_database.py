@@ -78,12 +78,19 @@ class V2AuthDatabaseInit:
     def _create_auth_database(self):
         """Erstellt auth.db (oder öffnet bestehende)"""
         if os.path.exists(self.auth_db_path):
-            print(f"⚠️  {self.auth_db_path} existiert bereits - wird überschrieben!")
-            os.remove(self.auth_db_path)
+            print(f"⚠️  {self.auth_db_path} existiert bereits - Tabellen werden gelöscht!")
+            # Tabellen löschen statt Datei (wegen File-Lock)
+            conn = sqlite3.connect(self.auth_db_path)
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS sys_benutzer")
+            cursor.execute("DROP TABLE IF EXISTS sys_mandanten")
+            conn.commit()
+            conn.close()
+        else:
+            conn = sqlite3.connect(self.auth_db_path)
+            conn.close()
         
-        conn = sqlite3.connect(self.auth_db_path)
-        conn.close()
-        print(f"✅ {self.auth_db_path} erstellt")
+        print(f"✅ {self.auth_db_path} bereit")
     
     def _create_sys_benutzer_table(self):
         """Erstellt sys_benutzer Tabelle"""
@@ -141,30 +148,80 @@ class V2AuthDatabaseInit:
         # User-Daten aus alter DB laden (falls vorhanden)
         old_user_data = self._load_old_user_data()
         
-        # Admin-User
-        admin_data = old_user_data.get('admin@super.de', {})
+        # Admin-User (mit alten Daten oder Defaults)
+        admin_old_data = old_user_data.get('admin@super.de', {})
+        if not admin_old_data:
+            # Default Admin-Daten wenn nicht aus alter DB
+            admin_old_data = {
+                "MeineApps": {
+                    "start": "5ca6674e-b9ce-4581-9756-64e742883f80"
+                },
+                "Anwendungen": {
+                    "Personalwesen": {"Menu": None},
+                    "Finanzwesen": {"Menu": None},
+                    "Benutzerdaten": {"Menu": "e1e77039-d1b5-46ff-b12b-cced0ae0da7c"},
+                    "Administration": {"Menu": "4cfbf1ac-c7db-4a3a-ab37-c5b457b89440"},
+                    "Testbereich": {"Menu": "113c6a2c-af9a-4022-929b-6544799e8954"}
+                },
+                "Benutzer": {
+                    "Anrede": "Herr",
+                    "Name": "Peters",
+                    "Vorname": "Norbert"
+                },
+                "Parameter": {
+                    "country": "DEU",
+                    "mode": "admin",
+                    "language": "de-de"
+                }
+            }
+        
         self._create_user(
             email='admin@super.de',
             password='admin',
-            name='Administrator',
+            name='Norbert Peters',
             roles=['admin'],
             sec_profiles=['sec-admin-full'],
             mandanten=['mandant_001', 'mandant_002'],
             default_mandant='mandant_001',
-            old_data=admin_data
+            old_data=admin_old_data
         )
         
-        # Work-User
-        user_data = old_user_data.get('user@super.de', {})
+        # Work-User (mit alten Daten oder Defaults)
+        user_old_data = old_user_data.get('user@super.de', {})
+        if not user_old_data:
+            # Default User-Daten wenn nicht aus alter DB
+            user_old_data = {
+                "MeineApps": {
+                    "start": "5ca6674e-b9ce-4581-9756-64e742883f80"
+                },
+                "Anwendungen": {
+                    "Personalwesen": {"Menu": None},
+                    "Finanzwesen": {"Menu": None},
+                    "Benutzerdaten": {"Menu": "e1e77039-d1b5-46ff-b12b-cced0ae0da7c"},
+                    "Administration": {"Menu": "4cfbf1ac-c7db-4a3a-ab37-c5b457b89440"},
+                    "Testbereich": {"Menu": "113c6a2c-af9a-4022-929b-6544799e8954"}
+                },
+                "Benutzer": {
+                    "Anrede": "Frau",
+                    "Name": "Hans",
+                    "Vorname": "Laurenne"
+                },
+                "Parameter": {
+                    "country": "DEU",
+                    "mode": "user",
+                    "language": "de-de"
+                }
+            }
+        
         self._create_user(
             email='user@super.de',
             password='user',
-            name='Test User',
+            name='Laurenne Hans',
             roles=['user', 'vertrieb'],
             sec_profiles=['sec-public-read', 'sec-vertrieb'],
             mandanten=['mandant_001'],
             default_mandant='mandant_001',
-            old_data=user_data
+            old_data=user_old_data
         )
     
     def _load_old_user_data(self) -> Dict:
@@ -223,16 +280,20 @@ class V2AuthDatabaseInit:
         # UID generieren
         uid = str(uuid.uuid4())
         
-        # Daten-Dict aufbauen
+        # Daten-Dict aufbauen (mit alter Struktur falls vorhanden)
         daten_dict = {
-            "USER": old_data.get('USER', {}) if old_data else {
+            "USER": old_data.get('Benutzer', {}) if old_data else {
+                "ANREDE": "",
                 "NAME": name,
+                "VORNAME": "",
                 "EMAIL": email,
                 "TELEFON": ""
             },
-            "SETTINGS": old_data.get('SETTINGS', {}) if old_data else {
+            "SETTINGS": {
                 "THEME": "light",
-                "LANGUAGE": "DEU",
+                "LANGUAGE": old_data.get('Parameter', {}).get('language', 'de-de') if old_data else 'de-de',
+                "COUNTRY": old_data.get('Parameter', {}).get('country', 'DEU') if old_data else 'DEU',
+                "MODE": old_data.get('Parameter', {}).get('mode', 'user') if old_data else 'user',
                 "FONT_SIZE": 10,
                 "STICHTAG": self.timestamp
             },
@@ -243,6 +304,26 @@ class V2AuthDatabaseInit:
             "PERMISSIONS": {
                 "ROLES": roles,
                 "SEC_PROFILES": sec_profiles
+            },
+            "MEINEAPPS": {
+                "START": old_data.get('MeineApps', {}).get('start') if old_data else None
+            },
+            "ANWENDUNGEN": {
+                "PERSONALWESEN": {
+                    "MENU": old_data.get('Anwendungen', {}).get('Personalwesen', {}).get('Menu') if old_data else None
+                },
+                "FINANZWESEN": {
+                    "MENU": old_data.get('Anwendungen', {}).get('Finanzwesen', {}).get('Menu') if old_data else None
+                },
+                "BENUTZERDATEN": {
+                    "MENU": old_data.get('Anwendungen', {}).get('Benutzerdaten', {}).get('Menu') if old_data else None
+                },
+                "ADMINISTRATION": {
+                    "MENU": old_data.get('Anwendungen', {}).get('Administration', {}).get('Menu') if old_data else None
+                },
+                "TESTBEREICH": {
+                    "MENU": old_data.get('Anwendungen', {}).get('Testbereich', {}).get('Menu') if old_data else None
+                }
             }
         }
         
