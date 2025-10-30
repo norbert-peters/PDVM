@@ -53,13 +53,14 @@ class PdvmInputControlsManager(QObject):
     refresh_requested = pyqtSignal()
     save_completed = pyqtSignal()  # NEU: Nach erfolgreichem Speichern
     
-    def __init__(self, framedaten_db, selected_guid: str, frame_guid: str = None):
+    def __init__(self, framedaten_db, selected_guid: str, frame_guid: str = None, main_app=None):
         """
         Args:
             framedaten_db: Framedaten-DB (für ROOT_TABLE, HEADER, METADATEN)
                           Die DB-Instanz IST bereits für die Frame-GUID - keine redundante Speicherung!
             selected_guid: GUID des ausgewählten Datensatzes
             frame_guid: DEPRECATED - wird ignoriert (framedaten_db ist die DB für diese Frame)
+            main_app: OPTIONAL - Referenz zur MainApp (für spätere Erweiterungen)
         """
         super().__init__()
         
@@ -67,6 +68,7 @@ class PdvmInputControlsManager(QObject):
         
         self.framedaten_db = framedaten_db
         self.selected_guid = selected_guid
+        self.main_app = main_app  # ✅ Speichern (aktuell ungenutzt, für Kompatibilität)
         
         logger.info(f"  📋 Selected-GUID: {self.selected_guid}")
         

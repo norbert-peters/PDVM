@@ -57,13 +57,14 @@ class PdvmGenerellerDialog(QWidget):
     # Signal wenn Datensatz ausgewählt wird
     datensatz_ausgewaehlt = pyqtSignal(str)  # GUID des ausgewählten Datensatzes
     
-    def __init__(self, frame_guid, parent=None):
+    def __init__(self, frame_guid, parent=None, main_app=None):
         """
         Initialisiert den Generellen Dialog
         
         Args:
             frame_guid: GUID der Frame-Konfiguration
             parent: Parent-Widget (Arbeitsbereich des Systems)
+            main_app: Referenz zur MainAppComplete (für Menü-Editor Module)
         """
         super().__init__(parent)
         
@@ -76,6 +77,7 @@ class PdvmGenerellerDialog(QWidget):
         
         self.frame_guid = frame_guid
         self.gcs = gcs
+        self.main_app = main_app  # ✅ MainApp-Referenz speichern
         
         # Framedaten-Instanz
         self.framedaten_db = None
@@ -100,6 +102,7 @@ class PdvmGenerellerDialog(QWidget):
         # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
             'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ FINALE VERSION (konsolidiert)
+            'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration (Phase 1: Platzhalter)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
@@ -595,7 +598,8 @@ class PdvmGenerellerDialog(QWidget):
             # WICHTIG: Als Instanzvariable speichern, damit es nicht garbage-collected wird!
             self.current_edit_module = ModuleClass(
                 framedaten_db=self.framedaten_db,
-                selected_guid=selected_guid
+                selected_guid=selected_guid,
+                main_app=self.main_app  # ✅ MainApp-Referenz durchreichen für menu_editor
             )
             
             # Signal verbinden: refresh_requested → Dialog.refresh()

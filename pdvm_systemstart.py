@@ -976,7 +976,8 @@ class MainAppComplete(QMainWindow):
             # Dialog erstellen mit frame_guid und Parent (Arbeitsbereich)
             dialog = PdvmGenerellerDialog(
                 frame_guid=frame_guid,
-                parent=self.content_frame
+                parent=self.content_frame,
+                main_app=self  # ✅ MainApp-Referenz für Menü-Editor Module
             )
             
             # Dialog in Arbeitsbereich anzeigen
@@ -1003,7 +1004,7 @@ class MainAppComplete(QMainWindow):
                 "Siehe main.log für Details"
             ], small=True)
 
-    def show_text_klein(self, text):
+    def show_text_klein(self, text): 
         """Kleine Meldung unten anhängen."""
         # Einfache Implementierung: Zeige als normalen Text
         self._show_label(f"{text}", small=True, clear_content=True)

@@ -95,6 +95,7 @@ class PdvmViewController(QObject):
         self.view_config = None
         self.controls_config = None
         self.table_name = None
+        self.no_data_mode = False  # ✅ Flag für Tabellen ohne Metadaten (z.B. Menüs)
         
         # Daten-Container
         self.raw_records = []
@@ -202,7 +203,32 @@ class PdvmViewController(QObject):
             
             self.table_name = root_data
             
-            # METADATEN
+            # ✅ NO_DATA Flag prüfen (für Tabellen ohne Metadaten wie Menüs)
+            no_data_flag = view_db.get_static_value(gruppe='ROOT', feld='NO_DATA')
+            self.no_data_mode = bool(no_data_flag)  # False wenn nicht gesetzt
+            
+            if self.no_data_mode:
+                logger.info("🎯 NO_DATA Modus aktiviert - überspringe METADATEN-Ladung")
+                # Nur automatische Spalten (uid, name, dummy)
+                self.view_config = {
+                    'ROOT': {'view_table': root_data},
+                    'controls': {},  # Keine benutzerdefinierten Controls
+                    'standard_control': {
+                        'dummy': {
+                            'feld': 'dummy',
+                            'name': 'Dummy',
+                            'type': 'text',
+                            'show': False,
+                            'expert_mode': False,
+                            'display_order': 999,
+                            'expert_order': 999
+                        }
+                    }
+                }
+                logger.info("✅ ViewDaten geladen im NO_DATA Modus (nur automatische Spalten)")
+                return  # Überspringe METADATEN-Ladung
+            
+            # METADATEN (nur wenn NOT no_data_mode)
             metadaten = view_db.get_static_value(gruppe='METADATEN', feld=root_data.upper())
             if not metadaten:
                 raise ValueError(f"METADATEN.{root_data.upper()} nicht gefunden")
