@@ -12,13 +12,21 @@ VERSION: 1.0
 import sys
 import sqlite3
 import json
-import bcrypt
+
+# bcrypt Import mit Fallback
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    print("⚠️ bcrypt nicht verfügbar - verwende einfachen Hash-Vergleich")
+    BCRYPT_AVAILABLE = False
+
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QLineEdit, QPushButton, QMessageBox, QApplication
+    QLineEdit, QPushButton, QMessageBox, QApplication, QCheckBox
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtGui import QFont, QIcon, QPixmap
 
 
 class V2LoginDialog(QDialog):
@@ -31,79 +39,129 @@ class V2LoginDialog(QDialog):
         self.setup_ui()
     
     def setup_ui(self):
-        """UI aufbauen"""
-        self.setWindowTitle("PDVM V2.0 - Login")
+        """UI aufbauen - Alte Optik aus pdvm_login.py"""
+        self.setWindowTitle("PDVM V2.0 - Sichere Anmeldung")
+        self.setFixedSize(470, 330)
         self.setModal(True)
-        self.setMinimumWidth(400)
         
-        layout = QVBoxLayout()
+        # Fenster-Flags für Vordergrund
+        self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.WindowSystemMenuHint)
+        
+        layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
         
-        # Titel
-        title = QLabel("PDVM V2.0")
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setBold(True)
+        # Titel mit Styling
+        title = QLabel("🔐 PDVM V2.0 - Sichere Anmeldung")
+        title_font = QFont("Segoe UI", 16, QFont.Bold)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("""
+            QLabel {
+                color: #2c3e50;
+                padding: 10px;
+                background-color: #ecf0f1;
+                border-radius: 8px;
+                border: 2px solid #3498db;
+            }
+        """)
         layout.addWidget(title)
-        
-        subtitle = QLabel("Anmeldung")
-        subtitle.setAlignment(Qt.AlignCenter)
-        layout.addWidget(subtitle)
-        
-        layout.addSpacing(20)
         
         # Email
         email_label = QLabel("E-Mail:")
+        email_label.setMinimumWidth(100)
         layout.addWidget(email_label)
         
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("admin@super.de")
+        self.email_input.setPlaceholderText("E-Mail eingeben...")
         self.email_input.returnPressed.connect(self.on_login_clicked)
         layout.addWidget(self.email_input)
         
         # Passwort
         password_label = QLabel("Passwort:")
+        password_label.setMinimumWidth(100)
         layout.addWidget(password_label)
         
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setPlaceholderText("Passwort eingeben")
+        self.password_input.setPlaceholderText("Passwort eingeben...")
         self.password_input.returnPressed.connect(self.on_login_clicked)
         layout.addWidget(self.password_input)
         
-        layout.addSpacing(20)
+        # Passwort anzeigen Checkbox
+        self.show_password_cb = QCheckBox("👁️ Passwort anzeigen")
+        self.show_password_cb.stateChanged.connect(self._toggle_password)
+        layout.addWidget(self.show_password_cb)
         
         # Buttons
         button_layout = QHBoxLayout()
         
-        self.login_button = QPushButton("Anmelden")
+        self.cancel_button = QPushButton("Abbrechen")
+        self.cancel_button.clicked.connect(self.reject)
+        
+        self.demo_button = QPushButton("🧪 Demo Login")
+        self.demo_button.clicked.connect(self.handle_demo_login)
+        self.demo_button.setToolTip("Schneller Admin-Login: admin@super.de")
+        
+        self.login_button = QPushButton("🔑 Anmeldung")
         self.login_button.setDefault(True)
         self.login_button.clicked.connect(self.on_login_clicked)
-        button_layout.addWidget(self.login_button)
         
-        cancel_button = QPushButton("Abbrechen")
-        cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_button)
+        # Button-Styling
+        button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                font-size: 11pt;
+                border-radius: 6px;
+                border: 1px solid #bdc3c7;
+            }
+            QPushButton:hover {
+                background-color: #ecf0f1;
+            }
+        """
+        self.cancel_button.setStyleSheet(button_style)
+        self.demo_button.setStyleSheet(button_style + """
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: 1px solid #e67e22;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+        """)
+        self.login_button.setStyleSheet(button_style + """
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: 1px solid #229954;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.demo_button)
+        button_layout.addWidget(self.login_button)
         
         layout.addLayout(button_layout)
         
-        # Info-Text
-        layout.addSpacing(20)
-        info_label = QLabel(
-            "Test-Zugänge:\n"
-            "• Admin: admin@super.de / admin\n"
-            "• User: user@super.de / user"
-        )
-        info_label.setStyleSheet("color: gray; font-size: 9pt;")
-        layout.addWidget(info_label)
-        
-        self.setLayout(layout)
-        
         # Focus auf Email-Feld
         self.email_input.setFocus()
+    
+    def _toggle_password(self, state):
+        """Passwort-Sichtbarkeit umschalten"""
+        if state == Qt.Checked:
+            self.password_input.setEchoMode(QLineEdit.Normal)
+        else:
+            self.password_input.setEchoMode(QLineEdit.Password)
+    
+    def handle_demo_login(self):
+        """Demo-Login: Automatisch als Admin einloggen"""
+        self.email_input.setText("admin@super.de")
+        self.password_input.setText("admin")
+        self.on_login_clicked()
     
     def on_login_clicked(self):
         """Login-Button geklickt"""
@@ -187,7 +245,7 @@ class V2LoginDialog(QDialog):
     
     def _verify_password(self, password: str, hashed: str) -> bool:
         """
-        Passwort mit bcrypt verifizieren
+        Passwort mit bcrypt verifizieren (oder einfacher Vergleich als Fallback)
         
         Args:
             password: Klartext-Passwort
@@ -197,10 +255,14 @@ class V2LoginDialog(QDialog):
             True wenn Passwort korrekt
         """
         try:
-            return bcrypt.checkpw(
-                password.encode('utf-8'), 
-                hashed.encode('utf-8')
-            )
+            if BCRYPT_AVAILABLE:
+                return bcrypt.checkpw(
+                    password.encode('utf-8'), 
+                    hashed.encode('utf-8')
+                )
+            else:
+                # Fallback: Einfacher String-Vergleich (nur für Demo!)
+                return password == hashed
         except Exception as e:
             print(f"❌ Fehler bei Passwort-Verifikation: {e}")
             return False
