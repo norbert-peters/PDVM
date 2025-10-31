@@ -7,7 +7,7 @@ Kompletter Login-Flow:
 3. Hauptanwendung starten (rudimentär)
 
 AUTOR: Norbert Peters
-DATUM: 30.10.2025
+DATUM: 30.10.2025 
 VERSION: 1.0
 """
 
@@ -18,6 +18,7 @@ from PyQt5.QtGui import QFont
 
 from v2_login_dialog import V2LoginDialog
 from v2_mandanten_dialog import V2MandantenDialog
+from v2_gcs import init_gcs, get_gcs, reset_gcs
 
 
 class V2MainWindow(QMainWindow):
@@ -27,12 +28,13 @@ class V2MainWindow(QMainWindow):
     Zeigt User-Daten und Mandanten-Info an
     """
     
-    def __init__(self, user_data: dict, mandant_id: str, mandant_info: dict):
+    def __init__(self, user_data: dict, mandant_guid: str, mandant_info: dict):
         super().__init__()
         
         # ⭐ User-Daten speichern (NICHT erneut laden!)
         self.user_data = user_data
-        self.mandant_id = mandant_id
+        self.mandant_guid = mandant_guid  # GUID
+        self.mandant_id = mandant_info['mandant_id']  # mandant_001, mandant_002
         self.mandant_info = mandant_info
         
         self.setup_ui()
@@ -105,6 +107,15 @@ class V2MainWindow(QMainWindow):
         apps_info.setStyleSheet("font-size: 11pt; padding: 20px; background-color: #e3f2fd; border-radius: 5px;")
         layout.addWidget(apps_info)
         
+        # GCS-Test
+        gcs_test = QLabel(
+            f"🔧 <b>GCS V2.0 Status:</b><br>"
+            f"✅ GCS initialisiert: {get_gcs() is not None}<br>"
+            f"📂 DB-Pfad: {get_gcs().mandant_db_path if get_gcs() else 'N/A'}"
+        )
+        gcs_test.setStyleSheet("font-size: 10pt; padding: 15px; background-color: #f5f5f5; border-radius: 5px; border: 2px dashed #999;")
+        layout.addWidget(gcs_test)
+        
         layout.addStretch()
         
         central_widget.setLayout(layout)
@@ -115,7 +126,14 @@ class V2MainWindow(QMainWindow):
         print("=" * 70)
         print(f"User: {self.user_data['name']}")
         print(f"Mandant: {self.mandant_info['name']} ({self.mandant_id})")
+        print(f"GCS verfügbar: {get_gcs() is not None}")
         print("=" * 70 + "\n")
+    
+    def closeEvent(self, event):
+        """Beim Schließen GCS zurücksetzen"""
+        print("\n🔄 Hauptfenster schließt - GCS wird zurückgesetzt")
+        reset_gcs()
+        event.accept()
 
 
 def main():
@@ -154,13 +172,25 @@ def main():
     
     selected_mandant = mandanten_dialog.selected_mandant
     mandant_info = mandanten_dialog._load_mandant_info(selected_mandant)
+    
+    # Mandanten-Daten aus auth.db holen (für GCS)
+    mandant_data = mandanten_dialog._load_mandant_data(selected_mandant)
+    
     print(f"✅ Mandant gewählt: {mandant_info['name']} ({selected_mandant})")
+    
+    # ⭐ GCS INITIALISIEREN (EINMALIG!)
+    print("\n[2.5/3] GCS initialisieren...")
+    gcs = init_gcs(
+        user_data=user_data,
+        mandant_guid=selected_mandant,  # ⭐ GUID!
+        mandant_data=mandant_data
+    )
     
     # PHASE 3: HAUPTANWENDUNG
     print("\n[3/3] Hauptanwendung starten...")
     main_window = V2MainWindow(
         user_data=user_data,           # ⭐ Weitergegeben, nicht erneut laden!
-        mandant_id=selected_mandant,
+        mandant_guid=selected_mandant,  # ⭐ GUID!
         mandant_info=mandant_info
     )
     

@@ -72,15 +72,15 @@ class V2MandantenDialog(QDialog):
         
         # Dropdown befüllen
         default_index = 0
-        for idx, mandant_id in enumerate(mandanten_list):
-            mandant_info = self._load_mandant_info(mandant_id)
+        for idx, mandant_guid in enumerate(mandanten_list):
+            mandant_info = self._load_mandant_info(mandant_guid)
             
             # Anzeige: "Hauptverwaltung (mandant_001)"
-            display_text = f"{mandant_info['name']} ({mandant_id})"
-            self.combo_mandanten.addItem(display_text, mandant_id)
+            display_text = f"{mandant_info['name']} ({mandant_info['mandant_id']})"
+            self.combo_mandanten.addItem(display_text, mandant_guid)
             
             # Default vormerken
-            if mandant_id == default_mandant:
+            if mandant_guid == default_mandant:
                 default_index = idx
         
         # Default vorauswählen
@@ -106,15 +106,15 @@ class V2MandantenDialog(QDialog):
         
         self.setLayout(layout)
     
-    def _load_mandant_info(self, mandant_id: str) -> dict:
+    def _load_mandant_info(self, mandant_guid: str) -> dict:
         """
-        Lädt Mandanten-Info aus sys_mandanten
+        Lädt Mandanten-Info aus sys_mandanten (kurze Version)
         
         Args:
-            mandant_id: z.B. "mandant_001"
+            mandant_guid: GUID aus sys_mandanten.uid
         
         Returns:
-            {'name': 'Hauptverwaltung', 'db_name': 'Mandant1', ...}
+            {'name': 'Hauptverwaltung', 'mandant_id': 'mandant_001', ...}
         """
         try:
             conn = sqlite3.connect(self.auth_db_path)
@@ -123,7 +123,7 @@ class V2MandantenDialog(QDialog):
             
             cursor.execute(
                 "SELECT * FROM sys_mandanten WHERE uid = ?",
-                (mandant_id,)
+                (mandant_guid,)
             )
             
             row = cursor.fetchone()
@@ -134,26 +134,61 @@ class V2MandantenDialog(QDialog):
                 return {
                     'name': daten['ROOT']['BEZEICHNUNG'],
                     'db_name': daten['ROOT']['DB_NAME'],
+                    'mandant_id': daten['METADATEN']['MANDANT_ID'],  # ⭐ Aus Daten!
                     'status': daten['METADATEN']['STATUS'],
                     'country': daten['METADATEN']['COUNTRY']
                 }
             else:
                 # Fallback wenn Mandant nicht in DB
                 return {
-                    'name': mandant_id,
-                    'db_name': mandant_id,
+                    'name': mandant_guid,
+                    'db_name': mandant_guid,
+                    'mandant_id': 'unknown',
                     'status': 'unbekannt',
                     'country': 'DEU'
                 }
         
         except Exception as e:
-            print(f"⚠️ Fehler beim Laden von Mandant {mandant_id}: {e}")
+            print(f"⚠️ Fehler beim Laden von Mandant {mandant_guid}: {e}")
             return {
-                'name': mandant_id,
-                'db_name': mandant_id,
+                'name': mandant_guid,
+                'db_name': mandant_guid,
+                'mandant_id': 'error',
                 'status': 'fehler',
                 'country': 'DEU'
             }
+    
+    def _load_mandant_data(self, mandant_guid: str) -> dict:
+        """
+        Lädt KOMPLETTE Mandanten-Daten für GCS
+        
+        Args:
+            mandant_guid: GUID aus sys_mandanten.uid
+        
+        Returns:
+            Komplettes JSON aus sys_mandanten.daten
+        """
+        try:
+            conn = sqlite3.connect(self.auth_db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                "SELECT daten FROM sys_mandanten WHERE uid = ?",
+                (mandant_guid,)
+            )
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return json.loads(row['daten'])
+            else:
+                raise ValueError(f"Mandant {mandant_guid} nicht gefunden!")
+        
+        except Exception as e:
+            print(f"❌ Fehler beim Laden von Mandanten-Daten: {e}")
+            raise
     
     def on_mandant_selected(self):
         """Mandant wurde ausgewählt"""

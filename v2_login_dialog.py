@@ -168,6 +168,13 @@ class V2LoginDialog(QDialog):
         email = self.email_input.text().strip()
         password = self.password_input.text()
         
+        # 🔍 DEBUG
+        print(f"\n🔍 LOGIN-VERSUCH:")
+        print(f"   Email: {email}")
+        print(f"   Passwort: '{password}'")
+        print(f"   Passwort-Länge: {len(password)}")
+        print(f"   Passwort repr(): {repr(password)}")
+        
         # Validierung
         if not email:
             QMessageBox.warning(self, "Fehler", "Bitte E-Mail eingeben!")
@@ -203,8 +210,16 @@ class V2LoginDialog(QDialog):
                 self.email_input.setFocus()
                 return
             
+            # 🔍 DEBUG
+            print(f"✅ Benutzer gefunden: {user_row['name']}")
+            print(f"   Gespeicherter Hash: {user_row['passwort']}")
+            print(f"   Hash-Länge: {len(user_row['passwort'])}")
+            
             # Passwort prüfen (bcrypt)
-            if not self._verify_password(password, user_row['passwort']):
+            verify_result = self._verify_password(password, user_row['passwort'])
+            print(f"   Verifizierungs-Ergebnis: {verify_result}")
+            
+            if not verify_result:
                 QMessageBox.warning(
                     self, 
                     "Fehler", 
@@ -255,16 +270,27 @@ class V2LoginDialog(QDialog):
             True wenn Passwort korrekt
         """
         try:
+            print(f"\n🔍 _verify_password() aufgerufen:")
+            print(f"   BCRYPT_AVAILABLE: {BCRYPT_AVAILABLE}")
+            print(f"   password: '{password}'")
+            print(f"   hashed: {hashed}")
+            
             if BCRYPT_AVAILABLE:
-                return bcrypt.checkpw(
+                result = bcrypt.checkpw(
                     password.encode('utf-8'), 
                     hashed.encode('utf-8')
                 )
+                print(f"   bcrypt.checkpw() Result: {result}")
+                return result
             else:
                 # Fallback: Einfacher String-Vergleich (nur für Demo!)
-                return password == hashed
+                result = password == hashed
+                print(f"   String-Vergleich Result: {result}")
+                return result
         except Exception as e:
             print(f"❌ Fehler bei Passwort-Verifikation: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 

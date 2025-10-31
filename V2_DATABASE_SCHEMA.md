@@ -30,7 +30,7 @@ CREATE TABLE <tabellenname> (
     historisch INTEGER,                -- 0 = keine Historie, 1 = mit Historie
     source_hash TEXT,                  -- Reserviert (vorerst nicht verwendet)
     sec_id TEXT,                       -- Zugriffsberechtigung (GUID)
-    gilt_bis TEXT,                     -- PdvmDateTime (999365.00000 = offen)
+    gilt_bis TEXT,                     -- PdvmDateTime (9999365.00000 = offen)
     created_at TEXT,                   -- PdvmDateTime (Erstellung)
     modified_at TEXT                   -- PdvmDateTime (letzte Änderung)
 );
@@ -199,12 +199,12 @@ INSERT INTO kunde (
 
 ```python
 # PdvmDateTime Format
-'999365.00000'  # Offen (keine Begrenzung)
+'9999365.00000'  # Offen (keine Begrenzung)
 '2026100.00000' # Gültig bis 10.04.2026
 
 # Abfrage nur gültiger Datensätze
 SELECT * FROM kunde 
-WHERE gilt_bis >= ? OR gilt_bis = '999365.00000'
+WHERE gilt_bis >= ? OR gilt_bis = '9999365.00000'
 ```
 
 ---
