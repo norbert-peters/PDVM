@@ -11,13 +11,15 @@ WICHTIG: Nach Login KEINE Verbindung mehr zu auth.db!
 
 AUTOR: Norbert Peters
 DATUM: 30.10.2025
-VERSION: 1.0
+VERSION: 2.0
 """
 
 import os
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional
+from v2_pdvm_datenbank import PdvmDatenbank
+from v2_pdvm_central_datenbank import PdvmCentralDatenbank
 
 
 # Globale GCS-Instanz (Singleton)
@@ -53,6 +55,9 @@ class V2GlobalCentralSystem:
         # ⭐ Mandanten-Datenbank-Pfad
         self.mandant_db_path = self._get_mandant_db_path(self.mandant_id)
         
+        # ⭐ PdvmInit.json für alte Datenbank-Klassen aktualisieren
+        self._update_pdvm_init_json()
+        
         # Benutzer-Einstellungen (Shortcuts)
         self.country = self.user_daten['SETTINGS']['COUNTRY']
         self.language = self.user_daten['SETTINGS']['LANGUAGE']
@@ -74,6 +79,15 @@ class V2GlobalCentralSystem:
         self.mandant_country = mandant_data['METADATEN']['COUNTRY']
         self.mandant_status = mandant_data['METADATEN']['STATUS']
         
+        # System-GUID für Anwendungsdaten (0000...)
+        self.system_guid = "00000000-0000-0000-0000-000000000000"
+        
+        # ⭐ 4 Datenbank-Instanzen initialisieren
+        self._init_database_instances()
+        
+        # ⭐ Mandanten-Daten in man_db abgleichen
+        self._sync_mandant_data_to_man_db()
+        
         print("\n" + "="*70)
         print("✅ GCS V2.0 INITIALISIERT")
         print("="*70)
@@ -87,6 +101,73 @@ class V2GlobalCentralSystem:
         print(f"   Mode: {self.mode}")
         print(f"   Stichtag: {self.stichtag}")
         print("="*70 + "\n")
+    
+    def _init_database_instances(self):
+        """
+        Initialisiert die 4 Datenbank-Instanzen für GCS
+        
+        1. u_db = Benutzerstamm (OHNE GUID) - Fiktive Tabelle, nur Login-Daten
+        2. app_db = sys_anwendungsdaten (user_guid) - User-Settings
+        3. db = sys_systemsteuerung (user_guid) - Systemsteuerung
+        4. man_db = sys_anwendungsdaten (mandant_guid) - Mandanten-Daten
+        """
+        try:
+            # 1. Benutzerstamm (fiktiv - OHNE GUID!)
+            self.u_db = PdvmCentralDatenbank('benutzerstamm')
+            self.u_db.set_data(self.user_daten)
+            
+            # 2. User-Anwendungsdaten
+            self.app_db = PdvmCentralDatenbank('sys_anwendungsdaten', self.user_guid)
+            
+            # 3. Systemsteuerung
+            self.db = PdvmCentralDatenbank('sys_systemsteuerung', self.user_guid)
+            
+            # 4. Mandanten-Anwendungsdaten
+            self.man_db = PdvmCentralDatenbank('sys_anwendungsdaten', self.mandant_guid)
+            
+            print(f"✅ 4 Datenbank-Instanzen initialisiert")
+            print(f"   u_db: benutzerstamm [fiktiv, OHNE GUID]")
+            print(f"   app_db: sys_anwendungsdaten[{self.user_guid}]")
+            print(f"   db: sys_systemsteuerung[{self.user_guid}]")
+            print(f"   man_db: sys_anwendungsdaten[{self.mandant_guid}]")
+            
+        except Exception as e:
+            print(f"⚠️ Fehler bei Datenbank-Initialisierung: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _sync_mandant_data_to_man_db(self):
+        """
+        Gleicht Mandanten-Daten aus auth.db mit man_db ab
+        
+        LINEAR:
+        1. set_data(mandant_data) → Überschreibt alle Daten
+        2. set_value() für Zusatz-Felder (DB_PATH, LETZTER_LOGIN)
+        3. save_all_values() → Fertig!
+        """
+        try:
+            from pdvm_datetime import Pdvm_DateTime
+            dt = Pdvm_DateTime("DEU")
+            letzter_login = dt.PdvmDateTimeNow()
+            
+            # 1. Mandanten-Daten aus auth.db überschreiben
+            self.man_db.set_data(self.mandant_data, self.mandant_guid)
+            
+            # 2. Zusätzliche Felder setzen
+            self.man_db.set_value('ROOT', 'DB_PATH', self.mandant_db_path, 1001.0)
+            self.man_db.set_value('METADATEN', 'LETZTER_LOGIN', letzter_login, letzter_login)
+            
+            # 3. Speichern
+            self.man_db.save_all_values()
+            
+            print(f"💾 Mandanten-Daten abgeglichen in man_db")
+            print(f"   DB-Pfad: {self.mandant_db_path}")
+            print(f"   Letzter Login: {letzter_login}")
+            
+        except Exception as e:
+            print(f"⚠️ Fehler beim Abgleich der Mandanten-Daten: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _get_mandant_db_path(self, mandant_id: str) -> str:
         """
@@ -104,6 +185,40 @@ class V2GlobalCentralSystem:
             )
         
         return str(db_path)
+    
+    def _update_pdvm_init_json(self):
+        """
+        Aktualisiert PdvmInit.json mit aktuellem Datenbank-Pfad
+        
+        Die alten pdvm_datenbank/pdvm_central_datenbank Klassen lesen
+        den DB-Pfad aus PdvmInit.json. In V2.0 setzen wir diesen Pfad
+        beim Login, damit alte und neue Klassen gemeinsam funktionieren.
+        """
+        try:
+            init_file_path = Path(__file__).parent / "PdvmInit.json"
+            
+            # PdvmInit.json laden oder neu erstellen
+            if init_file_path.exists():
+                with open(init_file_path, 'r', encoding='utf-8') as f:
+                    init_data = json.load(f)
+            else:
+                init_data = {"ROOT": {}}
+            
+            # Datenbank-Pfad setzen (nur Dateiname, nicht vollständiger Pfad!)
+            init_data["ROOT"]["datenbank"] = str(Path(self.mandant_db_path).name)
+            
+            # Zusätzlich: Vollständigen Pfad als Backup speichern
+            init_data["ROOT"]["datenbank_pfad"] = str(self.mandant_db_path)
+            
+            # Speichern
+            with open(init_file_path, 'w', encoding='utf-8') as f:
+                json.dump(init_data, f, ensure_ascii=False, indent=4)
+            
+            print(f"📝 PdvmInit.json aktualisiert: {init_data['ROOT']['datenbank']}")
+            
+        except Exception as e:
+            print(f"⚠️ Fehler beim Aktualisieren von PdvmInit.json: {e}")
+            # Nicht kritisch
     
     def get_user_setting(self, key: str) -> Any:
         """
@@ -188,6 +303,8 @@ class V2GlobalCentralSystem:
             'mode': self.mode,
             'stichtag': self.stichtag
         }
+    
+
 
 
 def init_gcs(user_data: Dict, mandant_guid: str, mandant_data: Dict) -> V2GlobalCentralSystem:

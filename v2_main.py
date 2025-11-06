@@ -12,13 +12,84 @@ VERSION: 1.0
 """
 
 import sys
+import os
+import logging
+import glob
+import re
+ 
+# UTF-8 Setup
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+
+def get_next_log_filename():
+    """
+    Ermittelt den nächsten Log-Dateinamen basierend auf Start-Counter.
+    
+    LOGIK:
+    - Bei jedem 10. Start wird die Nummer hochgezählt
+    - Start-Counter wird in '.v2_main_starts' gespeichert
+    - Log-Dateien: v2_main_1.log, v2_main_2.log, v2_main_3.log, ...
+    
+    Returns:
+        str: Log-Dateiname (z.B. "v2_main_1.log")
+    """
+    counter_file = '.v2_main_starts'
+    
+    # 1. Start-Counter laden (oder initialisieren)
+    if os.path.exists(counter_file):
+        try:
+            with open(counter_file, 'r', encoding='utf-8') as f:
+                start_count = int(f.read().strip())
+        except (ValueError, IOError):
+            start_count = 0
+    else:
+        start_count = 0
+    
+    # 2. Start-Counter hochzählen
+    start_count += 1
+    
+    # 3. Start-Counter speichern
+    try:
+        with open(counter_file, 'w', encoding='utf-8') as f:
+            f.write(str(start_count))
+    except IOError as e:
+        print(f"⚠️ Warnung: Start-Counter konnte nicht gespeichert werden: {e}")
+    
+    # 4. Log-Nummer berechnen (alle 10 Starts eine neue Datei)
+    log_number = ((start_count - 1) // 10) + 1
+    
+    # 5. Log-Dateiname erstellen
+    log_filename = f"v2_main_{log_number}.log"
+    
+    print(f"🚀 Start #{start_count} → Log: {log_filename}")
+    
+    return log_filename
+
+
+# Logging Setup mit automatischer Rotation
+log_filename = get_next_log_filename()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler(log_filename, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+logger = logging.getLogger(__name__)
+logger.info(f"📝 Logging initialisiert: {log_filename}")
+
 from PyQt5.QtWidgets import QApplication, QDialog, QMainWindow, QLabel, QVBoxLayout, QWidget
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from v2_login_dialog import V2LoginDialog
 from v2_mandanten_dialog import V2MandantenDialog
-from v2_gcs import init_gcs, get_gcs, reset_gcs
+from v2_central_systemsteuerung import initialize_gcs, get_gcs, is_gcs_initialized
 
 
 class V2MainWindow(QMainWindow):
@@ -131,8 +202,8 @@ class V2MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Beim Schließen GCS zurücksetzen"""
-        print("\n🔄 Hauptfenster schließt - GCS wird zurückgesetzt")
-        reset_gcs()
+        print("\n🔄 Hauptfenster schließt")
+        # GCS wird automatisch freigegeben
         event.accept()
 
 
@@ -180,19 +251,39 @@ def main():
     
     # ⭐ GCS INITIALISIEREN (EINMALIG!)
     print("\n[2.5/3] GCS initialisieren...")
-    gcs = init_gcs(
-        user_data=user_data,
-        mandant_guid=selected_mandant,  # ⭐ GUID!
-        mandant_data=mandant_data
-    )
+    gcs = initialize_gcs(
+        user_guid=user_data['uid'],     # ⭐ User-GUID!
+        user_data=user_data['daten'],   # ⭐ User-Daten (dict)!
+        mandant_guid=selected_mandant,  # ⭐ Mandant-GUID!
+        mandant_data=mandant_data       # ⭐ Mandanten-Daten (dict)!
+    ) 
+    
+    # ⭐ MENÜ-SYSTEM PRÜFEN
+    print("\n[2.7/3] Menü-System prüfen...")
+    try:
+        from v2_menu_storage import get_menu_storage
+        
+        storage = get_menu_storage()
+        if storage:
+            # Liste alle verfügbaren Menüs
+            menus = storage.list_all_menus()
+            print(f"   ✅ {len(menus)} Menüs in Mandanten-DB gefunden")
+            
+            # Prüfe ob Startmenü existiert
+            start_menu_guid = user_data['daten'].get('MEINEAPPS', {}).get('START')
+            if start_menu_guid and storage.menu_exists(start_menu_guid):
+                print(f"   ✅ Startmenü konfiguriert: {start_menu_guid}")
+            else:
+                print(f"   ⚠️ Startmenü {start_menu_guid} nicht gefunden!")
+    except Exception as e:
+        print(f"   ⚠️ Menü-Prüfung übersprungen: {e}")
     
     # PHASE 3: HAUPTANWENDUNG
-    print("\n[3/3] Hauptanwendung starten...")
-    main_window = V2MainWindow(
-        user_data=user_data,           # ⭐ Weitergegeben, nicht erneut laden!
-        mandant_guid=selected_mandant,  # ⭐ GUID!
-        mandant_info=mandant_info
-    )
+    print("\n[3/3] Hauptanwendung mit Menü starten...")
+    
+    # V2.0: Verwende v2_systemstart.py als Hauptanwendung
+    from v2_systemstart import V2MainAppComplete
+    main_window = V2MainAppComplete()
     
     main_window.show()
     

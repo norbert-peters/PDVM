@@ -1,6 +1,7 @@
 {
     "ROOT": {
-        "datenbank": "PdvmManager.db",
-        "lizenz": "12345678-1234-1234-1234-123456789012"
+        "datenbank": "Daten/mandant_001/datenbank.db",
+        "lizenz": "12345678-1234-1234-1234-123456789012",
+        "datenbank_pfad": "C:\\Users\\norbe\\OneDrive\\Dokumente\\MyApplication\\Daten\\mandant_001\\datenbank.db"
     }
 }

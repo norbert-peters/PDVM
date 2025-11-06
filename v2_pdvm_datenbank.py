@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# pdvm_datenbank.py - BEREINIGTE LINEARE VERSION
+# v2_pdvm_datenbank.py - V2.0 VERSION (KOPIE VON pdvm_datenbank.py)
 """
+V2.0 Datenbankschicht - Identisch mit pdvm_datenbank.py
 Saubere, lineare Datenbankschicht ohne Redundanzen und Reparatur-Mechanismen.
 
 ARCHITEKTUR:
@@ -29,17 +30,32 @@ class PdvmDatenbank:
 
     def __init__(self, table_name="menudaten"):
         """
-        Initialisiert die Datenbankverbindung.
+        V2.0: Initialisiert die Datenbankverbindung.
+        
+        DB-Pfad wird aus GCS geholt (gcs.db_path) - zentrale Konfiguration!
         
         Args:
-            table_name: Name der Tabelle (MUSS angegeben werden - kein Fallback)
+            table_name: Name der Tabelle (MUSS angegeben werden)
+        
+        Raises:
+            ValueError: Wenn table_name fehlt oder GCS nicht initialisiert
         """
         if not table_name:
-            raise ValueError("❌ Tabellenname muss angegeben werden - keine Fallback-Tabellen!")
+            raise ValueError("❌ Tabellenname muss angegeben werden!")
+        
+        # V2.0: DB-Pfad aus GCS holen (zentrale Konfiguration)
+        from v2_central_systemsteuerung import get_gcs
+        gcs = get_gcs()
+        
+        if not gcs:
+            raise ValueError("❌ GCS nicht initialisiert! DB-Pfad nicht verfügbar.")
+        
+        if not hasattr(gcs, 'db_path') or not gcs.db_path:
+            raise ValueError("❌ GCS.db_path nicht gesetzt!")
             
-        # Datenbankname aus PdvmInit.json laden
-        self.db_name = self._load_database_from_init()
+        self.db_name = gcs.db_path
         self.table_name = table_name
+        logger.info(f"✅ V2.0: Datenbank aus GCS: {gcs.db_path} → {table_name}")
         
         # Tabelle erstellen falls nicht vorhanden
         self._ensure_table_exists()
@@ -48,69 +64,6 @@ class PdvmDatenbank:
         self.historisch = self._ermittle_historisch_status()
         
         logger.info(f"PdvmDatenbank initialisiert: {self.db_name}.{table_name} (historisch: {self.historisch})")
-
-    def _load_database_from_init(self):
-        """
-        Lädt den Datenbanknamen aus PdvmInit.json.
-        
-        Erstellt die Datei falls sie nicht existiert und wirft einen Fehler.
-        
-        Returns:
-            str: Name der Datenbankdatei
-            
-        Raises:
-            ValueError: Wenn PdvmInit.json nicht existiert oder fehlerhaft ist
-        """
-        import os
-        
-        init_file_path = "PdvmInit.json"
-        
-        # Prüfe ob Datei existiert
-        if not os.path.exists(init_file_path):
-            # Erstelle Standard-PdvmInit.json
-            init_data = {
-                "ROOT": {
-                    "datenbank": "XXX",
-                    "lizenz": "00000000-0000-0000-0000-000000000000"
-                }
-            }
-            
-            try:
-                with open(init_file_path, 'w', encoding='utf-8') as f:
-                    json.dump(init_data, f, ensure_ascii=False, indent=4)
-                logger.info(f"PdvmInit.json erstellt: {init_file_path}")
-            except Exception as e:
-                logger.error(f"Fehler beim Erstellen von PdvmInit.json: {e}")
-            
-            raise ValueError("❌ Grunddaten, wie Datenbank etc. in PdvmInit.json eintragen.")
-        
-        # Lade und parse PdvmInit.json
-        try:
-            with open(init_file_path, 'r', encoding='utf-8') as f:
-                init_data = json.load(f)
-            
-            # Validiere Struktur
-            if 'ROOT' not in init_data:
-                raise ValueError("❌ PdvmInit.json: 'ROOT' Sektion fehlt")
-            
-            if 'datenbank' not in init_data['ROOT']:
-                raise ValueError("❌ PdvmInit.json: 'datenbank' in ROOT Sektion fehlt")
-            
-            db_name = init_data['ROOT']['datenbank']
-            
-            # Prüfe ob Datenbank-Wert gesetzt ist
-            if db_name == "XXX" or not db_name.strip():
-                raise ValueError("❌ Grunddaten, wie Datenbank etc. in PdvmInit.json eintragen.")
-            
-            logger.debug(f"Datenbank aus PdvmInit.json geladen: {db_name}")
-            return db_name
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON-Parsing-Fehler in PdvmInit.json: {e}")
-            raise ValueError("❌ PdvmInit.json ist fehlerhaft formatiert")
-        except Exception as e:
-            logger.error(f"Fehler beim Laden von PdvmInit.json: {e}")
-            raise ValueError(f"❌ Fehler beim Laden von PdvmInit.json: {e}")
 
     def _ensure_table_exists(self):
         """Erstellt die Tabelle falls sie nicht existiert."""
@@ -122,7 +75,7 @@ class PdvmDatenbank:
             uid TEXT PRIMARY KEY,
             name TEXT DEFAULT '',
             daten TEXT NOT NULL,
-            last_modified TEXT NOT NULL DEFAULT ''
+            modified_at TEXT NOT NULL DEFAULT ''
         )'''
         
         cursor.execute(create_table_query)
@@ -259,14 +212,14 @@ class PdvmDatenbank:
         if exists:
             # Update
             cursor.execute(
-                f'UPDATE {self.table_name} SET daten = ?, last_modified = ? WHERE uid = ?',
+                f'UPDATE {self.table_name} SET daten = ?, modified_at = ? WHERE uid = ?',
                 (json_daten, timestamp, guid)
             )
             logger.debug(f"Datensatz aktualisiert: {guid}")
         else:
             # Insert
             cursor.execute(
-                f'INSERT INTO {self.table_name} (uid, daten, last_modified) VALUES (?, ?, ?)',
+                f'INSERT INTO {self.table_name} (uid, daten, modified_at) VALUES (?, ?, ?)',
                 (guid, json_daten, timestamp)
             )
             logger.debug(f"Datensatz eingefügt: {guid}")
@@ -352,18 +305,33 @@ class PdvmDatenbank:
         Liest alle Datensätze aus der Tabelle.
         
         Returns:
-            list[dict]: Liste aller Datensätze mit uid, daten, last_modified
+            list[dict]: Liste aller Datensätze mit uid, daten, modified_at (falls vorhanden)
         """
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         
-        cursor.execute(f'SELECT uid, daten, last_modified FROM {self.table_name}')
+        # Prüfe ob modified_at Spalte existiert
+        cursor.execute(f"PRAGMA table_info({self.table_name})")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_modified_at = 'modified_at' in columns
+        
+        # Query anpassen je nach Spalten-Verfügbarkeit
+        if has_modified_at:
+            cursor.execute(f'SELECT uid, daten, modified_at FROM {self.table_name}')
+        else:
+            cursor.execute(f'SELECT uid, daten FROM {self.table_name}')
+            logger.debug(f"⚠️ Tabelle {self.table_name} hat keine 'modified_at' Spalte")
+        
         results = cursor.fetchall()
         conn.close()
         
         datensaetze = []
         for row in results:
-            uid, raw_json, last_modified = row
+            if has_modified_at:
+                uid, raw_json, modified_at = row
+            else:
+                uid, raw_json = row
+                modified_at = None
             
             try:
                 # JSON → Dict konvertieren
@@ -376,7 +344,7 @@ class PdvmDatenbank:
                 datensaetze.append({
                     'uid': uid,
                     'daten': data,
-                    'last_modified': last_modified
+                    'modified_at': modified_at
                 })
                 
             except json.JSONDecodeError as e:
