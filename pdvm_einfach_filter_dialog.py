@@ -221,7 +221,7 @@ class SimpleFilterDialog(QDialog):
             
             logger.info(f"✅ Filter anwenden: {len(filter_params)} Felder")
             
-            # EinfachFilterManager verwenden
+            # V2 EinfachFilterManager verwenden (KRITISCH: v2_* Version!)
             from pdvm_einfach_filter_manager import EinfachFilterManager
             
             manager = EinfachFilterManager(

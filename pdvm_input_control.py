@@ -32,11 +32,11 @@ import logging
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QSpacerItem, QSizePolicy, QDialog
 from PyQt5.QtCore import Qt
 
-from global_gcs import gcs
+from pdvm_central_systemsteuerung import get_gcs  # ✅ V2-Version!
 from pdvm_datetime import Pdvm_DateTime
-from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_central_datenbank import PdvmCentralDatenbank  # ✅ V2-Version!
 
-# Type-Klassen importieren
+# Type-Klassen importieren (✅ V2-Versionen!)
 from pdvm_input_type_text import PdvmInputTypeText
 from pdvm_input_type_datetime import PdvmInputTypeDatetime
 from pdvm_input_type_dropdown import PdvmInputTypeDropdown
@@ -65,11 +65,16 @@ class PdvmInputControlV4(QWidget):
         'viewtable': PdvmInputTypeViewtable,
     }
     
-    def __init__(self, root_instance, meta: dict, manager=None, parent=None):
+    def __init__(self, root_instance, meta: dict, manager=None, parent=None, gcs=None):
         super().__init__(parent)
         
         self.root_instance = root_instance
         self.manager = manager
+        
+        # ✅ V2: GCS holen (entweder als Parameter oder via get_gcs)
+        self.gcs = gcs if gcs is not None else get_gcs()
+        if not self.gcs:
+            raise RuntimeError("❌ GCS nicht initialisiert!")
         
         # METADATEN
         self.field_key = meta.get('field_key', '')
@@ -115,7 +120,7 @@ class PdvmInputControlV4(QWidget):
         self.read_only = False
         
         # ABDATUM für Tooltip
-        self.abdatum_dt = Pdvm_DateTime(gcs.field_value('country'))
+        self.abdatum_dt = Pdvm_DateTime(self.gcs.field_value('country'))
         self.abdatum_wert = None
         
         # TYPE-INSTANZ (wird in render() erstellt)
@@ -156,7 +161,7 @@ class PdvmInputControlV4(QWidget):
         
         # [3] TYPE: WERT LADEN
         if self.input_type:
-            stichtag = gcs.st_inst.PdvmDateTime
+            stichtag = self.gcs.st_inst.PdvmDateTime
             wert, self.abdatum_wert = self.input_type.load_value(stichtag)
             
             if self.abdatum_wert:
@@ -197,7 +202,7 @@ class PdvmInputControlV4(QWidget):
         
         # [2] TYPE: WERT NEU LADEN
         if self.input_type:
-            stichtag = gcs.st_inst.PdvmDateTime
+            stichtag = self.gcs.st_inst.PdvmDateTime
             wert, self.abdatum_wert = self.input_type.load_value(stichtag)
             
             if self.abdatum_wert:
@@ -288,7 +293,7 @@ class PdvmInputControlV4(QWidget):
             return
         
         zuordnungsfeld = f"{self.tabelle}-{self.gruppe}"
-        stichtag = gcs.st_inst.PdvmDateTime
+        stichtag = self.gcs.st_inst.PdvmDateTime
         
         try:
             result = self.root_instance.get_value(source_gruppe, zuordnungsfeld, stichtag)
@@ -640,3 +645,4 @@ class PdvmInputControlV4(QWidget):
     def _init_help_instance(self):
         """Initialisiert Hilfe-Instanz (DEPRECATED - wird jetzt lazy in _open_help_dialog erstellt)"""
         pass
+

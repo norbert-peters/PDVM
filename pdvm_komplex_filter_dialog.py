@@ -398,7 +398,7 @@ class ComplexFilterDialog(QDialog):
             
             logger.info(f"✅ Filter anwenden: {len(filter_params)} Felder")
             
-            # KomplexFilterManager verwenden
+            # V2 KomplexFilterManager verwenden (KRITISCH: v2_* Version!)
             from pdvm_komplex_filter_manager import KomplexFilterManager
             
             manager = KomplexFilterManager(

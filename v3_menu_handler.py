@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 
 from v3_menu_system import LinearMenuLoader, MenuItem
 from v3_menu_widgets import V3VerticalMenu, V3HorizontalMenu
-from v2_central_systemsteuerung import get_gcs
+from pdvm_central_systemsteuerung import get_gcs
 
 logger = logging.getLogger(__name__)
 

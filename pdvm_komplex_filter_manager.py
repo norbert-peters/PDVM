@@ -1,6 +1,6 @@
 """
-🔬 KOMPLEX-FILTER MANAGER
-=========================
+🔬 KOMPLEX-FILTER MANAGER V2
+============================
 ZWECK: Verwaltet komplexe Extended Filter (mehrere Bedingungen pro Feld, AND/OR)
 PATTERN:
   1. Sammelt Bedingungen aus UI (4-Positionen Struktur)

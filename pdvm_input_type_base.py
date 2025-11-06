@@ -50,6 +50,7 @@ class PdvmInputTypeBase(ABC):
                 - field_config: Type-spezifische Config
         """
         self.parent = parent
+        self.control = parent  # ✅ V2: Alias für Type-Klassen (self.control.gcs funktioniert)
         self.config = control_config
         
         # Extrahiere häufig verwendete Werte

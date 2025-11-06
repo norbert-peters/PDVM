@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# pdvm_central_datenbank.py - BEREINIGTE LINEARE VERSION
+# v2_pdvm_central_datenbank.py - V2.0 VERSION (KOPIE VON pdvm_central_datenbank.py)
 """
+V2.0 Business-Logic-Layer - Identisch mit pdvm_central_datenbank.py
 Business-Logic-Layer für strukturierte Datenverwaltung.
 
 ARCHITEKTUR:
@@ -34,20 +35,22 @@ class PdvmCentralDatenbank:
 
     def __init__(
         self,
-        table_name: str = "menudaten",
+        table_name: str = "sys_menudaten",
         guid: Optional[str] = None
     ):
         """
-        Initialisiert die Business-Logic-Schicht.
+        V2.0: Initialisiert die Business-Logic-Schicht.
+        
+        DB-Pfad wird aus GCS geholt (gcs.db_path) - zentrale Konfiguration!
         
         Args:
-            table_name: Name der Tabelle
+            table_name: Name der Tabelle (Standard: sys_menudaten)
             guid: GUID des Datensatzes (falls None, muss später gesetzt werden)
         """
         self.table_name = table_name
         self.guid = guid
         
-        # Basis-Datenbankschicht initialisieren (ohne db_name Parameter)
+        # Basis-Datenbankschicht initialisiert sich selbst aus GCS
         self._database = PdvmDatenbank(
             table_name=table_name
         )
@@ -73,7 +76,7 @@ class PdvmCentralDatenbank:
         cls,
         guid: str,
         daten: Dict[str, Any],
-        table_name: str = "menudaten"
+        table_name: str = "sys_menudaten"
     ):
         """
         Factory-Methode: Erstellt Instanz mit bereits geladenen Daten.

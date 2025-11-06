@@ -26,11 +26,11 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QScrollArea, QPushButton,
                              QHBoxLayout, QMessageBox, QLabel, QTabWidget)
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 
-from global_gcs import gcs
+from pdvm_central_systemsteuerung import get_gcs
 from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_date_time_picker import PdvmDateTimePicker
-from pdvm_input_control import PdvmInputControlV4
+from pdvm_input_control import PdvmInputControlV4  # ✅ V2-Version!
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class PdvmInputControlsManager(QObject):
     refresh_requested = pyqtSignal()
     save_completed = pyqtSignal()  # NEU: Nach erfolgreichem Speichern
     
-    def __init__(self, framedaten_db, selected_guid: str, frame_guid: str = None, main_app=None):
+    def __init__(self, framedaten_db, selected_guid: str, frame_guid: str = None, main_app=None, gcs=None):
         """
         Args:
             framedaten_db: Framedaten-DB (für ROOT_TABLE, HEADER, METADATEN)
@@ -61,6 +61,7 @@ class PdvmInputControlsManager(QObject):
             selected_guid: GUID des ausgewählten Datensatzes
             frame_guid: DEPRECATED - wird ignoriert (framedaten_db ist die DB für diese Frame)
             main_app: OPTIONAL - Referenz zur MainApp (für spätere Erweiterungen)
+            gcs: OPTIONAL - GCS-Instanz (wenn None, wird get_gcs() verwendet)
         """
         super().__init__()
         
@@ -69,6 +70,11 @@ class PdvmInputControlsManager(QObject):
         self.framedaten_db = framedaten_db
         self.selected_guid = selected_guid
         self.main_app = main_app  # ✅ Speichern (aktuell ungenutzt, für Kompatibilität)
+        
+        # V2: GCS holen (entweder als Parameter oder via get_gcs)
+        self.gcs = gcs if gcs is not None else get_gcs()
+        if not self.gcs:
+            raise RuntimeError("❌ GCS nicht initialisiert!")
         
         logger.info(f"  📋 Selected-GUID: {self.selected_guid}")
         
@@ -318,15 +324,15 @@ class PdvmInputControlsManager(QObject):
         """
         Initialisiert Neues Abdatum aus ZENTRALER GCS-INSTANZ (wie Stichtag!)
         
-        WICHTIG: Keine lokale Instanz mehr - nur Referenz auf gcs.neues_abdatum_inst!
+        WICHTIG: Keine lokale Instanz mehr - nur Referenz auf self.gcs.neues_abdatum_inst!
         """
         logger.info("  📅 === NEUES ABDATUM INITIALISIERUNG ===")
         
         # ZENTRALE INSTANZ: Direkt aus GCS verwenden (systemweit gültig!)
-        # Die Instanz wurde bereits in GCS.__init__() initialisiert und geladen
-        logger.info(f"    ✅ Verwende zentrale GCS-Instanz: gcs.neues_abdatum_inst")
-        logger.info(f"       📅 Aktueller Wert: {gcs.neues_abdatum_inst.FormTimeStamp}")
-        logger.info(f"       🔢 Raw PdvmDateTime: {gcs.neues_abdatum_inst.PdvmDateTime}")
+        # Die Instanz wurde bereits in self.gcs.__init__() initialisiert und geladen
+        logger.info(f"    ✅ Verwende zentrale GCS-Instanz: self.gcs.neues_abdatum_inst")
+        logger.info(f"       📅 Aktueller Wert: {self.gcs.neues_abdatum_inst.FormTimeStamp}")
+        logger.info(f"       🔢 Raw PdvmDateTime: {self.gcs.neues_abdatum_inst.PdvmDateTime}")
         
         logger.info("  ✅ Neues Abdatum Initialisierung abgeschlossen")
     
@@ -495,7 +501,8 @@ class PdvmInputControlsManager(QObject):
                 control = PdvmInputControlV4(
                     root_instance=self.root_instance,
                     meta=meta,
-                    manager=self  # Manager-Referenz für Refresh
+                    manager=self,  # Manager-Referenz für Refresh
+                    gcs=self.gcs  # ✅ V2: GCS durchreichen!
                 )
                 
                 self.controls.append(control)
@@ -579,15 +586,15 @@ class PdvmInputControlsManager(QObject):
         # Neues Abdatum Picker (ZENTRALE GCS-INSTANZ!)
         self.abdatum_picker = PdvmDateTimePicker(
             parent=self.main_widget,
-            pdvm_datetime=gcs.neues_abdatum_inst,  # ← ZENTRALE INSTANZ!
+            pdvm_datetime=self.gcs.neues_abdatum_inst,  # ← ZENTRALE INSTANZ!
             display="all",
             display_time_short=False,
-            default_date=gcs.neues_abdatum_inst.PdvmDateTime
+            default_date=self.gcs.neues_abdatum_inst.PdvmDateTime
         )
         buttons_layout.addWidget(self.abdatum_picker)
         
         # Einstellungen-Button (nur im Admin-Modus)
-        mode = gcs.field_value('mode')
+        mode = self.gcs.field_value('mode')
         if mode == 'admin':
             self.settings_button = QPushButton("⚙️ Einstellungen")
             self.settings_button.setStyleSheet("""
@@ -657,10 +664,10 @@ class PdvmInputControlsManager(QObject):
             logger.info("  📅 SCHRITT 1: Neues Abdatum verarbeiten...")
             
             if self.abdatum_picker:
-                self.abdatum_picker.save()  # Picker → gcs.neues_abdatum_inst
-                logger.info(f"    🔹 Picker gespeichert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+                self.abdatum_picker.save()  # Picker → self.gcs.neues_abdatum_inst
+                logger.info(f"    🔹 Picker gespeichert: {self.gcs.neues_abdatum_inst.FormTimeStamp}")
             
-            neues_abdatum = gcs.neues_abdatum_inst.PdvmDateTime
+            neues_abdatum = self.gcs.neues_abdatum_inst.PdvmDateTime
             logger.info(f"  🕒 Neues Abdatum: {neues_abdatum}")
             
             # [2] Dirty Controls sammeln
@@ -671,8 +678,8 @@ class PdvmInputControlsManager(QObject):
                 # AUCH WENN KEINE DATEN: Abdatum TROTZDEM persistent machen!
                 logger.info("  💾 Keine Datenänderungen, aber Abdatum wird gespeichert...")
                 try:
-                    gcs.update_neues_abdatum()
-                    logger.info(f"    ✅ Neues Abdatum gespeichert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+                    self.gcs.update_neues_abdatum()
+                    logger.info(f"    ✅ Neues Abdatum gespeichert: {self.gcs.neues_abdatum_inst.FormTimeStamp}")
                 except Exception as e:
                     logger.error(f"    ❌ Fehler beim Speichern in GCS: {e}")
                 
@@ -680,7 +687,7 @@ class PdvmInputControlsManager(QObject):
                     None,
                     "Keine Datenänderungen",
                     "Es wurden keine Datenänderungen vorgenommen.\n\n"
-                    f"✅ Das Neue Abdatum wurde jedoch gesetzt:\n{gcs.neues_abdatum_inst.FormTimeStamp}"
+                    f"✅ Das Neue Abdatum wurde jedoch gesetzt:\n{self.gcs.neues_abdatum_inst.FormTimeStamp}"
                 )
                 logger.info("  ℹ️ Keine Datenänderungen, aber Abdatum persistent gespeichert")
                 return
@@ -710,8 +717,8 @@ class PdvmInputControlsManager(QObject):
             # [5] Neues Abdatum in GCS speichern (WIE update_stichtag()!)
             logger.info("  💾 SCHRITT 5: Neues Abdatum in GCS speichern...")
             try:
-                gcs.update_neues_abdatum()
-                logger.info(f"    ✅ Neues Abdatum gespeichert: {gcs.neues_abdatum_inst.FormTimeStamp}")
+                self.gcs.update_neues_abdatum()
+                logger.info(f"    ✅ Neues Abdatum gespeichert: {self.gcs.neues_abdatum_inst.FormTimeStamp}")
             except Exception as e:
                 logger.error(f"    ❌ Fehler beim Speichern in GCS: {e}")
             
@@ -781,7 +788,7 @@ class PdvmInputControlsManager(QObject):
             Float-Wert des neuen Abdatums
         """
         try:
-            neues_abdatum, _ = gcs._db.get_value('EDIT', 'NEUES_ABDATUM')
+            neues_abdatum, _ = self.gcs._db.get_value('EDIT', 'NEUES_ABDATUM')
             return float(neues_abdatum)
         except Exception as e:
             logger.error(f"❌ Fehler beim Holen des neuen Abdatums: {e}")
@@ -807,3 +814,4 @@ class PdvmInputControlsManager(QObject):
                 "Speichern fehlgeschlagen",
                 "Beim Speichern ist ein Fehler aufgetreten!"
             )
+

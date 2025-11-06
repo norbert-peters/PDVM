@@ -25,7 +25,7 @@ import json
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 
-from v2_pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_central_datenbank import PdvmCentralDatenbank
 
 logger = logging.getLogger(__name__)
 

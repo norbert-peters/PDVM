@@ -72,7 +72,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
     def _create_and_show_view():
         """Erstellt View-Controller und fügt Widget in workspace_layout ein"""
         try:
-            from v2_pdvm_view_controller import V2PdvmViewController
+            from pdvm_view_controller import V2PdvmViewController
             
             logger.info("🔧 Erstelle View-Controller...")
             

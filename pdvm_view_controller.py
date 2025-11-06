@@ -1,6 +1,11 @@
-# pdvm_view_controller.py
+# v2_pdvm_view_controller.py
 """
-🎮 PDVM View Controller - SAUBERE ARCHITEKTUR (Option B)
+🎮 V2 PDVM View Controller - SAUBERE ARCHITEKTUR
+
+V2 ÄNDERUNGEN:
+- Tabellenname: viewdaten → sys_viewdaten
+- GCS Import: pdvm_central_systemsteuerung → v2_central_systemsteuerung
+- Klassenname: PdvmViewController → V2PdvmViewController
 
 VERANTWORTLICHKEITEN:
 - Koordiniert UI, Manager und Datenbank
@@ -10,30 +15,27 @@ VERANTWORTLICHKEITEN:
 
 ARCHITEKTUR:
 ┌─────────────────────┐
-│ PdvmViewController  │ ← Controller (Steuerung/Logik)
+│ V2PdvmViewController│ ← Controller (Steuerung/Logik)
 ├─────────────────────┤
 │ PdvmViewUI          │ ← Display (Darstellung)
 ├─────────────────────┤
 │ PdvmViewManager     │ ← Daten/Matrix-Verwaltung
 └─────────────────────┘
-
-MIGRATION VON:
-- PdvmViewDialog (alte Klasse mit gemischten Verantwortlichkeiten)
 """
 
 import logging
 from PyQt5.QtWidgets import QWidget, QMessageBox
 from PyQt5.QtCore import QObject, pyqtSignal
-from pdvm_central_datenbank import PdvmCentralDatenbank
-from pdvm_central_systemsteuerung import get_gcs
+from pdvm_central_datenbank import PdvmCentralDatenbank  # V2: Datenbank!
+from pdvm_central_systemsteuerung import get_gcs  # V2: GCS Import!
 
-# V3 Filter-System
+# V2 Filter-System (ALLE Komponenten als V2-Versionen!)
 from pdvm_schnellsuche_manager import SchnellsucheManager
 from pdvm_einfach_filter_manager import EinfachFilterManager
 
 logger = logging.getLogger(__name__)
 
-class PdvmViewController(QObject):
+class V2PdvmViewController(QObject):
     """
     Controller für View-Operationen
     
@@ -187,12 +189,12 @@ class PdvmViewController(QObject):
             return False
     
     def _load_viewdata(self):
-        """1. ViewDaten laden"""
-        logger.info("📂 SCHRITT 1: ViewDaten laden...")
+        """1. ViewDaten laden (V2: sys_viewdaten)"""
+        logger.info("📂 SCHRITT 1: ViewDaten laden (V2)...")
         
         try:
             view_db = PdvmCentralDatenbank(
-                table_name="viewdaten",
+                table_name="sys_viewdaten",  # V2: sys_viewdaten!
                 guid=self.view_guid
             )
             
@@ -534,8 +536,10 @@ class PdvmViewController(QObject):
             pipeline = get_pipeline(self.view_guid, self.matrix_manager)
             pipeline.run('BASIS')  # ← Kompletter Start: BASIS→FILTER→SORT→PROJECT
             
-            logger.info(f"  📊 BasisMatrix: {len(self.matrix_manager.basis_matrix)} Zeilen")
-            logger.info(f"  � Pipeline: BASIS→FILTER→SORT→PROJECT abgeschlossen")
+            # Zeilen-Anzahl sicher auslesen (kann None sein bei leerer Tabelle)
+            basis_count = len(self.matrix_manager.basis_matrix) if self.matrix_manager.basis_matrix else 0
+            logger.info(f"  📊 BasisMatrix: {basis_count} Zeilen")
+            logger.info(f"  🔄 Pipeline: BASIS→FILTER→SORT→PROJECT abgeschlossen")
             
             logger.info("✅ Matrix-Pipeline durchlaufen")
             
@@ -1105,7 +1109,7 @@ class PdvmViewController(QObject):
             logger.info("🗑️ Filter zurücksetzen - V3 FilterResetManager")
             
             try:
-                # ✅ V3: FilterResetManager für ALLE Filter-Löschungen
+                # ✅ V2: FilterResetManager für ALLE Filter-Löschungen
                 from pdvm_filter_reset_manager import get_filter_reset_manager
                 reset_manager = get_filter_reset_manager(self.view_guid, self.matrix_manager)
                 success = reset_manager.reset_all_filters()

@@ -99,7 +99,7 @@ class PdvmAutonomeView(QWidget):
             
             # [1] viewdaten-Tabelle öffnen (NEUE SIGNATUR!)
             view_db = PdvmCentralDatenbank(
-                table_name='viewdaten',
+                table_name='sys_viewdaten',
                 guid=self.view_guid
             )
             
@@ -136,9 +136,9 @@ class PdvmAutonomeView(QWidget):
             logger.info(f"✅ call_daten erstellt")
             
             # [6] ViewController erstellen (wie im generellen Dialog!)
-            from pdvm_view_controller import PdvmViewController
+            from pdvm_view_controller import V2PdvmViewController
             
-            self.view_controller = PdvmViewController(
+            self.view_controller = V2PdvmViewController(
                 call_daten=call_daten,
                 parent=self
             )

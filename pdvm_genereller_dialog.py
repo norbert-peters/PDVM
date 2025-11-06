@@ -36,19 +36,19 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 
-from global_gcs import gcs
-from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_central_systemsteuerung import get_gcs
+from pdvm_central_datenbank import PdvmCentralDatenbank  # V2: Datenbank!
 
 logger = logging.getLogger(__name__)
 
 
-class PdvmGenerellerDialog(QWidget):
+class V2PdvmGenerellerDialog(QWidget):
     """
-    🎯 Genereller Dialog für alle Datenänderungen
+    🎯 V2 Genereller Dialog für alle Datenänderungen
     
     Workflow:
-    1. Frame-GUID → Framedaten laden (ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
-    2. DIALOG_GUID → Dialogdaten laden/erstellen (Tab-Konfiguration)
+    1. Frame-GUID → sys_framedaten laden (ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
+    2. DIALOG_GUID → sys_dialogdaten laden/erstellen (Tab-Konfiguration)
     3. Tab 1: View initialisieren
     4. Tab 2: Edit-Bereich (Phase 1: nur GUID-Anzeige)
     5. Datensatz-Auswahl → Tab 2 öffnen + GUID übergeben
@@ -71,12 +71,12 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("🎯 === GENERELLER DIALOG - INITIALISIERUNG ===")
         logger.info(f"📋 Frame-GUID: {frame_guid}")
         
-        # GCS-Zugriff prüfen
-        if not gcs or not gcs.is_initialized:
+        # V2: GCS holen und prüfen
+        self.gcs = get_gcs()
+        if not self.gcs or not self.gcs.is_initialized:
             raise RuntimeError("❌ GCS muss initialisiert sein!")
         
         self.frame_guid = frame_guid
-        self.gcs = gcs
         self.main_app = main_app  # ✅ MainApp-Referenz speichern
         
         # Framedaten-Instanz
@@ -101,7 +101,7 @@ class PdvmGenerellerDialog(QWidget):
         # Einfache Erweiterbarkeit: Neues Modul einfach hier eintragen!
         # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
-            'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ FINALE VERSION (konsolidiert)
+            'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ PDVM 0.9 VERSION
             'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration (Phase 1: Platzhalter)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
@@ -112,6 +112,13 @@ class PdvmGenerellerDialog(QWidget):
         
         # Signal-Verbindung
         self.datensatz_ausgewaehlt.connect(self._on_datensatz_ausgewaehlt)
+        
+        # ✅ KRITISCH: Stichtag-Signal verbinden für Input Controls Refresh
+        # Der View-Controller verbindet sich automatisch selbst,
+        # aber die Input Controls im Edit-Tab brauchen eine Verbindung
+        if hasattr(self.gcs, 'stichtag_changed'):
+            self.gcs.stichtag_changed.connect(self._on_stichtag_changed)
+            logger.info("  🔗 stichtag_changed Signal verbunden → Dialog Refresh")
         
         # Initialisierung
         try:
@@ -204,38 +211,39 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("📂 Lade Framedaten...")
         
         try:
-            # Framedaten-DB Instanz erstellen mit frame_guid
-            self.framedaten_db = PdvmCentralDatenbank('framedaten', self.frame_guid)
+            # V2: sys_framedaten-DB Instanz erstellen mit frame_guid
+            self.framedaten_db = PdvmCentralDatenbank('sys_framedaten', self.frame_guid)
             
             # ROOT-Gruppe lesen
             gruppe = 'ROOT'
             
             # ROOT_TABLE
-            self.root_table, _ = self.framedaten_db.get_value(
+            # V2: Framedaten ist NICHT historisch → get_static_value
+            self.root_table = self.framedaten_db.get_static_value(
                 gruppe, 'ROOT_TABLE'
             )
             logger.info(f"  📋 ROOT_TABLE: {self.root_table}")
             
             # VIEW_GUID
-            self.view_guid, _ = self.framedaten_db.get_value(
+            self.view_guid = self.framedaten_db.get_static_value(
                 gruppe, 'VIEW_GUID'
             )
             logger.info(f"  📋 VIEW_GUID: {self.view_guid}")
             
             # DIALOG_GUID
-            self.dialog_guid, _ = self.framedaten_db.get_value(
+            self.dialog_guid = self.framedaten_db.get_static_value(
                 gruppe, 'DIALOG_GUID'
             )
             logger.info(f"  📋 DIALOG_GUID: {self.dialog_guid}")
             
             # HEADER_TEXT
-            self.header_text, _ = self.framedaten_db.get_value(
+            self.header_text = self.framedaten_db.get_static_value(
                 gruppe, 'HEADER_TEXT'
             )
             logger.info(f"  📋 HEADER_TEXT: {self.header_text}")
             
             # EDIT_TYPE
-            self.edit_type, _ = self.framedaten_db.get_value(
+            self.edit_type = self.framedaten_db.get_static_value(
                 gruppe, 'EDIT_TYPE'
             )
             if not self.edit_type:
@@ -285,31 +293,32 @@ class PdvmGenerellerDialog(QWidget):
                 self.framedaten_db.save_all_values()
                 logger.info("  💾 DIALOG_GUID in Framedaten gespeichert")
             
-            # Dialogdaten-DB Instanz erstellen
-            # WICHTIG: Verwende 'dialogdaten' Datenbank mit DIALOG_GUID
+            # V2: Dialogdaten-DB Instanz erstellen
+            # WICHTIG: Verwende 'sys_dialogdaten' Datenbank mit DIALOG_GUID
             # NICHT 'anwendungsdaten' - das ist nur für User-bezogene Daten über GCS!
-            self.dialogdaten_db = PdvmCentralDatenbank('dialogdaten', self.dialog_guid)
+            self.dialogdaten_db = PdvmCentralDatenbank('sys_dialogdaten', self.dialog_guid)
             
-            # Prüfen ob ROOT-Gruppe existiert (via get_value - wenn None dann nicht vorhanden)
-            active_tab_test, _ = self.dialogdaten_db.get_value('ROOT', 'active_tab')
+            # Prüfen ob ROOT-Gruppe existiert (via get_static_value - dialogdaten ist NICHT historisch)
+            # V2: Feldnamen in GROSSBUCHSTABEN!
+            active_tab_test = self.dialogdaten_db.get_static_value('ROOT', 'ACTIVE_TAB')
             root_exists = (active_tab_test is not None)
             
             if not root_exists:
                 logger.info("  🆕 Erstelle initiale Dialogdaten...")
                 
-                # Initiale ROOT-Parameter
-                self.dialogdaten_db.set_value('ROOT', 'active_tab', 0)
-                self.dialogdaten_db.set_value('ROOT', 'tab_count', 2)
+                # Initiale ROOT-Parameter (V2: GROSSBUCHSTABEN!)
+                self.dialogdaten_db.set_value('ROOT', 'ACTIVE_TAB', 0)
+                self.dialogdaten_db.set_value('ROOT', 'TAB_COUNT', 2)
                 
-                # Tab01 Parameter (View)
-                self.dialogdaten_db.set_value('Tab01', 'tab_type', 'view')
-                self.dialogdaten_db.set_value('Tab01', 'tab_title', 'Übersicht')
-                self.dialogdaten_db.set_value('Tab01', 'view_guid', self.view_guid)
+                # Tab01 Parameter (View) - V2: Gruppe GROSS, Felder klein!
+                self.dialogdaten_db.set_value('TAB01', 'tab_type', 'view')
+                self.dialogdaten_db.set_value('TAB01', 'tab_title', 'Übersicht')
+                self.dialogdaten_db.set_value('TAB01', 'view_guid', self.view_guid)
                 
-                # Tab02 Parameter (Edit)
-                self.dialogdaten_db.set_value('Tab02', 'tab_type', 'edit')
-                self.dialogdaten_db.set_value('Tab02', 'tab_title', 'Bearbeiten')
-                self.dialogdaten_db.set_value('Tab02', 'selected_guid', None)
+                # Tab02 Parameter (Edit) - V2: Gruppe GROSS, Felder klein!
+                self.dialogdaten_db.set_value('TAB02', 'tab_type', 'edit')
+                self.dialogdaten_db.set_value('TAB02', 'tab_title', 'Bearbeiten')
+                self.dialogdaten_db.set_value('TAB02', 'selected_guid', None)
                 
                 self.dialogdaten_db.save_all_values()
                 logger.info("  ✅ Initiale Dialogdaten erstellt")
@@ -327,8 +336,8 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("🔧 Initialisiere Tabs...")
         
         try:
-            # Tab-Anzahl aus Dialogdaten
-            tab_count, _ = self.dialogdaten_db.get_value('ROOT', 'tab_count')
+            # Tab-Anzahl aus Dialogdaten (V2: GROSSBUCHSTABEN + get_static_value!)
+            tab_count = self.dialogdaten_db.get_static_value('ROOT', 'TAB_COUNT')
             tab_count = int(tab_count) if tab_count else 2
             
             logger.info(f"  📊 Tab-Anzahl: {tab_count}")
@@ -341,6 +350,7 @@ class PdvmGenerellerDialog(QWidget):
             
             # === FEATURE: Letzte GUID aus Systemsteuerung laden ===
             # Wenn eine GUID für diesen Frame gespeichert ist → direkt Edit öffnen
+            # V2: Verwende get_value für Konsistenz mit set_value
             last_guid, _ = self.gcs._db.get_value(self.frame_guid, 'LAST_SELECTION')
             
             if last_guid:
@@ -372,8 +382,8 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("🔧 Erstelle View-Tab...")
         
         try:
-            # Tab-Titel aus Dialogdaten
-            tab_title, _ = self.dialogdaten_db.get_value('Tab01', 'tab_title')
+            # Tab-Titel aus Dialogdaten (V2: Gruppe GROSS, Feld klein!)
+            tab_title = self.dialogdaten_db.get_static_value('TAB01', 'tab_title')
             tab_title = tab_title or 'Übersicht'
             
             # View-Container
@@ -381,8 +391,8 @@ class PdvmGenerellerDialog(QWidget):
             view_layout = QVBoxLayout(view_container)
             view_layout.setContentsMargins(0, 0, 0, 0)
             
-            # View-Controller initialisieren
-            from pdvm_view_controller import PdvmViewController
+            # V2: View-Controller initialisieren
+            from pdvm_view_controller import V2PdvmViewController
             
             # call_daten für View (wie in test_pdvm_view)
             call_daten = {
@@ -392,7 +402,7 @@ class PdvmGenerellerDialog(QWidget):
                 'title': tab_title
             }
             
-            self.view_controller = PdvmViewController(call_daten, parent=view_container)
+            self.view_controller = V2PdvmViewController(call_daten, parent=view_container)
             
             # View initialisieren
             init_success = self.view_controller.initialize()
@@ -444,8 +454,8 @@ class PdvmGenerellerDialog(QWidget):
         logger.info("🔧 Erstelle Edit-Tab...")
         
         try:
-            # Tab-Titel aus Dialogdaten
-            tab_title, _ = self.dialogdaten_db.get_value('Tab02', 'tab_title')
+            # Tab-Titel aus Dialogdaten (V2: Gruppe GROSS, Feld klein!)
+            tab_title = self.dialogdaten_db.get_static_value('TAB02', 'tab_title')
             tab_title = tab_title or 'Bearbeiten'
             
             # Edit-Container (wird später befüllt)
@@ -594,12 +604,48 @@ class PdvmGenerellerDialog(QWidget):
             module = importlib.import_module(module_name)
             ModuleClass = getattr(module, class_name)
             
-            # Modul initialisieren mit EINFACHER API (GCS via globalen Import!)
+            # ⚠️ SPEZIAL-CHECK: Menu-Editor noch nicht V3-kompatibel
+            if self.edit_type == 'menu_editor':
+                logger.warning("⚠️ Menu-Editor noch nicht V3-kompatibel!")
+                logger.info("  📋 Zeige Info-Platzhalter statt Fehler...")
+                
+                # Platzhalter-Widget erstellen
+                from PyQt5.QtWidgets import QLabel
+                from PyQt5.QtCore import Qt
+                
+                placeholder = QLabel()
+                placeholder.setWordWrap(True)
+                placeholder.setAlignment(Qt.AlignCenter)
+                placeholder.setStyleSheet("""
+                    QLabel {
+                        background-color: #fff3cd;
+                        border: 2px solid #ffc107;
+                        border-radius: 5px;
+                        padding: 30px;
+                        font-size: 12pt;
+                        color: #856404;
+                    }
+                """)
+                placeholder.setText(
+                    "🚧 MENÜ-EDITOR IN ENTWICKLUNG\n\n"
+                    "Der Menü-Editor wird aktuell für das neue V3-Menü-System überarbeitet.\n\n"
+                    "Grund: Die Menüstruktur wurde fundamental geändert (V3-Migration)\n"
+                    "und der Editor muss entsprechend angepasst werden.\n\n"
+                    "Bitte nutzen Sie vorerst die Datenbank-Tools zur Menüpflege."
+                )
+                
+                # Widget anzeigen
+                self._replace_edit_widget(placeholder)
+                logger.info("  ✅ Platzhalter angezeigt")
+                return  # Frühzeitiger Return, keine weitere Verarbeitung
+            
+            # Modul initialisieren mit EINFACHER API
             # WICHTIG: Als Instanzvariable speichern, damit es nicht garbage-collected wird!
             self.current_edit_module = ModuleClass(
                 framedaten_db=self.framedaten_db,
                 selected_guid=selected_guid,
-                main_app=self.main_app  # ✅ MainApp-Referenz durchreichen für menu_editor
+                main_app=self.main_app,  # ✅ MainApp-Referenz durchreichen für menu_editor
+                gcs=self.gcs  # ✅ V2: GCS durchreichen statt get_gcs() Aufruf
             )
             
             # Signal verbinden: refresh_requested → Dialog.refresh()
@@ -613,6 +659,18 @@ class PdvmGenerellerDialog(QWidget):
                     lambda: self._on_datensatz_ausgewaehlt(self.current_selected_guid)
                 )
                 logger.info("  🔗 save_completed Signal verbunden → Neuaufbau Edit-Tab")
+            
+            # ✅ KRITISCH: Signal verbinden: stichtag_changed → Input Controls aktualisieren
+            # Wenn der Benutzer den Stichtag ändert, müssen die Input Controls
+            # ihre Werte neu laden (mit neuem Stichtag aus der historischen Datenbank)
+            if hasattr(self.current_edit_module, 'stichtag_changed'):
+                if self.gcs and hasattr(self.gcs, 'stichtag_changed'):
+                    self.gcs.stichtag_changed.connect(self.current_edit_module.stichtag_changed)
+                    logger.info("  🔗 stichtag_changed Signal verbunden → Input Controls Refresh")
+                else:
+                    logger.warning("  ⚠️ GCS hat kein stichtag_changed Signal")
+            else:
+                logger.info("  ℹ️ Edit-Modul hat keine stichtag_changed Methode (optional)")
             
             logger.info("  ✅ Modul erfolgreich initialisiert")
             
@@ -661,31 +719,37 @@ class PdvmGenerellerDialog(QWidget):
         🔄 Aktualisiert den kompletten Dialog nach Stichtag-Änderung
         
         Workflow:
-        1. View aktualisieren (über view_controller.refresh())
-        2. Edit-Bereich neu laden (falls Datensatz ausgewählt)
+        1. View aktualisieren (über view_controller.reload_with_stichtag())
+        2. Edit-Bereich Input Controls aktualisieren (über current_edit_module.stichtag_changed())
         
-        WICHTIG: Wird von MainAppComplete._on_complete_stichtag_refresh() aufgerufen
+        WICHTIG: Wird automatisch vom stichtag_changed Signal aufgerufen
         """
         logger.info("🔄 Dialog-Refresh nach Stichtag-Änderung gestartet...")
         
         try:
-            # 1. View aktualisieren
-            if hasattr(self, 'view_controller') and self.view_controller:
-                logger.info("  🔄 Aktualisiere View-Tab...")
-                if hasattr(self.view_controller, 'refresh'):
-                    self.view_controller.refresh()
-                    logger.info("  ✅ View-Tab aktualisiert")
-                else:
-                    logger.warning("  ⚠️ view_controller hat keine refresh()-Methode")
+            # Aktuellen Stichtag holen
+            current_stichtag = self.gcs.stichtag if self.gcs else None
+            logger.info(f"  📅 Neuer Stichtag: {current_stichtag}")
             
-            # 2. Edit-Bereich neu laden (falls Datensatz ausgewählt)
-            if hasattr(self, 'current_selected_guid') and self.current_selected_guid:
-                logger.info(f"  🔄 Aktualisiere Edit-Tab für GUID: {self.current_selected_guid}")
-                # Edit-Bereich komplett neu laden mit aktueller GUID
-                self._on_datensatz_ausgewaehlt(self.current_selected_guid)
-                logger.info("  ✅ Edit-Tab aktualisiert")
+            # 1. View aktualisieren (VOLLSTÄNDIG mit Daten-Neuladung!)
+            if hasattr(self, 'view_controller') and self.view_controller:
+                logger.info("  🔄 Aktualisiere View-Tab mit reload_with_stichtag()...")
+                if hasattr(self.view_controller, 'reload_with_stichtag'):
+                    self.view_controller.reload_with_stichtag(current_stichtag)
+                    logger.info("  ✅ View-Tab komplett neu geladen")
+                else:
+                    logger.warning("  ⚠️ view_controller hat keine reload_with_stichtag()-Methode")
+            
+            # 2. Input Controls im Edit-Tab aktualisieren
+            if hasattr(self, 'current_edit_module') and self.current_edit_module:
+                logger.info("  🔄 Aktualisiere Input Controls...")
+                if hasattr(self.current_edit_module, 'stichtag_changed'):
+                    self.current_edit_module.stichtag_changed()
+                    logger.info("  ✅ Input Controls aktualisiert")
+                else:
+                    logger.info("  ℹ️ Edit-Modul hat keine stichtag_changed()-Methode")
             else:
-                logger.info("  ℹ️ Kein Datensatz ausgewählt, Edit-Tab übersprungen")
+                logger.info("  ℹ️ Kein Edit-Modul geladen, Input Controls übersprungen")
             
             logger.info("✅ Dialog-Refresh abgeschlossen")
             
@@ -694,13 +758,26 @@ class PdvmGenerellerDialog(QWidget):
             import traceback
             logger.error(traceback.format_exc())
     
+    def _on_stichtag_changed(self, new_stichtag):
+        """
+        🔔 Handler für stichtag_changed Signal von GCS
+        
+        Args:
+            new_stichtag: Neuer Stichtag als Float
+        """
+        logger.info(f"🔔 === STICHTAG-SIGNAL EMPFANGEN IM DIALOG ===")
+        logger.info(f"  📅 Neuer Stichtag: {new_stichtag}")
+        
+        # Refresh aufrufen
+        self.refresh()
+    
     def _on_tab_changed(self, index):
         """Handler für Tab-Wechsel"""
         logger.info(f"🔄 Tab gewechselt: {index}")
         
         try:
-            # Aktiven Tab speichern
-            self.dialogdaten_db.set_value('ROOT', 'active_tab', index)
+            # Aktiven Tab speichern (V2: GROSSBUCHSTABEN!)
+            self.dialogdaten_db.set_value('ROOT', 'ACTIVE_TAB', index)
             self.dialogdaten_db.save_all_values()
             
         except Exception as e:

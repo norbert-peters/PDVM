@@ -215,7 +215,7 @@ class PdvmPipeline:
             logger.info(f"✅ KEIN FILTER: {len(self.matrix_filter)} Zeilen übernommen")
         else:
             # Filter anwenden: Verwende SearchStringParser für strukturierte Auswertung
-            from pdvm_search_string_parser import get_search_string_parser
+            from pdvm_search_string_parser_v2 import get_search_string_parser
             
             parser = get_search_string_parser()
             filter_func = parser.parse(s_string, s_source)

@@ -315,7 +315,11 @@ class PdvmInputControlHistoryDialog(QDialog):
             if float(abdatum_value) == 1001.0:
                 return "01.01.0001 (Default)"
             
-            dt = Pdvm_DateTime(gcs.field_value('country'))
+            # GCS verwenden (ist bereits importiert)
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            
+            dt = Pdvm_DateTime(gcs.country if gcs else 'DEU')
             dt.PdvmDateTime = float(abdatum_value)
             return dt.FormTimeStamp
             

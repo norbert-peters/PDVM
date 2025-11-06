@@ -18,9 +18,9 @@ DATUM: 25.10.2025
 import logging
 from PyQt5.QtWidgets import QPushButton, QWidget
 from PyQt5.QtCore import pyqtSignal
-from pdvm_input_type_base import PdvmInputTypeBase
+from pdvm_input_type_base import PdvmInputTypeBase  # ✅ V2-Version!
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from global_gcs import gcs
+# ✅ V2: GCS wird vom Control durchgereicht (self.control.gcs)
 
 logger = logging.getLogger(__name__)
 
@@ -228,3 +228,4 @@ class PdvmInputTypeViewtable(PdvmInputTypeBase):
                 "Fehler",
                 f"Fehler beim Öffnen der Auswahl:\n{str(e)}"
             )
+

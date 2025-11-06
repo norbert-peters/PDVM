@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FINALE ZENTRALE SYSTEMSTEUERUNG
+V2.0 ZENTRALE SYSTEMSTEUERUNG
 
-Robuste Architektur mit:
+Erweiterung der bewährten pdvm_central_systemsteuerung.py für V2.0:
 1. User-GUID und Benutzerdaten bei Initialisierung
-2. Parametrisierte Properties für flexible Erweiterung
-3. Persistente Speicherung bei allen Settern
-4. Spezielle Stichtag-Behandlung über st_inst
+2. MANDANT-GUID und Mandanten-Daten hinzugefügt (NEU!)
+3. 4 Datenbank-Instanzen: u_db, app_db, db, man_db (NEU!)
+4. Parametrisierte Properties für flexible Erweiterung
+5. Persistente Speicherung bei allen Settern
+6. Spezielle Stichtag-Behandlung über st_inst
 """
 
 import logging
@@ -57,13 +59,23 @@ class PdvmCentralSystemsteuerung(QObject):
     # Signal für Stichtag-Änderungen
     stichtag_changed = pyqtSignal(float)  # Neuer Stichtag-Wert
     
-    def __init__(self, user_guid, user_data):
-        """Initialisierung direkt im Konstruktor"""
+    def __init__(self, user_guid, user_data, mandant_guid, mandant_data):
+        """
+        V2.0 Initialisierung mit User UND Mandant
+        
+        Args:
+            user_guid: User-GUID aus auth.db
+            user_data: User-Daten aus auth.db (dict)
+            mandant_guid: Mandanten-GUID aus auth.db (NEU!)
+            mandant_data: Mandanten-Daten aus auth.db (dict, NEU!)
+        """
         super().__init__()  # QObject initialisieren für Signals
         
         self._db = None
         self._user_guid = user_guid
         self._user_data = user_data
+        self._mandant_guid = mandant_guid  # NEU!
+        self._mandant_data = mandant_data  # NEU!
         self._st_inst = None
         self._temp_dt_inst = None  # Temporäre Pdvm_DateTime Instanz für Formatierungen
         self._dropdown_cache = {}  # Cache für geladene Dropdowns: {dropdown_name: {language: {key: value}}}
@@ -105,26 +117,38 @@ class PdvmCentralSystemsteuerung(QObject):
 
         self._user_data = user_data_dict.copy() if user_data_dict else {}
 
-        # 2.1 Datenbank-Instanz für Benutzerstamm (ohne erneut DB zu lesen)
-        self._u_db = PdvmCentralDatenbank('benutzerstamm')
+        # V2.0: DB-Pfad aus Mandantendaten ermitteln und als Property setzen
+        from pathlib import Path
+        mandant_id = self._mandant_data['METADATEN']['MANDANT_ID']
+        self.db_path = str(Path(__file__).parent / "Daten" / mandant_id / "datenbank.db")
+        logger.info(f"📂 V2.0: DB-Pfad gesetzt: {self.db_path}")
 
-        # Setze die user_json Daten direkt in die Benutzerdatenbank
-        # Datenstruktur für die Datenbank: {user_guid: user_data_dict}
-        db_data = {user_guid: user_data_dict}
-        self._u_db.set_data(self._user_data, user_guid)
-        logger.info(f"✅ Benutzerdatenbank geladen mit GUID: {user_guid} und {len(self._user_data)} Properties")
+        # WICHTIG: Globale Instanz SOFORT setzen, damit PdvmDatenbank auf GCS zugreifen kann!
+        global _gcs_instance
+        _gcs_instance = self
+        logger.info(f"✅ V2.0: Globale GCS-Instanz registriert (für DB-Zugriff)")
+
+        # 2.1 Datenbank-Instanz für Benutzerstamm (fiktiv, OHNE GUID!)
+        self._u_db = PdvmCentralDatenbank('benutzerstamm')
+        self._u_db.set_data(self._user_data)  # Nur user_data, KEINE GUID!
+        logger.info(f"✅ Benutzerdatenbank geladen (fiktiv, ohne GUID) mit {len(self._user_data)} Properties")
 
         # 2.2 Datenbank-Instanz für Systemsteuerung
-        self._db = PdvmCentralDatenbank('systemsteuerung', user_guid)
-        logger.info(f"✅ Systemsteuerungsdatenbank geladen mit GUID: {user_guid}")
+        self._db = PdvmCentralDatenbank('sys_systemsteuerung', user_guid)
+        logger.info(f"✅ Systemsteuerungsdatenbank geladen mit User-GUID: {user_guid}")
         
-        # 2.3 Datenbank-Instanz für Anwendungsdaten (gespeicherte Filter, etc.)
-        self._app_db = PdvmCentralDatenbank('anwendungsdaten', user_guid)
-        logger.info(f"✅ Anwendungsdatenbank geladen mit GUID: {user_guid}")
+        # 2.3 Datenbank-Instanz für User-Anwendungsdaten (Filter, etc.)
+        self._app_db = PdvmCentralDatenbank('sys_anwendungsdaten', user_guid)
+        logger.info(f"✅ User-Anwendungsdatenbank geladen mit User-GUID: {user_guid}")
+        
+        # 2.4 Datenbank-Instanz für Mandanten-Anwendungsdaten (NEU in V2.0!)
+        self._man_db = PdvmCentralDatenbank('sys_anwendungsdaten', mandant_guid)
+        logger.info(f"✅ Mandanten-Anwendungsdatenbank geladen mit Mandant-GUID: {mandant_guid}")
 
         # Stichtag-Instanz erstellen und initialisieren
-        # Country aus Benutzerdatenbank holen (Parameter Gruppe)
-        country = self._u_db.get_static_value('Parameter', 'country') or 'DEU'
+        # V2.0: Country aus user_data holen (auth.db)
+        country = self._user_data.get('country', 'DEU')
+        logger.info(f"🌍 Country aus user_data: {country}")
         
         self._st_inst = Pdvm_DateTime(country)
         
@@ -187,10 +211,27 @@ class PdvmCentralSystemsteuerung(QObject):
             self._db.save_all_values()  # Sofort speichern!
             logger.info(f"💾 Neues Abdatum auf aktuellen Timestamp gesetzt: {self._neues_abdatum_inst.FormTimeStamp}")
 
+        # V2.0: Mandanten-Daten NACH Initialisierung der DateTime-Instanzen abgleichen
+        self._sync_mandant_data()
+        
+        # === VERSION aus Systemsteuerung laden oder initialisieren ===
+        stored_version = self._db.get_static_value(self.user_guid, 'version') if user_guid in self._db.data and 'version' in self._db.data[user_guid] else None
+        
+        if stored_version is None:
+            # Initial Version 0.9 setzen
+            self._version = "0.9"
+            self._db.set_value(user_guid, 'version', "0.9")
+            self._db.save_all_values()
+            logger.info(f"💾 Version initial gesetzt: {self._version}")
+        else:
+            self._version = str(stored_version)
+            logger.info(f"✅ Version aus DB geladen: {self._version}")
+        
         self._initialized = True
         logger.info(f"✅ Systemsteuerung initialisiert für {user_guid}")
         logger.info(f"📅 Stichtag: {self._st_inst.FormTimeStamp}")
         logger.info(f"📅 Neues Abdatum: {self._neues_abdatum_inst.FormTimeStamp}")
+        logger.info(f"🚀 PDVM-SYSTEM Version: {self._version}")
     
     @property
     def db(self):
@@ -274,14 +315,26 @@ class PdvmCentralSystemsteuerung(QObject):
                 anwendungen = self.get_property('start', 'u', 'MeineApps')
                 return anwendungen
             
-            # Für andere Apps: Suche in Anwendungen -> app_name
-            app_data = self.get_property(app_name, 'u', 'Anwendungen')
-            menu_id = app_data['Menu']
+            # ⭐ KORREKTUR: App-Name zu Großbuchstaben für Lookup
+            app_name_upper = app_name.upper()
+            logger.debug(f"🔍 Suche Menü für App: '{app_name}' → '{app_name_upper}'")
+            
+            # Für andere Apps: Suche in ANWENDUNGEN (Großbuchstaben!) -> APP_NAME (Großbuchstaben!)
+            app_data = self.get_property(app_name_upper, 'u', 'ANWENDUNGEN')
+            
+            # ⭐ KORREKTUR: MENU statt Menu (Großbuchstaben!)
+            if isinstance(app_data, dict):
+                menu_id = app_data.get('MENU')
+            else:
+                menu_id = None
+            
             logger.debug(f"✅ Menü-ID für '{app_name}': {menu_id}")
             return menu_id
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Holen der Menü-ID für App '{app_name}': {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def get_all_app_menu_ids(self):
@@ -524,43 +577,67 @@ class PdvmCentralSystemsteuerung(QObject):
     
     @property
     def country(self):
-        """Country aus Benutzerdaten (Parameter Gruppe)"""
+        """Country aus Benutzerdaten (SETTINGS Gruppe, UPPERCASE Felder)"""
         self._ensure_initialized()
         try:
-            # Hole country aus Parameter Gruppe der Benutzerdaten
-            parameter_data = self._user_data.get('Parameter', {})
-            return parameter_data.get('country', 'DEU')
+            # V2 verwendet SETTINGS Gruppe mit UPPERCASE Feldnamen
+            settings_data = self._user_data.get('SETTINGS', {})
+            country_value = settings_data.get('COUNTRY', None)
+            
+            # Fallback für V1-Kompatibilität (lowercase in Parameter Gruppe)
+            if country_value is None:
+                parameter_data = self._user_data.get('Parameter', {})
+                country_value = parameter_data.get('country', 'DEU')
+            
+            return country_value if country_value else 'DEU'
         except (KeyError, AttributeError, TypeError):
             return 'DEU'
     
     @property
     def language(self):
-        """Language aus Benutzerdaten (Parameter Gruppe)"""
+        """Language aus Benutzerdaten (SETTINGS Gruppe, UPPERCASE Felder)"""
         self._ensure_initialized()
         try:
-            # Hole language aus Parameter Gruppe der Benutzerdaten
-            parameter_data = self._user_data.get('Parameter', {})
-            return parameter_data.get('language', 'de-de')
+            # V2 verwendet SETTINGS Gruppe mit UPPERCASE Feldnamen
+            settings_data = self._user_data.get('SETTINGS', {})
+            language_value = settings_data.get('LANGUAGE', None)
+            
+            # Fallback für V1-Kompatibilität (lowercase in Parameter Gruppe)
+            if language_value is None:
+                parameter_data = self._user_data.get('Parameter', {})
+                language_value = parameter_data.get('language', 'de-de')
+            
+            return language_value if language_value else 'de-de'
         except (KeyError, AttributeError, TypeError):
             return 'de-de'
     
     @property
     def mode(self):
-        """Mode aus Benutzerdaten (Parameter Gruppe) - 'user' oder 'admin'"""
+        """Mode aus Benutzerdaten (SETTINGS Gruppe, UPPERCASE Felder) - 'user' oder 'admin'"""
         self._ensure_initialized()
         try:
-            # Hole mode aus Parameter Gruppe der Benutzerdaten
-            parameter_data = self._user_data.get('Parameter', {})
-            mode_value = parameter_data.get('mode', 'user')
+            # V2 verwendet SETTINGS Gruppe mit UPPERCASE Feldnamen
+            settings_data = self._user_data.get('SETTINGS', {})
+            mode_value = settings_data.get('MODE', None)
+            
+            # Fallback für V1-Kompatibilität (lowercase in Parameter Gruppe)
+            if mode_value is None:
+                parameter_data = self._user_data.get('Parameter', {})
+                mode_value = parameter_data.get('mode', 'user')
+            
+            # Default falls nichts gefunden
+            if mode_value is None:
+                mode_value = 'user'
             
             # Validiere Wert: nur 'user' oder 'admin' erlaubt
             if mode_value not in ['user', 'admin']:
                 logger.warning(f"⚠️ Ungültiger mode Wert '{mode_value}', verwende 'user' als Fallback")
                 return 'user'
             
+            logger.info(f"✅ Mode erfolgreich gelesen: '{mode_value}' aus SETTINGS.MODE")
             return mode_value
-        except (KeyError, AttributeError, TypeError):
-            logger.warning("⚠️ mode nicht gefunden in Benutzerdaten, verwende 'user' als Fallback")
+        except (KeyError, AttributeError, TypeError) as e:
+            logger.warning(f"⚠️ mode nicht gefunden in Benutzerdaten: {e}, verwende 'user' als Fallback")
             return 'user'
     
     @property
@@ -612,6 +689,21 @@ class PdvmCentralSystemsteuerung(QObject):
         except (KeyError, AttributeError, TypeError):
             return False
     
+    @property
+    def version(self):
+        """PDVM-System Version (zentral verwaltet in GCS)"""
+        self._ensure_initialized()
+        return self._version
+    
+    @version.setter
+    def version(self, value):
+        """Version setzen und persistieren"""
+        self._ensure_initialized()
+        self._version = str(value)
+        self._db.set_value(self.user_guid, 'version', str(value))
+        self._db.save_all_values()
+        logger.info(f"💾 Version aktualisiert: {self._version}")
+    
     def get_dropdown_options(self, dropdown_guid: str, dropdown_gruppe: str = None) -> Dict[str, str]:
         """
         Holt Dropdown-Optionen für einen bestimmten Dropdown-Namen.
@@ -635,9 +727,9 @@ class PdvmCentralSystemsteuerung(QObject):
             return self._dropdown_cache[cache_key]
         
         try:
-            # Dropdown aus Datenbank laden - verwende die korrekte Struktur
+            # Dropdown aus Datenbank laden - KORREKT: sys_dropdowndaten
             dropdown_db = PdvmCentralDatenbank(
-                table_name="dropdowndaten",
+                table_name="sys_dropdowndaten",
                 guid=dropdown_guid  # dropdown_guid ist die GUID aus "key"
             )
             
@@ -969,32 +1061,23 @@ class PdvmCentralSystemsteuerung(QObject):
 
     def get_projection_matrix(self, view_guid: str):
         """
-        ZENTRALE PROJECTION-MATRIX VERWALTUNG
-
-        Gibt die ProjectionMatrix für eine View-GUID zurück.
-        Erstellt neue Instanz falls nicht vorhanden.
-
-        Args:
-            view_guid: GUID der View
-
-        Returns:
-            ProjectionMatrix: Matrix-Instanz für die View
+        LEGACY: ProjectionMatrix-Instanz für View holen
+        HINWEIS: Wird durch Array-basiertes System ersetzt (siehe get_projection_table)
         """
+        logger.warning(f"⚠️ LEGACY: get_projection_matrix() aufgerufen - sollte get_projection_table() verwenden!")
+        
+        # Initialisiere Cache falls nicht vorhanden
         if not hasattr(self, '_projection_matrices'):
             self._projection_matrices = {}  # Cache für ProjectionMatrix-Instanzen
 
         if view_guid not in self._projection_matrices:
-            try:
-                from projection_matrix import ProjectionMatrix
-                self._projection_matrices[view_guid] = ProjectionMatrix(view_guid, self)
-
-                # Versuche aus GCS zu laden
-                if not self._projection_matrices[view_guid].load_from_gcs():
-                    logger.info(f"📝 Neue ProjectionMatrix für View {view_guid} erstellt")
-
-            except Exception as e:
-                logger.error(f"❌ Fehler beim Erstellen der ProjectionMatrix: {e}")
-                return None
+            # Erstelle Dummy-Objekt mit load_from_gcs Methode
+            class LegacyProjectionMatrix:
+                def load_from_gcs(self):
+                    return False
+            
+            self._projection_matrices[view_guid] = LegacyProjectionMatrix()
+            logger.warning(f"⚠️ Legacy ProjectionMatrix-Dummy erstellt für View {view_guid}")
 
         return self._projection_matrices[view_guid]
 
@@ -1135,26 +1218,85 @@ class PdvmCentralSystemsteuerung(QObject):
         except Exception as e:
             logger.error(f"❌ Fehler beim Löschen gespeicherter Suche: {e}")
             raise
+    
+    # ========================================
+    # V2.0 MANDANTEN-DATEN ABGLEICH
+    # ========================================
+    
+    def _sync_mandant_data(self):
+        """
+        Gleicht Mandanten-Daten aus auth.db mit man_db ab
+        
+        LINEAR:
+        1. set_data(mandant_data) → Überschreibt alle Daten
+        2. set_value() für Zusatz-Felder (DB_PATH, LETZTER_LOGIN)
+        3. save_all_values() → Fertig!
+        """
+        try:
+            # Aktuellen Zeitstempel
+            letzter_login = self._st_inst.PdvmDateTimeNow()
+            
+            # DB-Pfad ermitteln
+            from pathlib import Path
+            mandant_id = self._mandant_data['METADATEN']['MANDANT_ID']
+            base_path = Path(__file__).parent / "Daten" / mandant_id
+            db_path = str(base_path / "datenbank.db")
+            
+            # 1. Mandanten-Daten aus auth.db überschreiben
+            self._man_db.set_data(self._mandant_data, self._mandant_guid)
+            
+            # 2. Zusätzliche Felder setzen
+            self._man_db.set_value('ROOT', 'DB_PATH', db_path, 1001.0)
+            self._man_db.set_value('METADATEN', 'LETZTER_LOGIN', letzter_login, letzter_login)
+            
+            # 3. Speichern
+            self._man_db.save_all_values()
+            
+            logger.info(f"💾 Mandanten-Daten abgeglichen in man_db")
+            logger.info(f"   DB-Pfad: {db_path}")
+            logger.info(f"   Letzter Login: {letzter_login}")
+            
+        except Exception as e:
+            logger.error(f"⚠️ Fehler beim Abgleich der Mandanten-Daten: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ========================================
+    # V2.0 PROPERTIES FÜR MANDANTEN-ZUGRIFF
+    # ========================================
+    
+    @property
+    def mandant_db_path(self):
+        """Gibt den Pfad zur Mandanten-Datenbank zurück"""
+        try:
+            mandant_id = self._mandant_data['METADATEN']['MANDANT_ID']
+            from pathlib import Path
+            return str(Path(__file__).parent / "Daten" / mandant_id / "datenbank.db")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Ermitteln des Mandanten-DB-Pfads: {e}")
+            return None
 
 # Globale Instanz
 _gcs_instance = None
 
-def initialize_gcs(user_guid, user_data):
+def initialize_gcs(user_guid, user_data, mandant_guid, mandant_data):
     """
-    Initialisiere globale Systemsteuerung
+    V2.0: Initialisiere globale Systemsteuerung mit Mandanten-Support
     
     Args:
         user_guid: GUID des Benutzers
         user_data: Benutzerdaten nach Login
+        mandant_guid: GUID des gewählten Mandanten
+        mandant_data: Mandanten-Daten aus auth.db
     """
     global _gcs_instance
     
     if _gcs_instance is not None and _gcs_instance.is_initialized:
         raise RuntimeError("GCS bereits initialisiert!")
     
-    _gcs_instance = PdvmCentralSystemsteuerung(user_guid, user_data)
+    _gcs_instance = PdvmCentralSystemsteuerung(user_guid, user_data, mandant_guid, mandant_data)
     
-    logger.info("🌐 Globale Systemsteuerung initialisiert")
+    logger.info("🌐 Globale Systemsteuerung initialisiert (V2.0 mit Mandant)")
     return _gcs_instance
 
 def get_gcs():
@@ -1166,6 +1308,63 @@ def get_gcs():
 def is_gcs_initialized():
     """Prüfe ob GCS initialisiert ist"""
     return _gcs_instance is not None and _gcs_instance.is_initialized
+
+# ========================================
+# HELPER FUNKTION: Vereinfachter Projektions-Zugriff
+# ========================================
+
+_gcs_instance = None
+
+def initialize_gcs(user_guid, user_data, mandant_guid, mandant_data):
+    """
+    Initialisiere globale Systemsteuerung (V2.0 mit Mandant)
+    
+    Args:
+        user_guid: GUID des Benutzers
+        user_data: Benutzerdaten nach Login
+        mandant_guid: GUID des gewählten Mandanten (NEU!)
+        mandant_data: Mandanten-Daten aus auth.db (NEU!)
+    """
+    global _gcs_instance
+    
+    if _gcs_instance is not None and _gcs_instance.is_initialized:
+        raise RuntimeError("GCS bereits initialisiert!")
+    
+    # V2.0: Zwei-Phasen-Initialisierung wegen Circular Dependency
+    # Phase 1: GCS-Instanz erstellen (setzt db_path und _gcs_instance)
+    _gcs_instance = PdvmCentralSystemsteuerung(user_guid, user_data, mandant_guid, mandant_data)
+    
+    logger.info("🌐 V2.0 Globale Systemsteuerung initialisiert")
+    return _gcs_instance
+
+def get_gcs():
+    """
+    V2.0: Hole globale Systemsteuerung
+    
+    WICHTIG: Gibt Instanz zurück, auch während Initialisierung (für db_path Zugriff)
+    """
+    if _gcs_instance is None:
+        raise RuntimeError("GCS nicht initialisiert! Rufe initialize_gcs() auf.")
+    return _gcs_instance
+
+def is_gcs_initialized():
+    """Prüfe ob GCS initialisiert ist"""
+    return _gcs_instance is not None and _gcs_instance.is_initialized
+
+def reset_gcs():
+    """
+    V2.0: Setze GCS zurück (für Logout/Neustart)
+    
+    Wichtig bei Logout: GCS muss zurückgesetzt werden damit
+    beim nächsten Login eine neue Instanz erstellt wird.
+    """
+    global _gcs_instance
+    
+    if _gcs_instance is not None:
+        logger.info("🔄 Setze GCS zurück für Neustart")
+        _gcs_instance = None
+    else:
+        logger.debug("ℹ️ GCS bereits zurückgesetzt")
 
 # ========================================
 # HELPER FUNKTION: Vereinfachter Projektions-Zugriff

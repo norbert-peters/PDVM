@@ -14,9 +14,9 @@ DATUM: 24.10.2025
 import logging
 import json
 from PyQt5.QtWidgets import QComboBox, QWidget
-from pdvm_input_type_base import PdvmInputTypeBase
+from pdvm_input_type_base import PdvmInputTypeBase  # ✅ V2-Version!
 from pdvm_central_datenbank import PdvmCentralDatenbank
-from global_gcs import gcs
+# ✅ V2: GCS wird vom Control durchgereicht (self.control.gcs)
 
 logger = logging.getLogger(__name__)
 
@@ -41,55 +41,37 @@ class PdvmInputTypeDropdown(PdvmInputTypeBase):
         return self.calculated_width
     
     def _init_dropdown_instance(self):
-        """Initialisiert Dropdown-Instanz und lädt Items"""
+        """Initialisiert Dropdown-Instanz und lädt Items via GCS"""
         if not self.dropdown_config:
             logger.error("    ❌ DROPDOWN: Keine dropdown_config")
             return
         
-        table = self.dropdown_config.get('table', '')
         key = self.dropdown_config.get('key', '')
         value = self.dropdown_config.get('value', '')
         
-        if not table or not key or not value:
-            logger.error("    ❌ DROPDOWN: Unvollständige Config")
+        if not key or not value:
+            logger.error("    ❌ DROPDOWN: Unvollständige Config (key oder value fehlt)")
             return
         
-        # Instanz erstellen
+        # Dropdown-Optionen direkt aus GCS holen (verwendet sys_dropdowndaten)
         try:
-            self.dropdown_instance = PdvmCentralDatenbank(table, key)
-            logger.debug(f"    🔽 DROPDOWN-Instanz: {table}_{key[:8]}...")
-        except Exception as e:
-            logger.error(f"    ❌ DROPDOWN-Instanz-Fehler: {e}")
-            return
-        
-        # Language aus GCS
-        try:
-            language = gcs._u_db.get_static_value(gcs.user_guid, 'language')
-            if not language:
-                language = 'de-de'
-        except Exception as e:
-            logger.error(f"    ❌ Language-Fehler: {e}")
-            language = 'de-de'
-        
-        # Items laden
-        try:
-            json_data = self.dropdown_instance.get_static_value(value, language)
+            dropdown_dict = self.control.gcs.get_dropdown_options(key, value)
             
-            if not json_data:
-                logger.warning(f"    ⚠️ Keine Dropdown-Daten für {value}/{language}")
+            if not dropdown_dict:
+                logger.warning(f"    ⚠️ Keine Dropdown-Daten für {value} (GUID: {key})")
                 return
             
-            # JSON parsen
-            dropdown_dict = json.loads(json_data) if isinstance(json_data, str) else json_data
-            
+            # Mapping erstellen: {display_text: key}
             for item_key, display_text in dropdown_dict.items():
                 if item_key and display_text:
                     self.dropdown_items[display_text] = item_key
             
-            logger.info(f"    🔽 Dropdown geladen: {len(self.dropdown_items)} Items")
+            logger.info(f"    🔽 Dropdown geladen: {len(self.dropdown_items)} Items für {value}")
             
         except Exception as e:
             logger.error(f"    ❌ Dropdown-Items-Fehler: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def create_widget(self) -> QWidget:
         """Erstellt QComboBox Widget"""
@@ -207,3 +189,4 @@ class PdvmInputTypeDropdown(PdvmInputTypeBase):
                     color: #2c3e50;
                 }
             """)
+

@@ -13,7 +13,7 @@ DATUM: 24.10.2025
 
 import logging
 from PyQt5.QtWidgets import QLineEdit, QWidget
-from pdvm_input_type_base import PdvmInputTypeBase
+from pdvm_input_type_base import PdvmInputTypeBase  # ✅ V2-Version!
 
 logger = logging.getLogger(__name__)
 

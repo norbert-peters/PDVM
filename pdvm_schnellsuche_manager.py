@@ -34,7 +34,7 @@ class SchnellsucheManager:
             logger.error("❌ GCS nicht initialisiert!")
             raise RuntimeError("GCS nicht verfügbar")
         
-        # Pipeline holen
+        # Pipeline holen (V2!)
         from pdvm_pipeline import get_pipeline
         self.pipeline = get_pipeline(view_guid, matrix_manager)
         

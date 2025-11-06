@@ -147,6 +147,8 @@ class PdvmViewUI(QWidget):
         
         # Expert Mode Button (nur für Admins)
         user_mode = self.controller.gcs.field_value('mode') if self.controller.gcs else None
+        logger.info(f"🔍 User Mode aus GCS: '{user_mode}' (Type: {type(user_mode)})")
+        
         if user_mode == 'admin':
             # Hole aktuellen Expert Mode Status aus GCS (persistent!)
             current_expert_mode = self.controller.gcs.expert_mode if self.controller.gcs else False
@@ -1578,15 +1580,16 @@ class PdvmViewUI(QWidget):
             return
         
         try:
-            # Hole Filter-Projektion aus GCS
-            from global_gcs import gcs
+            # Hole Filter-Projektion aus GCS (V2)
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs_inst = get_gcs()
             
-            if not gcs:
+            if not gcs_inst:
                 logger.error("❌ GCS nicht verfügbar für Filter-Projektion")
                 return
             
             # Filter-Projektion: Position 2 (Standard) oder 7 (Expert)
-            filter_projection = gcs.get_projection_table(
+            filter_projection = gcs_inst.get_projection_table(
                 self.controller.view_guid,
                 'search_standard'  # Verwendet Position 2/7 je nach expert_mode
             )
@@ -1732,7 +1735,7 @@ class PdvmViewUI(QWidget):
         try:
             logger.info("📋 Öffne Spalten-Verwaltung...")
             
-            from column_management_dialog import show_column_management_dialog
+            from pdvm_column_management_dialog import show_column_management_dialog
             
             # Controls-Config vom Controller holen
             controls_config = self.current_controls if self.current_controls else {}
@@ -1935,3 +1938,4 @@ class PdvmViewUI(QWidget):
     def get_widget(self):
         """Widget für Parent zurückgeben"""
         return self
+

@@ -57,31 +57,20 @@ class PdvmHistoryValueWidgetDropdown(PdvmHistoryValueWidgetBase):
         
         try:
             from pdvm_central_datenbank import PdvmCentralDatenbank
-            from global_gcs import gcs
+            from pdvm_central_systemsteuerung import get_gcs
             import json
             
-            # DB-Instanz für Dropdown-Tabelle erstellen
-            dd_inst = PdvmCentralDatenbank(self.dropdown_table, self.dropdown_key)
+            gcs = get_gcs()
+            if not gcs:
+                logger.error("    ❌ GCS nicht verfügbar!")
+                return
             
-            # Sprache aus User-Settings holen
-            try:
-                language = gcs._u_db.get_static_value(gcs.user_guid, 'language')
-                if not language:
-                    language = 'de-de'
-            except:
-                language = 'de-de'
+            # Dropdown-Daten direkt aus GCS holen
+            dropdown_options = gcs.get_dropdown_options(self.dropdown_key, self.dropdown_value)
             
-            # JSON-Daten holen (enthält {key: display_text})
-            json_data = dd_inst.get_static_value(self.dropdown_value, language)
-            
-            if json_data:
-                # JSON parsen
-                parsed = json.loads(json_data) if isinstance(json_data, str) else json_data
-                
+            if dropdown_options:
                 # Mapping speichern: {key: display_text}
-                for key, display_text in parsed.items():
-                    self.key_to_display[key] = display_text
-                
+                self.key_to_display = dropdown_options.copy()
                 logger.info(f"    ✅ {len(self.key_to_display)} Dropdown-Optionen geladen: {list(self.key_to_display.keys())}")
             else:
                 logger.warning(f"    ⚠️ Keine Dropdown-Daten für {self.dropdown_table}.{self.dropdown_value}")

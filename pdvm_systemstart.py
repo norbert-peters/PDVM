@@ -1,34 +1,14 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PDVM-Systemstart mi                # Benutzername für Titelleiste aus GCS
-                vorname = gcs.get_property('Vorname', 'u') or ''
-                name = gcs.get_property('Name', 'u') or ''
-                self.user_name = f"{vorname} {name}".strip() or self.user_email
-                
-                # Kompatibilität: user_daten für bestehende Handler
-                self.user_daten = {
-                    'email': self.user_email,
-                    'guid': gcs._user_guid,
-                    'Vorname': vorname,
-                    'Name': name,
-                    'MeineApps': self.startmenu_id
-                }
-                
-                logger.info(f"✅ Alle Benutzerdaten aus finaler GCS geladen")
-                logger.info(f"🔹 E-Mail: {self.user_email}")
-                logger.info(f"🔹 GUID: {gcs._user_guid}")
-                logger.info(f"🔹 Startmenü-ID: {self.startmenu_id}")
-                logger.info(f"🔹 Benutzername: {self.user_name}")
-            else:
-                logger.error("❌ Finale GCS nicht verfügbar - verwende Fallback-Werte")
-                self.user_email = 'test@example.com'
-                # Fallback entfernt - GCS ist jetzt erforderlich
-                self.user_name = 'Test Benutzer'
-                self.startmenu_id = "5ca6674e-b9ce-4581-9756-64e742883f80"
-                self.user_daten = {}ursprünglicher Funktionalität + finale GCS-Integration
+PDVM-SYSTEM Version 0.9 - Hauptanwendung
 
-Kombiniert alle Features aus pdvm_systemstart.py mit der finalen GCS-Architektur
+Personal Daten Verwaltungs Management System
+Produktionsstand: Beta
+
+AUTOR: Norbert Peters
+DATUM: 06.11.2025
+VERSION: 0.9
 """
 
 import sys, io, os, logging, json, traceback
@@ -57,99 +37,546 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QDateTime, QDate, QTime
 from PyQt5.QtGui import QFont
+from PyQt5 import sip  # Für isdeleted() Check
 
-# 🔒 SICHERE IMPORTS: Nur grundlegende Komponenten - Handler werden lazy geladen
-from global_gcs import gcs
+# V2.0: Angepasste Imports
+from pdvm_central_systemsteuerung import get_gcs
 from pdvm_central_datenbank import PdvmCentralDatenbank
 
-class MainAppComplete(QMainWindow):
+class V2MainAppComplete(QMainWindow):
     """
-    Vollständige MainApp-Implementation mit ursprünglicher Funktionalität.
-    Kombiniert die finale GCS-Architektur mit allen Features aus pdvm_systemstart.py.
+    V2.0 Hauptanwendung (Basis: MainAppComplete aus pdvm_systemstart.py)
     
-    Features:
-    - ✅ Startmenü-System mit Apps
-    - ✅ Menüsteuerung (ein-/ausblendbar)
-    - ✅ Stichtag-Balken mit finale GCS-Integration
-    - ✅ Command-Handler-System
-    - ✅ View-Integration mit Multi-Tab
-    - ✅ Menüeditor-Integration
-    - ✅ Alle ursprünglichen Funktionalitäten
+    Features (übernommen):
+    - ✅ Stichtag-Balken mit GCS-Integration
+    - ✅ Content-Frame für Views
+    - ✅ Fensterlayout
+    
+    TODO (später):
+    - ⏳ Menü-System (neu implementieren)
+    - ⏳ MenuHandler (neu implementieren)
+    - ⏳ Command-Handler-System
+    - ⏳ View-Integration mit Multi-Tab
     """
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDVM System - Vollständige finale Hauptanwendung")
-        self.resize(1000, 600)
         
-        # Prüfe GCS-Verfügbarkeit (ohne Fallbacks)
-        if not gcs or not gcs.is_initialized:
+        # V2.0: GCS-Zugriff
+        self.gcs = get_gcs()
+        if not self.gcs:
             raise RuntimeError("❌ GCS muss vor MainApp initialisiert sein!")
         
-        # Benutzername für Titelleiste direkt aus GCS
-        # Debug: Verfügbare Benutzerdaten
-        logger.info(f"🔍 Debug: Verfügbare Benutzerdaten-Gruppen: {list(gcs._u_db.data.keys()) if hasattr(gcs, '_u_db') and hasattr(gcs._u_db, 'data') else 'Keine'}")
+        # Version aus GCS holen
+        version = self.gcs.version
+        self.setWindowTitle(f"PDVM-SYSTEM Version {version} - Hauptanwendung")
+        self.resize(1000, 600)
         
-        # Verwende neue hierarchische Abfrage-Methoden
-        vorname = gcs.get_property('Vorname', 'u', 'Benutzer') or ''
-        name = gcs.get_property('Name', 'u', 'Benutzer') or ''
-        anrede = gcs.get_property('Anrede', 'u', 'Benutzer') or ''
+        # V2.0: Mandanten-Bezeichnung aus Mandanten-Daten (ROOT.BEZEICHNUNG)
+        try:
+            # Hole BEZEICHNUNG aus ROOT-Gruppe der Mandanten-Daten
+            mandant_data = self.gcs._mandant_data
+            root_data = mandant_data.get('ROOT', {})
+            mandant_bezeichnung = root_data.get('BEZEICHNUNG')
+            
+            if not mandant_bezeichnung:
+                logger.error("❌ KRITISCH: Mandanten-Bezeichnung (ROOT.BEZEICHNUNG) fehlt!")
+                logger.error(f"   Mandanten-Daten Struktur: {list(mandant_data.keys())}")
+                logger.error(f"   ROOT-Gruppe: {root_data}")
+                raise ValueError("Mandanten-Bezeichnung nicht gefunden - System kann nicht starten!")
+        except Exception as e:
+            logger.error(f"❌ FEHLER beim Laden der Mandanten-Bezeichnung: {e}")
+            raise RuntimeError(f"Mandanten-Konfiguration fehlerhaft: {e}")
+        
+        # V2.0: Benutzername aus user_data (auth.db) - Hierarchische Struktur!
+        user_data = self.gcs._user_data
+        user_info = user_data.get('USER', {})
+        anrede = user_info.get('ANREDE', '')
+        vorname = user_info.get('VORNAME', '')
+        name = user_info.get('NAME', '')
         user_name = f"{anrede} {vorname} {name}".strip() or 'Unbekannt'
-        self.setWindowTitle(f"PDVM System - Vollständige finale Hauptanwendung - {user_name}")
-
-        logger.info(f"✅ Hauptanwendung gestartet für User: {gcs.user_guid}")
         
-        # Zentrales Widget und Layout
+        # Fensterkopfzeile: Mandant - Benutzername (Version aus GCS)
+        version = self.gcs.version
+        self.setWindowTitle(f"PDVM-SYSTEM Version {version} - {mandant_bezeichnung} - {user_name}")
+
+        logger.info(f"✅ V2.0 Hauptanwendung gestartet für User: {self.gcs.user_guid}")
+        
+        # V2.0: Neues Layout mit Menü-System
         central = QWidget()
         self.setCentralWidget(central)
-        self.main_layout = QHBoxLayout(central)
-        central.setLayout(self.main_layout)
-
-        # Linke Sidebar für vertikales Menü
-        self.menu_frame = QFrame()
-        self.menu_frame.setFrameShape(QFrame.StyledPanel)
-        self.menu_frame.setLayout(QVBoxLayout())
-        self.main_layout.addWidget(self.menu_frame, 1)
-
-        # Rechter Bereich als Container für Inhalte
-        self.content_frame = QWidget()
-        self.content_layout = QVBoxLayout(self.content_frame)
-        self.content_frame.setLayout(self.content_layout)
         
-        self.main_layout.addWidget(self.content_frame, 4)
+        # Haupt-Layout: Vertikal
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # 1. MENÜLEISTE OBEN (GRUND + ZUSATZ in einer Zeile)
+        menu_bar_container = QWidget()
+        menu_bar_container.setFixedHeight(50)
+        menu_bar_layout = QHBoxLayout(menu_bar_container)
+        menu_bar_layout.setContentsMargins(0, 0, 0, 0)
+        menu_bar_layout.setSpacing(0)
+        
+        # GRUND-Menü (links)
+        self.grund_menu_container = QWidget()
+        menu_bar_layout.addWidget(self.grund_menu_container)
+        
+        # ZUSATZ-Menü (direkt rechts anschließend)
+        self.zusatz_menu_container = QWidget()
+        menu_bar_layout.addWidget(self.zusatz_menu_container)
+        
+        # Stretch am Ende für Ausrichtung
+        menu_bar_layout.addStretch()
+        
+        main_layout.addWidget(menu_bar_container)
+        
+        # 2. ARBEITSBEREICH (VERTIKAL links, Rest rechts)
+        work_area = QWidget()
+        self.work_area_layout = QHBoxLayout(work_area)  # ✅ Als Instanz-Variable speichern für toggle_menu
+        self.work_area_layout.setContentsMargins(0, 0, 0, 0)
+        self.work_area_layout.setSpacing(0)
+        
+        # VERTIKAL-Menü (links)
+        self.vertical_menu_container = QWidget()
+        self.vertical_menu_container.setFixedWidth(200)
+        self.work_area_layout.addWidget(self.vertical_menu_container)
+        
+        # V2.0: Menü-Sichtbarkeits-Status initialisieren
+        self._menu_visible = True  # Standardmäßig sichtbar
+        
+        # Rechte Seite: Vertikal (Stichtag-Bar + Content)
+        right_side = QWidget()
+        right_side_layout = QVBoxLayout(right_side)
+        right_side_layout.setContentsMargins(0, 0, 0, 0)
+        right_side_layout.setSpacing(0)
+        self.work_area_layout.addWidget(right_side)
+        
+        # ========== V3.1: 3-EBENEN-ARCHITEKTUR ==========
+        # EBENE 1: Stichtagsbar (FEST - nie vom Pipeline berührt)
+        # EBENE 2: Separator (FEST - nie vom Pipeline berührt)
+        # EBENE 3: Workspace-Frame (DYNAMISCH - Pipeline verwaltet NUR DIESEN!)
+        
+        main_layout.addWidget(work_area)
 
-        # 🔒 LAZY IMPORT: Handler erst nach Login laden
+        # V3.0: Menu Handler initialisieren (LINEAR & EINFACH!)
         try:
-            from pdvm_command_handler import PdvmCommandHandler
-            self.command_handler = PdvmCommandHandler(self)
-        except ImportError as e:
-            logger.warning(f"⚠️ Command Handler nicht verfügbar: {e}")
-            self.command_handler = None
+            from v3_menu_handler import V3MenuHandler
+            self.menu_handler = V3MenuHandler(
+                self.vertical_menu_container,
+                self.grund_menu_container,
+                self.zusatz_menu_container
+            )
+            # WICHTIG: main_app Referenz setzen für Handler-Context
+            self.menu_handler.main_app = self
+            logger.info("✅ V3 Menu Handler initialisiert")
+        except Exception as e:
+            logger.error(f"❌ V3 Menu Handler Fehler: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.menu_handler = None
         
-        # FINALE STICHTAG-BALKEN direkt aus GCS
-        logger.info("🔧 Erstelle vollständigen Stichtag-Balken...")
+        # ========== EBENE 1: STICHTAGSBAR (PERMANENT) ==========
+        logger.info("🔧 Erstelle Stichtag-Balken...")
         self.stichtag_bar = self._create_complete_stichtag_bar()
         if self.stichtag_bar:
-            logger.info("✅ Vollständiger Stichtag-Balken erstellt, füge zu Layout hinzu...")
-            self.content_layout.insertWidget(0, self.stichtag_bar)  # Am Anfang einfügen
-            logger.info("✅ Vollständiger Stichtag-Balken erfolgreich zu Layout hinzugefügt")
+            logger.info("✅ Stichtag-Balken erstellt")
+            right_side_layout.addWidget(self.stichtag_bar)  # Direkt in right_side_layout!
         else:
-            logger.error("❌ Vollständiger Stichtag-Balken konnte nicht erstellt werden!")
+            logger.error("❌ Stichtag-Balken konnte nicht erstellt werden!")
         
-        # Separator-Line für optische Trennung
+        # ========== EBENE 2: SEPARATOR (PERMANENT) ==========
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
-        self.content_layout.insertWidget(1, separator)  # Nach Stichtag-Balken
+        right_side_layout.addWidget(separator)  # Direkt in right_side_layout!
         
-        # STARTMENÜ laden (klar getrennt von App-Menüs)
-        self.open_start_menu()
+        # ========== EBENE 3: WORKSPACE-FRAME (DYNAMISCH) ==========
+        # Nur DIESER Frame wird vom Pipeline gelöscht/befüllt!
+        self.workspace_frame = QWidget()
+        self.workspace_layout = QVBoxLayout(self.workspace_frame)
+        self.workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace_layout.setSpacing(0)
+        right_side_layout.addWidget(self.workspace_frame)
+        
+        # Kompatibilitäts-Alias für alte Code-Stellen
+        self.content_frame = self.workspace_frame  # DEPRECATED: Verwende workspace_frame!
+        
+        # V2.0: Willkommensbereich (initial im workspace_frame)
+        self.welcome_widget = self._create_welcome_widget()
+        self.workspace_layout.addWidget(self.welcome_widget)
+        
+        # V2.0: Startmenü laden
+        if self.menu_handler:
+            logger.info("🚀 Lade Startmenü...")
+            success = self.menu_handler.load_startmenu()
+            if success:
+                logger.info("✅ Startmenü erfolgreich geladen")
+                # Zeige Willkommenstext für Startmenü
+                self._show_welcome_message()
+            else:
+                logger.warning("⚠️ Startmenü konnte nicht geladen werden")
+        else:
+            logger.warning("⚠️ Menu Handler nicht verfügbar - kein Menü")
+
+    def _create_welcome_widget(self):
+        """Erstellt Widget für Willkommenstext/Menü-Info"""
+        from PyQt5.QtWidgets import QTextEdit
+        
+        widget = QTextEdit()
+        widget.setReadOnly(True)
+        widget.setStyleSheet("""
+            QTextEdit {
+                background-color: #f9f9f9;
+                border: 1px solid #ddd;
+                padding: 20px;
+                font-size: 12pt;
+            }
+        """)
+        return widget
+    
+    # ========================================
+    # ARBEITSBEREICHS-PIPELINE
+    # ========================================
+    
+    def workspace_pipeline(self, command_func=None, error_message=None, skip_clear=False, alternativ_skip_clear=False, alternativ_func=None):
+        """
+        V3.2: LINEARE PIPELINE nach User-Vorgabe
+        
+        3-EBENEN-ARCHITEKTUR:
+        - Stichtagsbar (FEST, über workspace_frame)
+        - Separator (FEST, über workspace_frame)
+        - workspace_frame (DYNAMISCH - Pipeline verwaltet NUR DIESEN!)
+        
+        ABLAUF (STRIKT LINEAR):
+        
+        1. Handler wird aufgerufen
+        2. Handler bereitet Parameter für Pipeline auf
+        3. Pipeline arbeitet:
+        
+           skip_clear=False (Arbeitsbereich wird neu belegt):
+           3.1 Arbeitsbereich löschen
+           3.2 Aufruf ausführen (command_func)
+           3.3 Falls leer → alternativ_func ausführen (z.B. Welcome-Screen)
+           
+           skip_clear=True (Arbeitsbereich bleibt):
+           4.1 Arbeitsbereich wird NICHT gelöscht
+           4.2 Aufruf wird ausgeführt (command_func)
+           4.3 alternativ_skip_clear entscheidet:
+               False → Pipeline Ende (Arbeitsbereich bleibt)
+               True  → Arbeitsbereich löschen + alternativ_func ausführen
+        
+        Args:
+            command_func: Haupt-Funktion (Handler-Logik)
+            error_message: Fehlermeldung (optional)
+            skip_clear: False = Workspace leeren vor Aufruf, True = behalten
+            alternativ_skip_clear: True = Nach skip_clear Workspace löschen
+            alternativ_func: Funktion für leeren Workspace (z.B. Welcome-Screen)
+        
+        Returns:
+            bool: True wenn erfolgreich, False bei Fehler
+        """
+        try:
+            # ========== SCHRITT 3.1 / 4.1: WORKSPACE LEEREN (BEDINGT) ==========
+            if not skip_clear:
+                logger.info("🧹 STEP 3.1: Workspace-Frame leeren...")
+                self._clear_workspace_layout()
+                logger.info("✅ STEP 3.1 abgeschlossen: Workspace-Frame geleert")
+            else:
+                logger.info("⏭️ STEP 4.1: Workspace bleibt unverändert (skip_clear=True)")
+            
+            # ========== SCHRITT 3.2 / 4.2: HAUPTAUFRUF AUSFÜHREN ==========
+            if error_message:
+                logger.warning(f"⚠️ Zeige Fehlermeldung: {error_message}")
+                self._show_error_in_workspace(error_message)
+                return False
+            
+            if command_func:
+                logger.info(f"⚡ STEP {3.2 if not skip_clear else 4.2}: Führe Command-Funktion aus...")
+                result = command_func()
+                logger.info(f"✅ Command ausgeführt (Result: {result})")
+            else:
+                result = True
+            
+            # ========== SCHRITT 4.3: ALTERNATIV-LOGIK (nur bei skip_clear=True) ==========
+            if skip_clear:
+                if alternativ_skip_clear:
+                    logger.info("🧹 STEP 4.4: alternativ_skip_clear=True → Workspace leeren")
+                    self._clear_workspace_layout()
+                    
+                    # STEP 4.5: Alternativen Aufruf ausführen
+                    if alternativ_func:
+                        logger.info("🎨 STEP 4.5: Führe alternativ_func aus...")
+                        alternativ_func()
+                    elif self.workspace_layout.count() == 0:
+                        logger.info("🏠 STEP 4.5: Füge Welcome-Screen ein...")
+                        self._insert_welcome_screen()
+                else:
+                    logger.info("✅ STEP 4.3: alternativ_skip_clear=False → Pipeline Ende")
+                
+                return result if result is not None else True
+            
+            # ========== SCHRITT 3.3: WORKSPACE-FÜLLUNG GARANTIEREN ==========
+            if self.workspace_layout.count() == 0:
+                logger.info("⚠️ STEP 3.3: Workspace leer → Füge Inhalt ein")
+                
+                if alternativ_func:
+                    logger.info("🎨 Führe alternativ_func aus...")
+                    alternativ_func()
+                else:
+                    logger.info("🏠 Füge Welcome-Screen ein...")
+                    self._insert_welcome_screen()
+            
+            return result if result is not None else True
+            
+        except Exception as e:
+            logger.error(f"❌ PIPELINE-FEHLER: {e}", exc_info=True)
+            self._show_error_in_workspace(f"Pipeline-Fehler: {str(e)}")
+            return False
+    
+    def _clear_workspace_layout(self):
+        """Löscht ALLE Widgets aus workspace_layout"""
+        while self.workspace_layout.count() > 0:
+            item = self.workspace_layout.takeAt(0)
+            if item.widget():
+                widget = item.widget()
+                widget.hide()
+                widget.deleteLater()
+                logger.debug(f"  ✅ Widget entfernt: {type(widget).__name__}")
+        
+        # Alte Referenzen löschen
+        if hasattr(self, 'current_dialog_widget'):
+            self.current_dialog_widget = None
+        if hasattr(self, 'current_view_widget'):
+            self.current_view_widget = None
+    
+    def _insert_welcome_screen(self):
+        """
+        Fügt Welcome-Screen in workspace_layout ein
+        
+        WICHTIG: Erstellt NEUES Widget (altes wurde gelöscht!)
+        """
+        # Erstelle NEUES Widget
+        self.welcome_widget = self._create_welcome_widget()
+        self._show_welcome_message()
+        
+        # Füge in Workspace ein
+        self.workspace_layout.addWidget(self.welcome_widget)
+        self.welcome_widget.show()
+        logger.info("✅ Welcome-Screen eingefügt")
+        
+        # App-Name einfügen (falls gesetzt)
+        if hasattr(self, '_current_app_name') and self._current_app_name:
+            try:
+                app_name = self._current_app_name
+                current_html = self.welcome_widget.toHtml()
+                
+                app_info_html = f"""
+                <div style="text-align: center; padding: 20px; margin-top: 20px; 
+                            background-color: #e3f2fd; border-radius: 10px; 
+                            border-left: 4px solid #0078d4;">
+                    <h2 style="color: #0078d4; margin: 0;">📂 {app_name}</h2>
+                    <p style="color: #666; margin: 10px 0 0 0;">
+                        Wählen Sie eine Aktion aus dem Menü
+                    </p>
+                </div>
+                """
+                
+                if "<h1" in current_html and "</h1>" in current_html:
+                    parts = current_html.split("</h1>", 1)
+                    new_html = parts[0] + "</h1>" + app_info_html + parts[1]
+                    self.welcome_widget.setHtml(new_html)
+                    logger.info(f"✅ App-Name in Welcome-Screen: {app_name}")
+                
+                # Reset
+                self._current_app_name = None
+            except Exception as e:
+                logger.debug(f"ℹ️ App-Name konnte nicht eingefügt werden: {e}")
+    
+    # ========================================
+    # PIPELINE-HANDLER (V3.2)
+    # ========================================
+    
+    def handler_return_to_startmenu(self):
+        """
+        🏠 Handler: Zurück zum Startmenü
+        
+        V3.2: Lädt Startmenü, Pipeline fügt Welcome-Screen automatisch ein
+        skip_clear=False → Workspace wird geleert, STEP 3.3 fügt Welcome ein
+        """
+        try:
+            logger.info("🏠 Handler: Zurück zum Startmenü")
+            
+            def _load_startmenu():
+                # Lade Startmenü
+                if self.menu_handler:
+                    success = self.menu_handler.load_startmenu()
+                    if success:
+                        logger.info("✅ Startmenü geladen")
+                        # V3.2: KEIN _show_welcome_message() mehr!
+                        # Pipeline fügt Welcome-Screen automatisch ein (STEP 3.3)
+                    else:
+                        logger.error("❌ Startmenü konnte nicht geladen werden")
+                    return success
+                return False
+            
+            # Pipeline mit skip_clear=False → Workspace leeren (3.1) + Welcome (3.3)
+            return self.workspace_pipeline(command_func=_load_startmenu)
+            
+        except Exception as e:
+            logger.error(f"❌ Handler-Fehler (Return to Startmenu): {e}", exc_info=True)
+            self.workspace_pipeline(error_message=f"Fehler beim Laden des Startmenüs: {str(e)}")
+            return False
+    
+    def handler_toggle_menu(self):
+        """
+        🔄 Handler: Menü ein/ausschalten
+        
+        Toggle Menü-Sichtbarkeit OHNE Arbeitsbereich zu leeren
+        Arbeitsbereich bleibt unverändert (skip_clear=True)
+        """
+        try:
+            logger.info("🔄 Handler: Menü ein/aus")
+            
+            def _toggle_menu():
+                # Toggle Menü-Sichtbarkeit
+                if hasattr(self, 'vertical_menu_container') and self.vertical_menu_container:
+                    current_visible = self.vertical_menu_container.isVisible()
+                    new_visible = not current_visible
+                    
+                    self.vertical_menu_container.setVisible(new_visible)
+                    self._menu_visible = new_visible
+                    
+                    status = "ein" if new_visible else "aus"
+                    logger.info(f"✅ Menü {status}geschaltet")
+                    return True
+                return False
+            
+            # Pipeline mit skip_clear=True → Arbeitsbereich NICHT leeren!
+            return self.workspace_pipeline(command_func=_toggle_menu, skip_clear=True)
+            
+        except Exception as e:
+            logger.error(f"❌ Handler-Fehler (Toggle Menu): {e}", exc_info=True)
+            return False
+    
+    def handler_toggle_stichtagsbar(self):
+        """
+        🔄 Handler: Stichtagsbar ein/ausschalten
+        
+        Toggle Stichtagsbar-Sichtbarkeit OHNE Arbeitsbereich zu leeren
+        Arbeitsbereich bleibt unverändert (skip_clear=True)
+        """
+        try:
+            logger.info("🔄 Handler: Stichtagsbar ein/aus")
+            
+            def _toggle_stichtagsbar():
+                # Toggle Stichtagsbar-Sichtbarkeit
+                if hasattr(self, 'stichtag_bar') and self.stichtag_bar:
+                    current_visible = self.stichtag_bar.isVisible()
+                    new_visible = not current_visible
+                    
+                    self.stichtag_bar.setVisible(new_visible)
+                    
+                    status = "ein" if new_visible else "aus"
+                    logger.info(f"✅ Stichtagsbar {status}geschaltet")
+                    return True
+                return False
+            
+            # Pipeline mit skip_clear=True → Arbeitsbereich NICHT leeren!
+            return self.workspace_pipeline(command_func=_toggle_stichtagsbar, skip_clear=True)
+            
+        except Exception as e:
+            logger.error(f"❌ Handler-Fehler (Toggle Stichtagsbar): {e}", exc_info=True)
+            return False
+    
+    def _show_error_in_workspace(self, error_message: str):
+        """
+        Zeigt Fehlermeldung im Arbeitsbereich an
+        
+        Args:
+            error_message: Fehlermeldung
+        """
+        from PyQt5.QtWidgets import QLabel
+        
+        error_widget = QLabel()
+        error_widget.setWordWrap(True)
+        error_widget.setStyleSheet("""
+            QLabel {
+                background-color: #fee;
+                border: 2px solid #c00;
+                border-radius: 5px;
+                padding: 30px;
+                font-size: 14pt;
+                color: #c00;
+            }
+        """)
+        error_widget.setText(f"❌ FEHLER\n\n{error_message}")
+        error_widget.setAlignment(Qt.AlignCenter)
+        
+        self.workspace_layout.addWidget(error_widget)  # V3.1: workspace_layout statt content_layout!
+        logger.debug("  ✅ Fehler-Widget erstellt und angezeigt")
+    
+    def _show_welcome_message(self):
+        """Zeigt Willkommenstext für Startmenü"""
+        # Hole User-Info aus GCS
+        user_info = self.gcs._user_data.get('USER', {})
+        vorname = user_info.get('VORNAME', '')
+        name = user_info.get('NAME', '')
+        
+        # Version aus GCS holen
+        version = self.gcs.version
+        
+        welcome_html = f"""
+        <div style="text-align: center; padding: 40px;">
+            <h1 style="color: #0078d4;">🎉 Willkommen im PDVM-SYSTEM Version {version}!</h1>
+            <h2 style="color: #555;">Hallo {vorname} {name}</h2>
+            
+            <div style="text-align: left; margin-top: 40px; padding: 20px; background-color: white; border-radius: 5px;">
+                <h3 style="color: #0078d4;">📋 Kurzanleitung:</h3>
+                <ul style="font-size: 11pt; line-height: 1.8;">
+                    <li><b>Vertikalmenü (links):</b> Hauptnavigation - Klicken Sie auf einen Bereich</li>
+                    <li><b>Grundmenü (oben):</b> Allgemeine Aktionen wie Datei, Bearbeiten, Ansicht</li>
+                    <li><b>Zusatzmenü (oben rechts):</b> Kontextspezifische Aktionen erscheinen automatisch</li>
+                    <li><b>Stichtag:</b> Wählen Sie einen Zeitpunkt für historische Datenansicht</li>
+                </ul>
+                
+                <h3 style="color: #0078d4; margin-top: 30px;">🚀 Erste Schritte:</h3>
+                <ol style="font-size: 11pt; line-height: 1.8;">
+                    <li>Wählen Sie einen Bereich aus dem <b>Vertikalmenü</b> (z.B. "Stammdaten")</li>
+                    <li>Im <b>Zusatzmenü</b> erscheinen dann passende Aktionen (z.B. "Neu", "Bearbeiten")</li>
+                    <li>Nutzen Sie das <b>Grundmenü</b> für allgemeine Funktionen</li>
+                    <li>Der <b>Stichtag</b> ermöglicht Ihnen Zeitreisen in der Datenhistorie</li>
+                </ol>
+                
+                <p style="margin-top: 30px; padding: 15px; background-color: #fff3cd; border-left: 4px solid #ffc107;">
+                    <b>💡 Tipp:</b> Klicken Sie auf "Stammdaten" im Vertikalmenü, um die Personenverwaltung zu öffnen!
+                </p>
+            </div>
+        </div>
+        """
+        
+        self.welcome_widget.setHtml(welcome_html)
+    
+    def _show_menu_info(self, menu_name: str):
+        """Zeigt Info über aktuelles Menü"""
+        info_html = f"""
+        <div style="text-align: center; padding: 40px;">
+            <h2 style="color: #0078d4;">📂 Aktuelles Menü</h2>
+            <h1 style="color: #333;">{menu_name}</h1>
+            
+            <p style="font-size: 12pt; color: #666; margin-top: 20px;">
+                Wählen Sie eine Aktion aus dem Menü
+            </p>
+        </div>
+        """
+        
+        self.welcome_widget.setHtml(info_html)
 
     def _create_complete_stichtag_bar(self):
         """
         Erstellt den vollständigen Stichtag-Balken für historische Datenansicht.
         
-        Verwendet die finale GCS-Architektur mit gcs.st_inst.
+        Verwendet die finale GCS-Architektur mit self.gcs.st_inst.
         Layout: 'Stichtag:' (PdvmDateTimePicker) --> verwendeter Stichtag: (PdvmTimeStamp) [Refresh]
         
         Returns:
@@ -160,11 +587,11 @@ class MainAppComplete(QMainWindow):
         from PyQt5.QtWidgets import QHBoxLayout, QLabel, QPushButton, QFrame
         from PyQt5.QtGui import QFont
         
-        # Prüfe finale GCS direkt (vereinfacht)
-        if not gcs:
-            logger.error("❌ Finale GCS nicht verfügbar - kann Balken nicht erstellen")
-            return QLabel("❌ Finale GCS nicht verfügbar")
-        logger.info("✅ Finale GCS verfügbar")
+        # V2.0: GCS-Prüfung
+        if not self.gcs:
+            logger.error("❌ GCS nicht verfügbar - kann Balken nicht erstellen")
+            return QLabel("❌ GCS nicht verfügbar")
+        logger.info("✅ GCS verfügbar")
         
         # Hauptcontainer für Stichtag-Balken
         stichtag_widget = QFrame()
@@ -192,16 +619,16 @@ class MainAppComplete(QMainWindow):
         
         # Stichtag-Instanz aus finale GCS holen - mit Fallback
         try:
-            # Für finale GCS verwenden wir gcs.st_inst direkt
+            # Für finale GCS verwenden wir self.gcs.st_inst direkt
             try:
                 from pdvm_date_time_picker import PdvmDateTimePicker
                 self.stichtag_picker = PdvmDateTimePicker(
                     parent=self,
-                    pdvm_datetime=gcs.st_inst,  # Finale GCS st_inst!
+                    pdvm_datetime=self.gcs.st_inst,  # Finale GCS st_inst!
                     display="all",
                     display_time_short=False
                 )
-                logger.info(f"✅ Vollständige PdvmDateTimePicker Datum: {gcs.st_inst}") 
+                logger.info(f"✅ Vollständige PdvmDateTimePicker Datum: {self.gcs.st_inst}") 
                 if hasattr(self.stichtag_picker, '_date_edit'):
                     calendar = self.stichtag_picker._date_edit.calendarWidget()
                     if calendar:
@@ -275,12 +702,12 @@ class MainAppComplete(QMainWindow):
 
     def _update_complete_stichtag_display(self):
         """
-        Aktualisiert die Anzeige des verwendeten Stichtags mit finale GCS.
+        Aktualisiert die Anzeige des verwendeten Stichtags mit finale self.gcs.
         """
         try:
-            if gcs:
+            if self.gcs:
                 # Finale GCS verwendet st_inst direkt
-                stichtag_value = gcs.st_inst
+                stichtag_value = self.gcs.st_inst
                 # Anzeige als PdvmTimeStamp (schönes Format)
                 if hasattr(stichtag_value, 'FormTimeStamp'):
                     display_text = str(stichtag_value.FormTimeStamp)
@@ -311,19 +738,19 @@ class MainAppComplete(QMainWindow):
             
             # 1. Picker-Änderungen speichern (finale Architektur)
             if hasattr(self, 'stichtag_picker') and self.stichtag_picker:
-                logger.info(f"📊 VOR save(): gcs.st_inst={gcs.st_inst.PdvmDateTime}, picker.initial={self.stichtag_picker.initial.PdvmDateTime}")
+                logger.info(f"📊 VOR save(): self.gcs.st_inst={self.gcs.st_inst.PdvmDateTime}, picker.initial={self.stichtag_picker.initial.PdvmDateTime}")
                 
                 if hasattr(self.stichtag_picker, 'save'):
                     self.stichtag_picker.save()
                     logger.info("💾 Vollständige Stichtag-Picker Änderungen gespeichert")
-                    logger.info(f"📊 NACH save(): gcs.st_inst={gcs.st_inst.PdvmDateTime}")
+                    logger.info(f"📊 NACH save(): self.gcs.st_inst={self.gcs.st_inst.PdvmDateTime}")
                 else:
                     logger.warning("⚠️ Vollständige Stichtag-Picker hat keine save()-Methode")
             
             # 2. Stichtag in finale GCS persistieren
-            if gcs and hasattr(gcs, 'update_stichtag'):
-                logger.info(f"📊 VOR update_stichtag(): gcs.st_inst={gcs.st_inst.PdvmDateTime}")
-                gcs.update_stichtag()
+            if self.gcs and hasattr(self.gcs, 'update_stichtag'):
+                logger.info(f"📊 VOR update_stichtag(): self.gcs.st_inst={self.gcs.st_inst.PdvmDateTime}")
+                self.gcs.update_stichtag()
                 logger.info("💾 Stichtag erfolgreich in finale GCS persistiert")
             else:
                 logger.warning("⚠️ Finale GCS nicht verfügbar oder update_stichtag() fehlt")
@@ -331,42 +758,21 @@ class MainAppComplete(QMainWindow):
             # 3. Display aktualisieren (finale GCS)
             self._update_complete_stichtag_display()
             
-            # 4. View-Aktualisierung über CONTROLLER (NEUE ARCHITEKTUR)
-            # ✅ Stichtag ist bereits in GCS persistent → refresh() reicht!
-            if hasattr(self, 'current_view_controller') and self.current_view_controller:
-                logger.info("🔄 Aktualisiere aktuelle View nach Stichtag-Änderung...")
-                
-                if hasattr(self.current_view_controller, 'refresh'):
-                    # refresh() holt sich den aktuellen Stichtag automatisch aus GCS
-                    self.current_view_controller.refresh()
-                    logger.info(f"✅ View erfolgreich aktualisiert (Stichtag aus GCS: {gcs.stichtag})")
-                else:
-                    logger.warning("⚠️ Controller hat keine refresh()-Methode")
-                
-                logger.info("✅ Vollständige Stichtag-Balken erfolgreich aktualisiert")
+            # 4. View-Aktualisierung über SIGNAL (AUTOMATISCH!)
+            # ✅ Das stichtag_changed Signal wurde bereits emittiert (durch update_stichtag())
+            # ✅ Alle verbundenen Views werden automatisch über reload_with_stichtag() aktualisiert
+            # ❌ KEIN direkter refresh() Aufruf nötig - das würde die Daten-Neuladung überschreiben!
+            logger.info("✅ Stichtag-Signal emittiert → Views werden automatisch aktualisiert")
+            logger.info(f"   📅 Neuer Stichtag: {self.gcs.stichtag}")
+            logger.info("   🔔 Alle Views mit reload_with_stichtag() verbunden werden neu geladen")
             
-            # 5. Dialog-Aktualisierung (EDIT-BEREICH)
-            # ✅ Falls ein genereller Dialog geöffnet ist, auch diesen aktualisieren
+            # 5. Dialog-Aktualisierung (EBENFALLS ÜBER SIGNAL!)
+            # ✅ Genereller Dialog sollte auch mit stichtag_changed verbunden sein
+            # ❌ Falls nicht, hier Warnung ausgeben
             if hasattr(self, 'current_dialog') and self.current_dialog:
-                logger.info("🔄 Aktualisiere generellen Dialog nach Stichtag-Änderung...")
-                
-                if hasattr(self.current_dialog, 'refresh'):
-                    # refresh() aktualisiert View UND Edit-Bereich
-                    self.current_dialog.refresh()
-                    logger.info(f"✅ Dialog erfolgreich aktualisiert (Stichtag aus GCS: {gcs.stichtag})")
-                else:
-                    logger.warning("⚠️ Dialog hat keine refresh()-Methode")
+                logger.info("ℹ️ Genereller Dialog offen - sollte ebenfalls Signal empfangen haben")
             
-            # Fallback: Alte Widget-basierte Aktualisierung (für Kompatibilität)
-            elif hasattr(self, 'current_view_widget') and self.current_view_widget:
-                if hasattr(self.current_view_widget, 'reload'):
-                    logger.info("🔄 Fallback: Aktualisiere View über Widget (alte Architektur)...")
-                    self.current_view_widget.reload()
-                    logger.info("✅ View erfolgreich nach Stichtag-Refresh aktualisiert (Widget-Fallback)")
-                else:
-                    logger.warning("⚠️ Aktuelle View hat keine reload()-Methode")
-            else:
-                logger.warning("⚠️ Keine View geladen für Stichtag-Aktualisierung")
+            logger.info("✅ Vollständige Stichtag-Refresh abgeschlossen")
                 
         except Exception as e:
             logger.error(f"❌ Fehler beim Aktualisieren des vollständigen Stichtag-Balkens: {e}")
@@ -390,8 +796,8 @@ class MainAppComplete(QMainWindow):
                 
             # GUID setzen wenn nicht vorhanden
             if not db.guid:
-                db.guid = gcs._user_guid
-                logger.info(f"✅ DB GUID gesetzt für Demo-Menü: {gcs._user_guid}")
+                db.guid = self.gcs._user_guid
+                logger.info(f"✅ DB GUID gesetzt für Demo-Menü: {self.gcs._user_guid}")
             
             # Prüfe ob Demo-Menü bereits existiert (verwende get_value statt load_menu_data)
             existing_menu = db.get_value(
@@ -452,7 +858,7 @@ class MainAppComplete(QMainWindow):
             self.clear_content_layout()
         
         # Größerer oberer Abstand (30px statt vorher zentriert)
-        self.content_layout.addSpacing(30)
+        self.workspace_layout.addSpacing(30)
         
         # Text aufbereiten
         if isinstance(texts, str):
@@ -509,7 +915,7 @@ class MainAppComplete(QMainWindow):
             scroll_area.setWidget(scroll_widget)
             
             # ScrollArea zum Hauptlayout hinzufügen
-            self.content_layout.addWidget(scroll_area)
+            self.workspace_layout.addWidget(scroll_area)
             
             logger.info(f"📜 ScrollArea erstellt für {len(texts)} Zeilen (max_height: {max_height}px)")
             
@@ -522,10 +928,10 @@ class MainAppComplete(QMainWindow):
                     lbl.setStyleSheet("font-size: 12px; margin: 5px;")
                 else:
                     lbl.setStyleSheet("font-size: 16px; margin: 10px;")
-                self.content_layout.addWidget(lbl)
+                self.workspace_layout.addWidget(lbl)
         
         # Flexibler unterer Abstand (nimmt den restlichen Platz ein)
-        self.content_layout.addStretch(1)
+        self.workspace_layout.addStretch(1)
 
     def show_text(self, text, small=False):
         """Normaler Text im Hauptbereich."""
@@ -538,29 +944,30 @@ class MainAppComplete(QMainWindow):
 
     def clear_content_layout(self):
         """
-        Löscht alle Inhalte aus dem content_layout.
-        SCHÜTZT den Stichtag-Balken (Index 0) und Separator (Index 1).
-        """
-        # Rückwärts durch das Layout gehen, um Indizes stabil zu halten
-        # Beginne bei Index 2, um Stichtag-Balken (0) und Separator (1) zu schützen
-        protected_items = 2  # Stichtag-Balken + Separator
+        V3.1: DEPRECATED - Verwende workspace_pipeline() stattdessen!
         
-        while self.content_layout.count() > protected_items:
-            # Immer das letzte Item nehmen (höchster Index)
-            last_index = self.content_layout.count() - 1
-            item = self.content_layout.takeAt(last_index)
-            
+        Diese Methode bleibt aus Kompatibilitätsgründen, leitet aber
+        nur noch an workspace_pipeline() weiter.
+        
+        3-EBENEN-ARCHITEKTUR:
+        - Stichtagsbar ist ÜBER workspace_frame (nie berührt)
+        - Separator ist ÜBER workspace_frame (nie berührt)
+        - workspace_frame wird KOMPLETT geleert
+        """
+        logger.warning("⚠️ clear_content_layout() ist DEPRECATED - verwende workspace_pipeline()")
+        
+        # Leite an workspace_pipeline weiter (leert workspace_frame)
+        while self.workspace_layout.count() > 0:
+            item = self.workspace_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
                 logger.debug(f"🗑️ Widget entfernt: {widget.__class__.__name__}")
             elif item.layout():
-                # Falls ein verschachteltes Layout, rekursiv löschen
                 self._clear_layout(item.layout())
                 logger.debug("🗑️ Layout entfernt")
-            # Spacer/Stretches werden durch takeAt automatisch entfernt
         
-        logger.debug(f"✅ Content-Layout bereinigt - {protected_items} geschützte Items behalten")
+        logger.debug(f"✅ Workspace-Frame bereinigt (V3.1 Architektur)")
 
     def _clear_layout(self, layout):
         """Hilfsmethode zum rekursiven Löschen von Layouts"""
@@ -577,15 +984,18 @@ class MainAppComplete(QMainWindow):
         logger.info(f"🔹 Benutzer {self.user_name} öffnet Menüeditor für {menu_type}")
         
         try:
+            # ⚠️ DEAKTIVIERT - Menü-Editor noch nicht fertig (Post-0.9 Feature)
             # Lazy Import - nur bei Bedarf laden
-            from pdvm_menu_editor import PdvmMenuEditor
+            # from pdvm_menu_editor import PdvmMenuEditor
             
             # Inhalt löschen
             self.clear_content_layout()
             
+            # Platzhalter-Meldung
+            logger.warning("⚠️ Menü-Editor noch nicht implementiert (Post-0.9 Feature)")
             # Editor instanziieren und anzeigen
-            editor = PdvmMenuEditor(self.content_frame, self.menu_handler.menu, menu_type, self, call_path)
-            self.content_layout.addWidget(editor)
+            # editor = PdvmMenuEditor(self.content_frame, self.menu_handler.menu, menu_type, self, call_path)
+            # self.workspace_layout.addWidget(editor)
         except ImportError as e:
             logger.warning(f"⚠️ Menüeditor nicht verfügbar: {e}")
             self.show_text(f"⚠️ Menüeditor nicht verfügbar: {e}")
@@ -596,7 +1006,7 @@ class MainAppComplete(QMainWindow):
         
         try:
             # Startmenü-GUID direkt aus GCS (ohne Zwischenvariable)
-            startmenu_guid = gcs.get_menu_id('Startbereich')
+            startmenu_guid = self.gcs.get_menu_id('Startbereich')
             if not startmenu_guid:
                 raise ValueError("Startmenü-GUID nicht in GCS gefunden!")
                 
@@ -653,7 +1063,7 @@ class MainAppComplete(QMainWindow):
 
     def pdvm_start(self, application_name):
         """
-        Startet eine Anwendung basierend auf den Benutzer-Berechtigungen aus der GCS.
+        Startet eine Anwendung basierend auf den Benutzer-Berechtigungen aus der self.gcs.
         
         Args:
             application_name: Name der Anwendung (z.B. "Testbereich", "Personalwesen")
@@ -664,7 +1074,7 @@ class MainAppComplete(QMainWindow):
             # Hole Menü-GUID aus GCS-Benutzerdaten basierend auf App-Berechtigung
             try:
                 # Prüfe Menü-Berechtigung für die Anwendung
-                menu_guid = gcs.get_menu_id(application_name)
+                menu_guid = self.gcs.get_menu_id(application_name)
                 logger.debug(f"🔹 Gefundene Menü-GUID für '{application_name}': {menu_guid}")
                 if not menu_guid:
                     logger.warning(f"⚠️ Keine Menü-Berechtigung für '{application_name}' - Zugriff verweigert")
@@ -815,7 +1225,7 @@ class MainAppComplete(QMainWindow):
             from pdvm_central_datenbank import PdvmCentralDatenbank
             
             framedaten_db = PdvmCentralDatenbank(
-                table_name="framedaten", 
+                table_name="sys_framedaten", 
                 guid=frame_guid
             )
             
@@ -883,7 +1293,7 @@ class MainAppComplete(QMainWindow):
                 
                 # Content löschen und neues Widget hinzufügen
                 self.clear_content_layout()
-                self.content_layout.addWidget(view_widget)
+                self.workspace_layout.addWidget(view_widget)
                 
                 # Controller speichern für Stichtag-Refresh und spätere Operationen
                 self.current_view_controller = view_controller
@@ -981,7 +1391,7 @@ class MainAppComplete(QMainWindow):
             )
             
             # Dialog in Arbeitsbereich anzeigen
-            self.content_layout.addWidget(dialog)
+            self.workspace_layout.addWidget(dialog)
             
             # Dialog-Instanz speichern für spätere Operationen
             self.current_dialog = dialog
@@ -1014,45 +1424,24 @@ class MainAppComplete(QMainWindow):
         try:
             logger.info(f"🔧 Öffne Menü-Editor für: {menu_type}")
             
+            # ⚠️ DEAKTIVIERT - Menü-Editor noch nicht fertig (Post-0.9 Feature)
             # 🔒 LAZY IMPORT: Editor erst bei Bedarf laden
-            from pdvm_menu_editor import PdvmMenuEditor
+            # from pdvm_menu_editor import PdvmMenuEditor
             
             # Inhalt löschen
             self.clear_content_layout()
             
+            # Platzhalter-Meldung
+            logger.warning("⚠️ Menü-Editor noch nicht implementiert (Post-0.9 Feature)")
             # Editor instanziieren und anzeigen
-            editor = PdvmMenuEditor(self.content_frame, self.menu_handler.menu, menu_type, self, call_path)
-            self.content_layout.addWidget(editor)
+            # editor = PdvmMenuEditor(self.content_frame, self.menu_handler.menu, menu_type, self, call_path)
+            # self.workspace_layout.addWidget(editor)
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Öffnen des Menü-Editors: {e}")
             self.show_text(f"❌ Fehler beim Öffnen des Menü-Editors:\n\n{str(e)}")
 
-    def clear_content_layout(self):
-        """
-        Löscht alle Inhalte aus dem content_layout.
-        SCHÜTZT den Stichtag-Balken (Index 0) und Separator (Index 1).
-        """
-        # Rückwärts durch das Layout gehen, um Indizes stabil zu halten
-        # Beginne bei Index 2, um Stichtag-Balken (0) und Separator (1) zu schützen
-        protected_items = 2  # Stichtag-Balken + Separator
-        
-        while self.content_layout.count() > protected_items:
-            # Immer das letzte Item nehmen (höchster Index)
-            last_index = self.content_layout.count() - 1
-            item = self.content_layout.takeAt(last_index)
-            
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-                logger.debug(f"🗑️ Widget entfernt: {widget.__class__.__name__}")
-            elif item.layout():
-                # Falls ein verschachteltes Layout, rekursiv löschen
-                self._clear_layout(item.layout())
-                logger.debug("🗑️ Layout entfernt")
-            # Spacer/Stretches werden durch takeAt automatisch entfernt
-        
-        logger.debug(f"✅ Content-Layout bereinigt - {protected_items} geschützte Items behalten")
+    # V3.1: DEPRECATED - Diese Methode ist bereits oben definiert
 
     def _clear_layout(self, layout):
         """Hilfsmethode zum rekursiven Löschen von Layouts"""
@@ -1143,25 +1532,24 @@ class MainAppComplete(QMainWindow):
             # Hauptfenster schließen
             self.close()
             
-            # GCS zurücksetzen für Neustart
+            # V2.0: GCS zurücksetzen für Neustart
             try:
-                from pdvm_central_systemsteuerung import _gcs_instance
-                import pdvm_central_systemsteuerung
-                pdvm_central_systemsteuerung._gcs_instance = None
-                logger.info("🔄 GCS zurückgesetzt für Neustart")
-            except:
-                logger.warning("⚠️ GCS-Reset fehlgeschlagen - wird beim Neustart automatisch überschrieben")
+                from pdvm_central_systemsteuerung import reset_gcs
+                reset_gcs()
+                logger.info("🔄 V2 GCS zurückgesetzt für Neustart")
+            except Exception as e:
+                logger.warning(f"⚠️ GCS-Reset fehlgeschlagen: {e} - wird beim Neustart automatisch überschrieben")
             
-            # Neuen Hauptprozess starten
+            # V2.0: Neuen Hauptprozess starten
             import subprocess
             import sys
             import os
             
-            # Starte main.py in neuem Prozess
+            # Starte pdvm_main.py in neuem Prozess (PDVM 0.9)
             python_exe = sys.executable
-            main_script = os.path.join(os.getcwd(), "main.py")
+            main_script = os.path.join(os.getcwd(), "pdvm_main.py")
             
-            logger.info(f"🚀 Starte neuen Prozess: {python_exe} {main_script}")
+            logger.info(f"🚀 Starte V2.0 Login neu: {python_exe} {main_script}")
             subprocess.Popen([python_exe, main_script], cwd=os.getcwd())
             
             # Aktuellen Prozess beenden
@@ -1172,6 +1560,92 @@ class MainAppComplete(QMainWindow):
             logger.error(f"❌ Fehler beim Neustart: {e}")
             # Fallback: Einfach das Fenster schließen
             self.close()
+
+    def pdvm_dialog(self, dialog_guid, mode=0, selected_id=None):
+        """
+        V2.0: Öffnet einen PDVM-Dialog im Arbeitsbereich (ersetzt aktuellen Inhalt)
+        
+        Args:
+            dialog_guid: Frame-GUID aus sys_framedaten (enthält ROOT_TABLE, VIEW_GUID, DIALOG_GUID)
+            mode: Dialog-Modus (0=neu, 1=bearbeiten, etc.)
+            selected_id: ID des zu bearbeitenden Datensatzes
+        """
+        try:
+            logger.info(f"🚀 V2.0: Öffne PDVM-Dialog im Arbeitsbereich")
+            logger.info(f"  📋 Frame-GUID: {dialog_guid}")
+            logger.info(f"  📋 Mode: {mode}, ID: {selected_id}")
+            
+            # V2-Genereller-Dialog importieren (vollständige Implementierung)
+            from pdvm_genereller_dialog import V2PdvmGenerellerDialog
+            
+            # Verstecke aktuellen Content (welcome_widget) - mit Fehlerbehandlung
+            if hasattr(self, 'welcome_widget') and self.welcome_widget:
+                try:
+                    # Prüfe ob Widget noch existiert (nicht deleted)
+                    if not sip.isdeleted(self.welcome_widget):
+                        self.welcome_widget.hide()
+                        logger.debug("✅ Welcome-Widget versteckt")
+                    else:
+                        logger.debug("ℹ️ Welcome-Widget bereits gelöscht")
+                except RuntimeError as e:
+                    # Widget wurde bereits von Qt gelöscht
+                    logger.debug(f"ℹ️ Welcome-Widget nicht mehr verfügbar: {e}")
+            
+            # Entferne altes Dialog-Widget falls vorhanden - mit Fehlerbehandlung
+            if hasattr(self, 'current_dialog_widget') and self.current_dialog_widget:
+                try:
+                    if not sip.isdeleted(self.current_dialog_widget):
+                        self.workspace_layout.removeWidget(self.current_dialog_widget)
+                        self.current_dialog_widget.deleteLater()
+                        logger.debug("✅ Altes Dialog-Widget entfernt")
+                    else:
+                        logger.debug("ℹ️ Altes Dialog-Widget bereits gelöscht")
+                except RuntimeError as e:
+                    logger.debug(f"ℹ️ Altes Dialog-Widget nicht mehr verfügbar: {e}")
+            
+            # V2-Dialog erstellen mit frame_guid (nicht dialog_guid!)
+            # Frame enthält ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT, EDIT_TYPE
+            dialog_widget = V2PdvmGenerellerDialog(
+                frame_guid=dialog_guid,  # ✅ frame_guid als Parameter
+                parent=self.content_frame,
+                main_app=self
+            )
+            
+            # Dialog im Arbeitsbereich anzeigen - nimmt vollen Platz ein
+            self.workspace_layout.addWidget(dialog_widget)
+            self.current_dialog_widget = dialog_widget
+            
+            logger.info(f"✅ V2.0: Dialog im Arbeitsbereich angezeigt (voller Platz)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ V2.0: Fehler beim Öffnen des PDVM-Dialogs: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Dialog-Fehler",
+                f"Fehler beim Öffnen des Dialogs:\n\n{str(e)}"
+            )
+            return False
+    
+    def remove_dialog_widget(self):
+        """Entfernt aktuelles Dialog-Widget und zeigt wieder welcome_widget"""
+        try:
+            if hasattr(self, 'current_dialog_widget') and self.current_dialog_widget:
+                logger.info("🔒 Entferne Dialog-Widget aus Arbeitsbereich")
+                self.workspace_layout.removeWidget(self.current_dialog_widget)
+                self.current_dialog_widget.deleteLater()
+                self.current_dialog_widget = None
+                
+                # Zeige welcome_widget wieder an
+                if hasattr(self, 'welcome_widget') and self.welcome_widget:
+                    self.welcome_widget.show()
+                    logger.info("✅ Welcome-Widget wieder angezeigt")
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Entfernen des Dialog-Widgets: {e}")
 
     def toggle_menu_visibility(self):
         """
@@ -1185,7 +1659,7 @@ class MainAppComplete(QMainWindow):
         try:
             # SICHERHEIT: STARTMENÜ-Panel darf NIE umgeschaltet werden!
             current_menu_id = self._get_current_menu_id()
-            startmenu_guid = gcs.get_menu_id('Startbereich')
+            startmenu_guid = self.gcs.get_menu_id('Startbereich')
             
             if current_menu_id == startmenu_guid:
                 logger.warning(f"🚨 SICHERHEIT: STARTMENÜ-Panel darf nicht umgeschaltet werden!")
@@ -1225,7 +1699,7 @@ class MainAppComplete(QMainWindow):
                 self._menu_visible = True
 
             current_menu_id = self._get_current_menu_id()
-            startmenu_guid = gcs.get_menu_id('Startbereich')
+            startmenu_guid = self.gcs.get_menu_id('Startbereich')
             
             # SICHERHEIT: Falls irrtümlich für STARTMENÜ aufgerufen - FEHLER!
             if current_menu_id == startmenu_guid:
@@ -1233,7 +1707,7 @@ class MainAppComplete(QMainWindow):
                 return
             
             # APP-MENÜS: Status aus GCS laden, Default = False (versteckt) beim ersten Aufruf
-            menu_visible = gcs.get_menu_panel_visible(current_menu_id)  # Default = True falls nicht gesetzt
+            menu_visible = self.gcs.get_menu_panel_visible(current_menu_id)  # Default = True falls nicht gesetzt
             self._menu_visible = menu_visible
             
             if self._menu_visible:
@@ -1273,24 +1747,106 @@ class MainAppComplete(QMainWindow):
             return self.menu_handler.menu_id
         
         # Fallback: Startmenü-GUID direkt aus GCS
-        return gcs.get_menu_id('Startbereich')
+        return self.gcs.get_menu_id('Startbereich')
 
-    def _save_menu_visibility_status(self):
-        """Klare Trennung: NUR APP-MENÜS werden gespeichert, STARTMENÜ nie"""
+    def toggle_menu_visibility(self):
+        """
+        V2.0: Schaltet die Sichtbarkeit des vertikalen Menüs um.
+        
+        Entfernt oder fügt das vertikale Menü zum Layout hinzu
+        und gibt dem Content-Bereich den gesamten verfügbaren Platz.
+        
+        WICHTIG: Status wird persistent in GCS gespeichert pro Menü!
+        """
         try:
-            current_menu_id = self._get_current_menu_id()
-            startmenu_guid = gcs.get_menu_id('Startbereich')
-            menu_visible = getattr(self, '_menu_visible', True)
-
-            # NUR APP-MENÜS speichern (STARTMENÜ wird nie gespeichert)
-            if current_menu_id != startmenu_guid:
-                gcs.set_menu_panel_visible(current_menu_id, menu_visible)
-                logger.info(f"💾 APP-MENÜ Panel-Status gespeichert: {menu_visible} für Menü {current_menu_id}")
+            # Hole aktuelle Menü-GUID
+            current_menu_guid = self.menu_handler.current_menu_guid if self.menu_handler else None
+            
+            if not current_menu_guid:
+                logger.warning("⚠️ Keine Menü-GUID verfügbar für Toggle")
+                return
+            
+            # Status umschalten
+            if self._menu_visible:
+                # Menü aus Layout entfernen
+                self.work_area_layout.removeWidget(self.vertical_menu_container)
+                self.vertical_menu_container.hide()
+                logger.info("🎛️ V2.0: Vertikales Menü ausgeblendet - Content-Bereich vergrößert")
+                self._menu_visible = False
             else:
-                logger.debug(f"🏠 STARTMENÜ - keine Speicherung (immer sichtbar)")
+                # Menü wieder zum Layout hinzufügen (Position 0 = links)
+                self.work_area_layout.insertWidget(0, self.vertical_menu_container)
+                self.vertical_menu_container.show()
+                logger.info("🎛️ V2.0: Vertikales Menü eingeblendet - Layout wiederhergestellt")
+                self._menu_visible = True
+            
+            # Layout-Update erzwingen
+            from PyQt5.QtWidgets import QApplication
+            self.work_area_layout.update()
+            QApplication.processEvents()
+            
+            # Status persistent speichern (pro Menü!)
+            self._save_menu_visibility_status()
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Speichern des Menü-Status: {e}")
+            logger.error(f"❌ Fehler beim Umschalten der V2.0 Menü-Sichtbarkeit: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _load_and_apply_menu_visibility(self, menu_guid):
+        """
+        V2.0: Lädt und wendet gespeicherten Menü-Sichtbarkeits-Status an.
+        
+        Args:
+            menu_guid: GUID des aktuell geladenen Menüs
+        """
+        try:
+            if not hasattr(self, '_menu_visible'):
+                self._menu_visible = True
+            
+            # Status aus GCS laden (Default = True = sichtbar)
+            menu_visible = self.gcs.get_menu_panel_visible(menu_guid)
+            self._menu_visible = menu_visible
+            
+            if self._menu_visible:
+                # Menü sichtbar machen
+                if self.vertical_menu_container not in [self.work_area_layout.itemAt(i).widget() 
+                                                          for i in range(self.work_area_layout.count())]:
+                    self.work_area_layout.insertWidget(0, self.vertical_menu_container)
+                self.vertical_menu_container.show()
+            else:
+                # Menü verstecken
+                self.work_area_layout.removeWidget(self.vertical_menu_container)
+                self.vertical_menu_container.hide()
+            
+            from PyQt5.QtWidgets import QApplication
+            self.work_area_layout.update()
+            QApplication.processEvents()
+            
+            logger.info(f"📋 V2.0: Menü-Status angewendet: {self._menu_visible} für Menü {menu_guid}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden des V2.0 Menü-Status: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _save_menu_visibility_status(self):
+        """V2.0: Speichert Menü-Sichtbarkeits-Status in GCS"""
+        try:
+            current_menu_guid = self.menu_handler.current_menu_guid if self.menu_handler else None
+            
+            if not current_menu_guid:
+                logger.debug("ℹ️ Keine Menü-GUID - kein Status zu speichern")
+                return
+            
+            menu_visible = getattr(self, '_menu_visible', True)
+            
+            # Status in GCS speichern (persistiert automatisch in sys_systemsteuerung)
+            self.gcs.set_menu_panel_visible(current_menu_guid, menu_visible)
+            logger.info(f"💾 V2.0: Menü-Status gespeichert: {menu_visible} für Menü {current_menu_guid}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern des V2.0 Menü-Status: {e}")
 
 def main():
     """Hauptfunktion für Demo-Zwecke"""
@@ -1319,12 +1875,12 @@ def main():
     ]
     
     try:
-        main_window = MainAppComplete(demo_user_data)
+        main_window = V2MainAppComplete()  # V2.0: Kein Parameter, nutzt GCS
         main_window.show()
-        logger.info("🚀 Vollständige finale Hauptanwendung gestartet")
+        logger.info("🚀 V2.0 Hauptanwendung gestartet")
         return app.exec_()
     except Exception as e:
-        logger.error(f"❌ Fehler beim Starten der vollständigen finalen Hauptanwendung: {e}")
+        logger.error(f"❌ Fehler beim Starten der V2.0 Hauptanwendung: {e}")
         import traceback
         traceback.print_exc()
         return 1

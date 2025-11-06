@@ -13,10 +13,10 @@ DATUM: 24.10.2025
 
 import logging
 from PyQt5.QtWidgets import QWidget
-from pdvm_input_type_base import PdvmInputTypeBase
+from pdvm_input_type_base import PdvmInputTypeBase  # ✅ V2-Version!
 from pdvm_date_time_picker import PdvmDateTimePicker
 from pdvm_datetime import Pdvm_DateTime
-from global_gcs import gcs
+# ✅ V2: GCS wird vom Control durchgereicht (self.control.gcs)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class PdvmInputTypeDatetime(PdvmInputTypeBase):
         super().__init__(parent, control_config)
         
         # Pdvm_DateTime Instanz für Wert
-        self.value_dt = Pdvm_DateTime(gcs.field_value('country'))
+        self.value_dt = Pdvm_DateTime(self.control.gcs.field_value('country'))
         
         # Display-Mode bestimmt Breite
         self.display_mode = self.field_config.get('display_val', 'all')
@@ -118,3 +118,4 @@ class PdvmInputTypeDatetime(PdvmInputTypeBase):
         """Handler für valueChanged Signal vom Picker"""
         # Picker stylt sich selbst - wir müssen nur wissen dass er dirty ist
         self._is_dirty = True
+
