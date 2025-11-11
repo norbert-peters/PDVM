@@ -1,0 +1,15 @@
+# PDVM-System Requirements
+# Version: 0.9
+# Python: 3.8+
+
+# GUI Framework
+PyQt5>=5.15.0
+
+# Security
+bcrypt>=4.0.0
+
+# Database (Standard-Library, aber für Klarheit aufgeführt)
+# sqlite3 ist in Python bereits enthalten
+
+# Optional: Für bessere Logging-Features
+# colorama>=0.4.6

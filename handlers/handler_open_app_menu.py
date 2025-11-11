@@ -32,7 +32,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
             'app_name': str  # Name der Anwendung (z.B. 'TESTBEREICH')
         }
         context: {
-            'menu_handler': V3MenuHandler,
+            'menu_handler': PdvmMenuHandler,
             'main_app': MainAppComplete
         }
         gcs: GlobalCentralSystemsteuerung

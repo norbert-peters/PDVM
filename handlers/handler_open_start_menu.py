@@ -30,7 +30,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
     Args:
         params: {} (keine Parameter benötigt)
         context: {
-            'menu_handler': V3MenuHandler,
+            'menu_handler': PdvmMenuHandler,
             'main_app': MainAppComplete
         }
         gcs: GlobalCentralSystemsteuerung

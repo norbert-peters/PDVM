@@ -268,38 +268,6 @@ class PdvmCentralDatenbank:
         
         # Direkter Wert - für nicht-historische Daten
         return feld_data, None
-
-    def get_gruppe(self, gruppe: str) -> Dict[str, Any]:
-        """
-        Liest alle Felder einer Gruppe als Dictionary.
-        
-        Args:
-            gruppe: Name der Gruppe
-            
-        Returns:
-            Dict[str, Any]: Dictionary mit allen Feldern der Gruppe
-                           Format: {feld_name: wert, ...}
-                           Für historische Daten: {feld_name: {timestamp: wert, ...}, ...}
-            
-        Beispiel:
-            >>> db = PdvmCentralDatenbank('framedaten', 'abc-123')
-            >>> metadaten = db.get_gruppe('Metadaten')
-            >>> for feld_name, feld_config in metadaten.items():
-            >>>     print(f"{feld_name}: {feld_config}")
-        """
-        self._ensure_data_loaded()
-        
-        if gruppe not in self.data:
-            logger.warning(f"Gruppe '{gruppe}' nicht gefunden in {self.table_name}.{self.guid}")
-            return {}
-        
-        gruppe_data = self.data[gruppe]
-        
-        if not isinstance(gruppe_data, dict):
-            logger.warning(f"Gruppe '{gruppe}' ist kein Dictionary: {type(gruppe_data)}")
-            return {}
-        
-        return gruppe_data
     
     def get_field(self, gruppe: str, feld: str) -> Dict[float, Any]:
         """
@@ -383,6 +351,62 @@ class PdvmCentralDatenbank:
             return feld_data['wert']
             
         return feld_data
+    
+    def get_value_by_group(self, gruppe: str) -> Dict[str, Any]:
+        """
+        Holt ALLE Felder einer Gruppe.
+        
+        Konvertiert automatisch Legacy 'wert'-Struktur zu bereinigten Daten.
+        Funktioniert für historische UND nicht-historische Tabellen.
+        
+        Args:
+            gruppe: Name der Gruppe (z.B. 'VERTIKAL', 'GRUND', 'METADATEN')
+            
+        Returns:
+            Dict[str, Any]: Dictionary mit {feld: wert} für alle Felder der Gruppe
+                           Legacy-Strukturen werden automatisch konvertiert
+            
+        Example:
+            >>> # Menü-System
+            >>> items = db.get_value_by_group('VERTIKAL')
+            >>> # items = {'guid-1': {...}, 'guid-2': {...}}
+            
+            >>> # Metadaten
+            >>> metadaten = db.get_value_by_group('METADATEN')
+            >>> # metadaten = {'titel': 'Personen', 'beschreibung': '...'}
+        """
+        self._ensure_data_loaded()
+        
+        if gruppe not in self.data:
+            logger.warning(f"⚠️ Gruppe nicht gefunden: {gruppe}")
+            return {}
+        
+        gruppe_data = self.data[gruppe]
+        
+        if not isinstance(gruppe_data, dict):
+            logger.warning(f"⚠️ Gruppe '{gruppe}' ist kein Dictionary: {type(gruppe_data)}")
+            return {}
+        
+        # Konvertiere Legacy 'wert'-Struktur wenn nötig
+        result = {}
+        for feld, feld_data in gruppe_data.items():
+            if isinstance(feld_data, dict) and 'wert' in feld_data:
+                # Legacy-Struktur: {'wert': actual_value, ...}
+                result[feld] = feld_data['wert']
+            else:
+                # Moderne Struktur oder direkte Werte
+                result[feld] = feld_data
+        
+        return result
+    
+    # Alias für Abwärtskompatibilität
+    def get_gruppe(self, gruppe: str) -> Dict[str, Any]:
+        """
+        DEPRECATED: Verwende get_value_by_group() stattdessen.
+        
+        Alias für get_value_by_group() zur Abwärtskompatibilität.
+        """
+        return self.get_value_by_group(gruppe)
 
     def set_value(self, gruppe: str, feld: str, wert: Any, ab_zeit: Optional[float] = None):
         """

@@ -604,41 +604,6 @@ class V2PdvmGenerellerDialog(QWidget):
             module = importlib.import_module(module_name)
             ModuleClass = getattr(module, class_name)
             
-            # ⚠️ SPEZIAL-CHECK: Menu-Editor noch nicht V3-kompatibel
-            if self.edit_type == 'menu_editor':
-                logger.warning("⚠️ Menu-Editor noch nicht V3-kompatibel!")
-                logger.info("  📋 Zeige Info-Platzhalter statt Fehler...")
-                
-                # Platzhalter-Widget erstellen
-                from PyQt5.QtWidgets import QLabel
-                from PyQt5.QtCore import Qt
-                
-                placeholder = QLabel()
-                placeholder.setWordWrap(True)
-                placeholder.setAlignment(Qt.AlignCenter)
-                placeholder.setStyleSheet("""
-                    QLabel {
-                        background-color: #fff3cd;
-                        border: 2px solid #ffc107;
-                        border-radius: 5px;
-                        padding: 30px;
-                        font-size: 12pt;
-                        color: #856404;
-                    }
-                """)
-                placeholder.setText(
-                    "🚧 MENÜ-EDITOR IN ENTWICKLUNG\n\n"
-                    "Der Menü-Editor wird aktuell für das neue V3-Menü-System überarbeitet.\n\n"
-                    "Grund: Die Menüstruktur wurde fundamental geändert (V3-Migration)\n"
-                    "und der Editor muss entsprechend angepasst werden.\n\n"
-                    "Bitte nutzen Sie vorerst die Datenbank-Tools zur Menüpflege."
-                )
-                
-                # Widget anzeigen
-                self._replace_edit_widget(placeholder)
-                logger.info("  ✅ Platzhalter angezeigt")
-                return  # Frühzeitiger Return, keine weitere Verarbeitung
-            
             # Modul initialisieren mit EINFACHER API
             # WICHTIG: Als Instanzvariable speichern, damit es nicht garbage-collected wird!
             self.current_edit_module = ModuleClass(

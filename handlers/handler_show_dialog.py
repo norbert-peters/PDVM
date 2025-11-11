@@ -57,25 +57,40 @@ def execute(params: dict, context: dict, gcs) -> bool:
         return False
     
     try:
-        # V2.0: Verwende pdvm_dialog Methode
-        if hasattr(main_app, 'pdvm_dialog'):
-            result = main_app.pdvm_dialog(
-                dialog_guid=dialog_guid,
-                mode=dialog_mode,
-                selected_id=selected_id
-            )
-            logger.info(f"✅ V2.0: Dialog via pdvm_dialog {'erfolgreich' if result else 'abgebrochen'}: {dialog_guid}")
-            return True
+        # Dialog direkt öffnen (in workspace_container)
+        from pdvm_genereller_dialog import V2PdvmGenerellerDialog
         
-        # Fallback: Alte Methoden
-        elif hasattr(main_app, 'start_dialog'):
-            main_app.start_dialog(dialog_guid)
-            logger.info(f"✅ Dialog via start_dialog geöffnet: {dialog_guid}")
-            return True
+        # Dialog erstellen
+        dialog_widget = V2PdvmGenerellerDialog(
+            frame_guid=dialog_guid,
+            parent=main_app.workspace_container,
+            main_app=main_app
+        )
         
-        else:
-            logger.error("❌ Keine Dialog-Methode verfügbar")
-            return False
+        # Altes Widget im workspace_container entfernen
+        workspace_layout = main_app.workspace_container.layout()
+        
+        # Falls kein Layout vorhanden, erstelle eins
+        if not workspace_layout:
+            from PyQt5.QtWidgets import QVBoxLayout
+            workspace_layout = QVBoxLayout(main_app.workspace_container)
+            workspace_layout.setContentsMargins(0, 0, 0, 0)
+            workspace_layout.setSpacing(0)
+        
+        # Altes Widget entfernen
+        while workspace_layout.count():
+            child = workspace_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # Dialog-Widget einfügen
+        workspace_layout.addWidget(dialog_widget)
+        
+        # Referenz speichern
+        main_app.current_dialog_widget = dialog_widget
+        
+        logger.info(f"✅ Dialog geöffnet: {dialog_guid}")
+        return True
             
     except Exception as e:
         logger.error(f"❌ Fehler beim Öffnen des Dialogs: {e}")

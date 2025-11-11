@@ -84,10 +84,10 @@ def execute(params: dict, context: dict, gcs) -> bool:
                 'test_mode': False
             }
             
-            # Controller erstellen (parent ist workspace_frame)
+            # Controller erstellen (parent ist workspace_container)
             controller = V2PdvmViewController(
                 call_daten=call_daten,
-                parent=main_app.workspace_frame
+                parent=main_app.workspace_container
             )
             
             # Controller initialisieren (lädt Daten, erstellt Matrix, baut UI)
@@ -106,9 +106,25 @@ def execute(params: dict, context: dict, gcs) -> bool:
             
             logger.info("✅ View-Widget erfolgreich erstellt")
             
-            # V3.1: Widget direkt in workspace_layout einfügen
-            # (Pipeline hat bereits geleert!)
-            main_app.workspace_layout.addWidget(view_widget)
+            # V3.1: Widget direkt in workspace_container einfügen
+            # Workspace-Container hat schon ein Layout (aus pdvm_systemstart.py)
+            workspace_layout = main_app.workspace_container.layout()
+            
+            # Falls kein Layout vorhanden, erstelle eins
+            if not workspace_layout:
+                from PyQt5.QtWidgets import QVBoxLayout
+                workspace_layout = QVBoxLayout(main_app.workspace_container)
+                workspace_layout.setContentsMargins(0, 0, 0, 0)
+                workspace_layout.setSpacing(0)
+            
+            # Altes Widget entfernen (falls vorhanden)
+            while workspace_layout.count():
+                child = workspace_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            
+            # Neues Widget einfügen
+            workspace_layout.addWidget(view_widget)
             
             # Referenz für Stichtag-Refresh speichern
             main_app.current_view_controller = controller

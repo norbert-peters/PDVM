@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def execute(params: dict, context: dict, gcs) -> bool:
     """
-    Meldet Benutzer ab
+    Meldet Benutzer ab und kehrt zum Login zurück
     
     Args:
         params: {} (keine Parameter benötigt)
@@ -26,7 +26,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
     Returns:
         True bei Erfolg
     """
-    logger.info("🔵 Handler: logout")
+    logger.info("🔵 Handler: logout - Benutzer abmelden")
     
     # Hole main_app
     main_app = context.get('main_app')
@@ -35,7 +35,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
         return False
     
     try:
-        # Versuche verschiedene Logout-Methoden
+        # Versuche verschiedene Logout-Methoden (alter Ablauf)
         if hasattr(main_app, 'logout'):
             main_app.logout()
             logger.info("✅ Logout via logout() durchgeführt")

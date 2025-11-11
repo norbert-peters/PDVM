@@ -80,6 +80,7 @@ class PdvmCentralSystemsteuerung(QObject):
         self._temp_dt_inst = None  # Temporäre Pdvm_DateTime Instanz für Formatierungen
         self._dropdown_cache = {}  # Cache für geladene Dropdowns: {dropdown_name: {language: {key: value}}}
         self._initialized = False
+        self._menu_containers = {}  # Container-Referenzen für autonomes Menü-System
 
         # ========================================================================
         # BASIS-SCHRIFTGRÖSSE: Zentral für alle Views (KEINE Akkumulation!)
@@ -144,6 +145,18 @@ class PdvmCentralSystemsteuerung(QObject):
         # 2.4 Datenbank-Instanz für Mandanten-Anwendungsdaten (NEU in V2.0!)
         self._man_db = PdvmCentralDatenbank('sys_anwendungsdaten', mandant_guid)
         logger.info(f"✅ Mandanten-Anwendungsdatenbank geladen mit Mandant-GUID: {mandant_guid}")
+        
+        # 2.5 Datenbank-Instanz für System-Menü (sys_menudaten)
+        # WICHTIG: Menü wird über UID aus sys_menudaten geladen
+        # Standard: Admin-Startmenü (TODO: Aus User-Profil laden)
+        start_menu_uid = '5ca6674e-b9ce-4581-9756-64e742883f80'  # Admin-Startmenü
+        self._menu_system_db = PdvmCentralDatenbank('sys_menudaten', start_menu_uid)
+        logger.info(f"✅ System-Menü-Datenbank geladen mit UID={start_menu_uid}")
+        
+        # Menu-Pipeline Instanzen (Lazy Initialization)
+        self._menu_pipeline_vertikal = None
+        self._menu_pipeline_grund = None
+        self._menu_pipeline_zusatz = None
 
         # Stichtag-Instanz erstellen und initialisieren
         # V2.0: Country aus user_data holen (auth.db)
@@ -400,6 +413,30 @@ class PdvmCentralSystemsteuerung(QObject):
             else:
                 self.set_property(property_name, value)
             return None
+    
+    def register_menu_containers(self, vertical=None, grund=None, zusatz=None):
+        """
+        Registriert Container-Referenzen für autonomes Menü-System.
+        
+        Args:
+            vertical: QWidget Container für vertikales Menü
+            grund: QWidget Container für Grund-Menü
+            zusatz: QWidget Container für Zusatz-Menü
+            
+        Returns:
+            None
+        """
+        if vertical:
+            self._menu_containers['vertical'] = vertical
+            logger.info("✅ Vertikaler Menu-Container registriert")
+        if grund:
+            self._menu_containers['grund'] = grund
+            logger.info("✅ Grund Menu-Container registriert")
+        if zusatz:
+            self._menu_containers['zusatz'] = zusatz
+            logger.info("✅ Zusatz Menu-Container registriert")
+        
+        logger.info(f"📦 {len(self._menu_containers)}/3 Menu-Container in GCS registriert")
     
     def get_menu_panel_visible(self, menu_guid):
         """
@@ -1275,6 +1312,52 @@ class PdvmCentralSystemsteuerung(QObject):
         except Exception as e:
             logger.error(f"❌ Fehler beim Ermitteln des Mandanten-DB-Pfads: {e}")
             return None
+    
+    # ========================================
+    # MENÜ-SYSTEM: System-Menü Pipelines (Singleton-Pattern)
+    # ========================================
+    
+    def get_system_menu_pipeline(self, menu_guid: str):
+        """
+        Hole System-Menü-Pipeline für angegebene Gruppe.
+        
+        SINGLETON-PATTERN: Pro menu_guid wird nur EINE Pipeline-Instanz erstellt.
+        
+        Args:
+            menu_guid: 'VERTIKAL', 'GRUND' oder 'ZUSATZ'
+            
+        Returns:
+            PdvmMenuPipeline Instanz
+            
+        Example:
+            >>> pipeline = gcs.get_system_menu_pipeline('VERTIKAL')
+            >>> pipeline.run('BASIS')
+            >>> matrix, info = pipeline.get_projected_data()
+        """
+        from pdvm_menu_pipeline import get_menu_pipeline
+        
+        # Lazy initialization: Nur erstellen wenn noch nicht vorhanden
+        if menu_guid == 'VERTIKAL':
+            if self._menu_pipeline_vertikal is None:
+                logger.info(f"🎯 Erstelle VERTIKAL-Menü-Pipeline")
+                self._menu_pipeline_vertikal = get_menu_pipeline('VERTIKAL', self._menu_system_db)
+            return self._menu_pipeline_vertikal
+            
+        elif menu_guid == 'GRUND':
+            if self._menu_pipeline_grund is None:
+                logger.info(f"🎯 Erstelle GRUND-Menü-Pipeline")
+                self._menu_pipeline_grund = get_menu_pipeline('GRUND', self._menu_system_db)
+            return self._menu_pipeline_grund
+            
+        elif menu_guid == 'ZUSATZ':
+            if self._menu_pipeline_zusatz is None:
+                logger.info(f"🎯 Erstelle ZUSATZ-Menü-Pipeline")
+                self._menu_pipeline_zusatz = get_menu_pipeline('ZUSATZ', self._menu_system_db)
+            return self._menu_pipeline_zusatz
+            
+        else:
+            logger.error(f"❌ Ungültige menu_guid: {menu_guid}")
+            raise ValueError(f"Ungültige menu_guid: {menu_guid}. Muss 'VERTIKAL', 'GRUND' oder 'ZUSATZ' sein.")
 
 # Globale Instanz
 _gcs_instance = None

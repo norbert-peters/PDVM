@@ -1,0 +1,1040 @@
+"""
+🎯 PDVM Menu-Editor Widget
+==========================
+
+KONZEPT: Gekapselte Plugin-Box für EDIT_TYPE='menu_editor'
+- Bekommt menu_guid von Dialog (aus View)
+- Lädt JSON-Daten aus sys_menudaten.json_data
+- Bearbeitet Menüstruktur (Vertikal/Grund/Zusatz)
+- Speichert zurück in JSON-Struktur
+
+LINEAR: Widget → Lade JSON → Bearbeite → Speichere JSON → Fertig
+"""
+
+import json
+import logging
+from typing import Dict, List, Optional, Any
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QListWidget, QListWidgetItem, QPushButton, QSplitter,
+    QLabel, QMessageBox, QFrame, QLineEdit, QComboBox, 
+    QCheckBox, QTextEdit, QFormLayout, QScrollArea, QGroupBox
+)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QColor
+
+# Import GCS und Datenbank
+from pdvm_central_systemsteuerung import get_gcs
+from pdvm_central_datenbank import PdvmCentralDatenbank
+
+logger = logging.getLogger(__name__)
+
+
+class DraggableMenuList(QListWidget):
+    """
+    Drag & Drop Liste für Menüpunkte
+    """
+    
+    items_reordered = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QListWidget.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
+        
+        # Signal für Änderungen
+        self.model().rowsMoved.connect(self.items_reordered)
+
+
+class MenuItemEditor(QFrame):
+    """
+    Editor für einzelnen Menüpunkt (Rechte Seite)
+    AUTONOM: Greift direkt auf Datenbank zu (get_static_value/set_value)
+    """
+    
+    item_saved = pyqtSignal()  # Signal wenn Item gespeichert wurde
+    
+    def __init__(self, db: 'PdvmCentralDatenbank', menu_type: str, parent=None):
+        super().__init__(parent)
+        self.db = db  # Datenbank-Instanz
+        self.menu_type = menu_type  # "VERTIKAL", "GRUND", "ZUSATZ"
+        self.current_guid = None  # Aktuell geladenes Item (Feld=GUID)
+        self.controls = {}
+        self._init_ui()
+    
+    def _init_ui(self):
+        """UI aufbauen mit allen Feldern"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Header
+        header = QLabel("✏️ Menüpunkt bearbeiten")
+        header.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
+        layout.addWidget(header)
+        
+        # Scroll Area für alle Controls
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        scroll_widget = QWidget()
+        form_layout = QFormLayout(scroll_widget)
+        form_layout.setSpacing(10)
+        
+        # === BASIC FIELDS ===
+        
+        # Type (Dropdown)
+        self.controls['type'] = QComboBox()
+        self.controls['type'].addItems(['BUTTON', 'SUBMENU', 'SEPARATOR', 'SPACER'])
+        self.controls['type'].currentTextChanged.connect(self._on_type_changed)
+        form_layout.addRow("🔹 Typ:", self.controls['type'])
+        
+        # Label
+        self.controls['label'] = QLineEdit()
+        self.controls['label'].setPlaceholderText("z.B. 'Datei öffnen'")
+        form_layout.addRow("📝 Label:", self.controls['label'])
+        
+        # Icon
+        self.controls['icon'] = QLineEdit()
+        self.controls['icon'].setPlaceholderText("Icon-Name oder leer")
+        form_layout.addRow("🎨 Icon:", self.controls['icon'])
+        
+        # Tooltip
+        self.controls['tooltip'] = QLineEdit()
+        self.controls['tooltip'].setPlaceholderText("Optionaler Tooltip-Text")
+        form_layout.addRow("💬 Tooltip:", self.controls['tooltip'])
+        
+        # Visibility
+        visibility_layout = QHBoxLayout()
+        self.controls['visible'] = QCheckBox("Sichtbar")
+        self.controls['enabled'] = QCheckBox("Aktiviert")
+        visibility_layout.addWidget(self.controls['visible'])
+        visibility_layout.addWidget(self.controls['enabled'])
+        visibility_layout.addStretch()
+        form_layout.addRow("👁️ Status:", visibility_layout)
+        
+        # === COMMAND (immer sichtbar, Felder leer bei SUBMENU/etc) ===
+        
+        self.command_group = QGroupBox("⚡ Command")
+        command_layout = QFormLayout()
+        
+        # Handler
+        self.controls['handler'] = QLineEdit()
+        self.controls['handler'].setPlaceholderText("z.B. 'open_view'")
+        command_layout.addRow("🔧 Handler:", self.controls['handler'])
+        
+        # Params (JSON)
+        self.controls['params'] = QTextEdit()
+        self.controls['params'].setPlaceholderText('{"view_guid": "..."}')
+        self.controls['params'].setMaximumHeight(80)
+        command_layout.addRow("📋 Parameter:", self.controls['params'])
+        
+        self.command_group.setLayout(command_layout)
+        form_layout.addWidget(self.command_group)
+        
+        # Speichern Button
+        self.btn_save = QPushButton("💾 Speichern")
+        self.btn_save.clicked.connect(self._save_to_db)
+        self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        form_layout.addRow(self.btn_save)
+        
+        # Info-Label
+        self.info_label = QLabel()
+        self.info_label.setStyleSheet("color: gray; font-size: 10px; padding: 5px;")
+        self.info_label.setWordWrap(True)
+        form_layout.addRow(self.info_label)
+        
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+        
+        # Initial deaktiviert
+        self._set_enabled(False)
+    
+    def _set_enabled(self, enabled: bool):
+        """Aktiviert/Deaktiviert alle Controls"""
+        for control in self.controls.values():
+            control.setEnabled(enabled)
+        self.command_group.setEnabled(enabled)
+        self.btn_save.setEnabled(enabled)
+        
+        if not enabled:
+            self.info_label.setText("← Wähle einen Menüpunkt aus der Liste")
+    
+    def _on_type_changed(self, type_value: str):
+        """Type geändert → Hinweis anzeigen"""
+        if type_value != 'BUTTON':
+            self.info_label.setText("ℹ️ Command nur bei BUTTON relevant")
+        else:
+            self.info_label.setText("")
+    
+    def load_item(self, item_guid: str):
+        """
+        Lädt Item DIREKT aus Datenbank via GUID
+        Feld = GUID, Gruppe = menu_type
+        """
+        self.current_guid = item_guid
+        
+        try:
+            # Lade Item aus DB: get_static_value(menu_type, item_guid)
+            item_data, _ = self.db.get_static_value(self.menu_type, item_guid)
+            
+            if not item_data:
+                logger.warning(f"⚠️ Item nicht gefunden: {item_guid}")
+                return
+            
+            self._set_enabled(True)
+            
+            # Controls befüllen
+            self.controls['type'].setCurrentText(item_data.get('type', 'BUTTON'))
+            self.controls['label'].setText(item_data.get('label', ''))
+            self.controls['icon'].setText(item_data.get('icon') or '')
+            self.controls['tooltip'].setText(item_data.get('tooltip') or '')
+            self.controls['visible'].setChecked(item_data.get('visible', True))
+            self.controls['enabled'].setChecked(item_data.get('enabled', True))
+            
+            # Command
+            command = item_data.get('command')
+            if command and isinstance(command, dict):
+                self.controls['handler'].setText(command.get('handler', ''))
+                params = command.get('params', {})
+                self.controls['params'].setPlainText(json.dumps(params, indent=2))
+            else:
+                self.controls['handler'].clear()
+                self.controls['params'].clear()
+            
+            logger.info(f"✅ Item geladen: {item_data.get('label', 'N/A')} (GUID={item_guid})")
+            self.info_label.setText(f"📋 Bearbeite: {item_data.get('label', 'N/A')}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden: {e}", exc_info=True)
+            self.info_label.setText(f"❌ Fehler: {str(e)}")
+    
+    def _save_to_db(self):
+        """Speichert Item DIREKT in Datenbank"""
+        if not self.current_guid:
+            return
+        
+        try:
+            # Daten aus Controls lesen
+            item_data = {
+                'guid': self.current_guid,
+                'type': self.controls['type'].currentText(),
+                'label': self.controls['label'].text(),
+                'icon': self.controls['icon'].text() or None,
+                'tooltip': self.controls['tooltip'].text() or None,
+                'visible': self.controls['visible'].isChecked(),
+                'enabled': self.controls['enabled'].isChecked(),
+                'sort_order': 0,  # TODO: Aus Liste übernehmen
+                'parent_guid': None  # TODO: Parent-Dropdown
+            }
+            
+            # Command
+            handler = self.controls['handler'].text().strip()
+            params_text = self.controls['params'].toPlainText().strip()
+            
+            if handler:
+                try:
+                    params = json.loads(params_text) if params_text else {}
+                    item_data['command'] = {
+                        'handler': handler,
+                        'params': params
+                    }
+                except json.JSONDecodeError as e:
+                    QMessageBox.warning(self, "JSON-Fehler", f"Parameter ungültig:\n{str(e)}")
+                    return
+            else:
+                item_data['command'] = None
+            
+            # In DB schreiben: set_value(menu_type, item_guid, item_data, stichtag)
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            self.db.set_value(self.menu_type, self.current_guid, item_data, gcs.st_inst.PdvmDateTime)
+            
+            logger.info(f"✅ Item gespeichert: {item_data['label']} (GUID={self.current_guid})")
+            self.info_label.setText(f"✅ Gespeichert: {item_data['label']}")
+            self.item_saved.emit()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern: {e}", exc_info=True)
+            QMessageBox.critical(self, "Fehler", f"Speichern fehlgeschlagen:\n{str(e)}")
+    
+    def get_item_data(self) -> Optional[Dict[str, Any]]:
+        """Gibt aktuelle Daten zurück (für Kompatibilität)"""
+        if not self.current_guid:
+            return None
+        try:
+            item_data, _ = self.db.get_static_value(self.menu_type, self.current_guid)
+            return item_data
+        except:
+            return None
+
+
+class MenuListWidget(QWidget):
+        """UI aufbauen mit allen Feldern"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Header
+        header = QLabel("✏️ Menüpunkt bearbeiten")
+        header.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
+        layout.addWidget(header)
+        
+        # Scroll Area für alle Controls
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        scroll_widget = QWidget()
+        form_layout = QFormLayout(scroll_widget)
+        form_layout.setSpacing(10)
+        
+        # === BASIC FIELDS ===
+        
+        # Type (Dropdown)
+        self.controls['type'] = QComboBox()
+        self.controls['type'].addItems(['BUTTON', 'SUBMENU', 'SEPARATOR', 'SPACER'])
+        self.controls['type'].currentTextChanged.connect(self._on_type_changed)
+        form_layout.addRow("🔹 Typ:", self.controls['type'])
+        
+        # Label
+        self.controls['label'] = QLineEdit()
+        self.controls['label'].setPlaceholderText("z.B. 'Datei öffnen'")
+        self.controls['label'].textChanged.connect(self._on_field_changed)
+        form_layout.addRow("📝 Label:", self.controls['label'])
+        
+        # Icon (TODO: Icon-Picker Button)
+        icon_layout = QHBoxLayout()
+        self.controls['icon'] = QLineEdit()
+        self.controls['icon'].setPlaceholderText("Icon-Name oder leer")
+        self.controls['icon'].textChanged.connect(self._on_field_changed)
+        icon_button = QPushButton("🎨")
+        icon_button.setMaximumWidth(40)
+        icon_button.setToolTip("Icon-Picker öffnen (TODO)")
+        icon_layout.addWidget(self.controls['icon'])
+        icon_layout.addWidget(icon_button)
+        form_layout.addRow("🎨 Icon:", icon_layout)
+        
+        # Tooltip
+        self.controls['tooltip'] = QLineEdit()
+        self.controls['tooltip'].setPlaceholderText("Optionaler Tooltip-Text")
+        self.controls['tooltip'].textChanged.connect(self._on_field_changed)
+        form_layout.addRow("💬 Tooltip:", self.controls['tooltip'])
+        
+        # === VISIBILITY ===
+        
+        visibility_layout = QHBoxLayout()
+        self.controls['visible'] = QCheckBox("Sichtbar")
+        self.controls['visible'].setChecked(True)
+        self.controls['visible'].stateChanged.connect(self._on_field_changed)
+        self.controls['enabled'] = QCheckBox("Aktiviert")
+        self.controls['enabled'].setChecked(True)
+        self.controls['enabled'].stateChanged.connect(self._on_field_changed)
+        visibility_layout.addWidget(self.controls['visible'])
+        visibility_layout.addWidget(self.controls['enabled'])
+        visibility_layout.addStretch()
+        form_layout.addRow("👁️ Status:", visibility_layout)
+        
+        # === COMMAND (nur für BUTTON) ===
+        
+        self.command_group = QGroupBox("⚡ Command (nur für BUTTON)")
+        command_layout = QFormLayout()
+        
+        # Handler
+        self.controls['handler'] = QLineEdit()
+        self.controls['handler'].setPlaceholderText("z.B. 'open_view'")
+        self.controls['handler'].textChanged.connect(self._on_field_changed)
+        command_layout.addRow("🔧 Handler:", self.controls['handler'])
+        
+        # Params (JSON)
+        self.controls['params'] = QTextEdit()
+        self.controls['params'].setPlaceholderText('{"view_guid": "..."}')
+        self.controls['params'].setMaximumHeight(80)
+        self.controls['params'].textChanged.connect(self._on_field_changed)
+        command_layout.addRow("📋 Parameter (JSON):", self.controls['params'])
+        
+        self.command_group.setLayout(command_layout)
+        
+        # WICHTIG: Nicht addRow() für GroupBox verwenden!
+        # GroupBox nimmt volle Breite
+        form_layout.addWidget(self.command_group)
+        
+        # === PARENT (für Sub-Items) ===
+        
+        self.controls['parent_guid'] = QComboBox()
+        self.controls['parent_guid'].addItem("(Top-Level)", None)
+        self.controls['parent_guid'].currentIndexChanged.connect(self._on_field_changed)
+        form_layout.addRow("📂 Übergeordnet:", self.controls['parent_guid'])
+        
+        # Info-Label
+        self.info_label = QLabel()
+        self.info_label.setStyleSheet("color: gray; font-size: 10px; padding: 5px;")
+        self.info_label.setWordWrap(True)
+        form_layout.addRow(self.info_label)
+        
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+        
+        # Kein Item geladen
+        self._set_enabled(False)
+    
+    def _set_enabled(self, enabled: bool):
+        """Aktiviert/Deaktiviert alle Controls"""
+        for control in self.controls.values():
+            if isinstance(control, (QLineEdit, QComboBox, QCheckBox, QTextEdit)):
+                control.setEnabled(enabled)
+        self.command_group.setEnabled(enabled)
+        
+        if not enabled:
+            self.info_label.setText("← Wähle einen Menüpunkt aus der Liste")
+        else:
+            self.info_label.setText("")
+    
+    def _set_readonly_mode(self, readonly: bool):
+        """Setzt alle Controls auf Read-Only (für Template-Items)"""
+        for control in self.controls.values():
+            if isinstance(control, QLineEdit):
+                control.setReadOnly(readonly)
+            elif isinstance(control, QTextEdit):
+                control.setReadOnly(readonly)
+            elif isinstance(control, (QComboBox, QCheckBox)):
+                control.setEnabled(not readonly)
+        self.command_group.setEnabled(not readonly)
+    
+    def _on_type_changed(self, type_value: str):
+        """Type geändert → Command-Gruppe ein/ausblenden"""
+        self.command_group.setVisible(type_value == 'BUTTON')
+        self._on_field_changed()
+    
+    def _on_field_changed(self):
+        """Feld wurde geändert → Daten aktualisieren"""
+        if not self.current_item:
+            return
+        
+        # Daten aus Controls lesen
+        self.current_item['type'] = self.controls['type'].currentText()
+        self.current_item['label'] = self.controls['label'].text()
+        self.current_item['icon'] = self.controls['icon'].text() or None
+        self.current_item['tooltip'] = self.controls['tooltip'].text() or None
+        self.current_item['visible'] = self.controls['visible'].isChecked()
+        self.current_item['enabled'] = self.controls['enabled'].isChecked()
+        self.current_item['parent_guid'] = self.controls['parent_guid'].currentData()
+        
+        # Command (nur bei BUTTON)
+        if self.current_item['type'] == 'BUTTON':
+            handler = self.controls['handler'].text()
+            params_text = self.controls['params'].toPlainText().strip()
+            
+            if handler:
+                try:
+                    params = json.loads(params_text) if params_text else {}
+                    self.current_item['command'] = {
+                        'handler': handler,
+                        'params': params
+                    }
+                except json.JSONDecodeError:
+                    self.current_item['command'] = {
+                        'handler': handler,
+                        'params': {}
+                    }
+            else:
+                self.current_item['command'] = None
+        else:
+            self.current_item['command'] = None
+        
+        self.item_changed.emit()
+    
+    def load_item(self, item_data: Dict[str, Any]):
+        """Lädt Daten in Editor"""
+        self.current_item = item_data
+        
+        # Template-Items: Items die AUS einem Template kommen (werden dynamisch eingefügt)
+        # Diese haben KEINE template_guid, aber ihr Label beginnt NICHT mit @TEMPLATE
+        # SPACER mit @TEMPLATE:guid ist der Platzhalter und EDITIERBAR!
+        label = item_data.get('label', '')
+        is_template_placeholder = label.startswith('@TEMPLATE:')
+        
+        # Für jetzt: Nur der SPACER mit @TEMPLATE: ist editierbar
+        # TODO: Echte Template-Items (eingefügte) müssen anders erkannt werden
+        is_readonly = False  # Erstmal alles editierbar
+        
+        self._set_enabled(True)
+        
+        # Controls mit Daten befüllen
+        self.controls['type'].setCurrentText(item_data.get('type', 'BUTTON'))
+        self.controls['label'].setText(item_data.get('label', ''))
+        self.controls['icon'].setText(item_data.get('icon') or '')
+        self.controls['tooltip'].setText(item_data.get('tooltip') or '')
+        self.controls['visible'].setChecked(item_data.get('visible', True))
+        self.controls['enabled'].setChecked(item_data.get('enabled', True))
+        
+        # Parent
+        parent_guid = item_data.get('parent_guid')
+        for i in range(self.controls['parent_guid'].count()):
+            if self.controls['parent_guid'].itemData(i) == parent_guid:
+                self.controls['parent_guid'].setCurrentIndex(i)
+                break
+        
+        # Command (nur bei BUTTON)
+        command = item_data.get('command')
+        if command and isinstance(command, dict):
+            self.controls['handler'].setText(command.get('handler', ''))
+            params = command.get('params', {})
+            self.controls['params'].setPlainText(json.dumps(params, indent=2))
+            logger.debug(f"   ⚡ Command geladen: handler={command.get('handler', '')}, params={params}")
+        else:
+            self.controls['handler'].clear()
+            self.controls['params'].clear()
+            logger.debug(f"   ℹ️ Kein Command vorhanden")
+        
+        # Command-Gruppe sichtbar?
+        item_type = item_data.get('type', 'BUTTON')
+        is_button = item_type == 'BUTTON'
+        self.command_group.setVisible(is_button)
+        logger.debug(f"   📋 Type={item_type}, Command-Gruppe sichtbar: {is_button}")
+        
+        # Hinweis für Template-Platzhalter
+        if is_template_placeholder:
+            self.info_label.setText("� Template-Platzhalter: Ändere Label um Template zu wechseln")
+            self.info_label.setStyleSheet("color: blue; font-size: 10px; padding: 5px; font-weight: bold;")
+        else:
+            self.info_label.setText("")
+            self.info_label.setStyleSheet("color: gray; font-size: 10px; padding: 5px;")
+        
+        logger.info(f"📝 Editor lädt Item: {item_data.get('label', 'N/A')}{' (TEMPLATE-PLATZHALTER)' if is_template_placeholder else ''}")
+    
+    def update_parent_options(self, items: Dict[str, Dict[str, Any]], current_guid: str):
+        """Aktualisiert Parent-Dropdown (nur SUBMENUs als Optionen)"""
+        current_parent = self.controls['parent_guid'].currentData()
+        
+        self.controls['parent_guid'].clear()
+        self.controls['parent_guid'].addItem("(Top-Level)", None)
+        
+        # Nur SUBMENUs als Parent erlauben
+        for guid, item in items.items():
+            if guid != current_guid and item.get('type') == 'SUBMENU':
+                label = item.get('label', 'Unbenannt')
+                self.controls['parent_guid'].addItem(f"📁 {label}", guid)
+        
+        # Vorherige Auswahl wiederherstellen
+        for i in range(self.controls['parent_guid'].count()):
+            if self.controls['parent_guid'].itemData(i) == current_parent:
+                self.controls['parent_guid'].setCurrentIndex(i)
+                break
+    
+    def get_item_data(self) -> Optional[Dict[str, Any]]:
+        """Gibt aktuelle Daten zurück"""
+        return self.current_item
+
+
+class MenuListWidget(QWidget):
+    """
+    Linke Seite: Liste + Buttons für eine Menü-Gruppe (Vertikal/Grund/Zusatz)
+    """
+    
+    items_changed = pyqtSignal()
+    item_selected = pyqtSignal(dict)
+    
+    def __init__(self, menu_type: str, parent=None):
+        super().__init__(parent)
+        self.menu_type = menu_type  # "VERTIKAL", "GRUND", "ZUSATZ"
+        self.items: List[Dict[str, Any]] = []
+        self._init_ui()
+    
+    def _init_ui(self):
+        """UI aufbauen"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Liste mit Drag & Drop
+        self.list_widget = DraggableMenuList()
+        self.list_widget.items_reordered.connect(self._on_items_reordered)
+        self.list_widget.currentItemChanged.connect(self._on_item_selected)
+        layout.addWidget(self.list_widget)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.btn_add = QPushButton("➕ Neu")
+        self.btn_add.clicked.connect(self._on_add_clicked)
+        button_layout.addWidget(self.btn_add)
+        
+        self.btn_duplicate = QPushButton("📋 Duplizieren")
+        self.btn_duplicate.clicked.connect(self._on_duplicate_clicked)
+        self.btn_duplicate.setEnabled(False)
+        button_layout.addWidget(self.btn_duplicate)
+        
+        self.btn_delete = QPushButton("🗑️ Löschen")
+        self.btn_delete.clicked.connect(self._on_delete_clicked)
+        self.btn_delete.setEnabled(False)
+        button_layout.addWidget(self.btn_delete)
+        
+        layout.addLayout(button_layout)
+    
+    def load_items(self, items: List[Dict[str, Any]]):
+        """Lädt Items in Liste (hierarchisch mit Einrückung)"""
+        # Wenn items ein Dict ist (GUID → Item), konvertiere zu hierarchischer Liste
+        if isinstance(items, dict):
+            items_dict = items
+            items_list = []
+            
+            # Funktion zum rekursiven Aufbau der Liste
+            def add_item_with_children(item_data, level=0):
+                item_copy = item_data.copy()
+                item_copy['_indent_level'] = level  # Für Darstellung
+                items_list.append(item_copy)
+                
+                # Kinder finden und hinzufügen
+                item_guid = item_copy.get('guid')
+                for child_guid, child_item in items_dict.items():
+                    if child_item.get('parent_guid') == item_guid:
+                        child_item['guid'] = child_guid
+                        add_item_with_children(child_item, level + 1)
+            
+            # Erst alle Top-Level Items sammeln
+            top_level = []
+            for guid, item in items_dict.items():
+                if item.get('parent_guid') is None:
+                    item['guid'] = guid
+                    top_level.append(item)
+            
+            # Nach sort_order sortieren
+            top_level.sort(key=lambda x: x.get('sort_order', 0))
+            
+            # Hierarchisch aufbauen
+            for item in top_level:
+                add_item_with_children(item, level=0)
+            
+            items = items_list
+        
+        self.items = items
+        self.list_widget.clear()
+        
+        for item in items:
+            label = item.get('label', 'Unbenannt')
+            item_type = item.get('type', 'BUTTON')
+            indent_level = item.get('_indent_level', 0)
+            
+            # Template-Platzhalter (SPACER mit @TEMPLATE:guid)
+            is_template_placeholder = label.startswith('@TEMPLATE:')
+            
+            # Einrückung für Hierarchie
+            indent = "    " * indent_level
+            
+            # Icon-Anzeige
+            if item_type == 'SEPARATOR':
+                display = f"{indent}─────────────────"
+            elif item_type == 'SPACER':
+                if is_template_placeholder:
+                    display = f"{indent}📌 {label}"  # Template-Platzhalter
+                else:
+                    display = f"{indent}(Abstand)"
+            elif item_type == 'SUBMENU':
+                display = f"{indent}📁 {label}"
+            else:
+                icon = item.get('icon', '')
+                display = f"{indent}{icon} {label}" if icon else f"{indent}📄 {label}"
+            
+            # Command/Handler anzeigen (wenn vorhanden)
+            command = item.get('command')
+            if command and isinstance(command, dict):
+                handler = command.get('handler', '')
+                if handler:
+                    display += f"  →  ⚡{handler}"
+            
+            list_item = QListWidgetItem(display)
+            list_item.setData(Qt.UserRole, item)
+            
+            # Farben je nach Status
+            if is_template_placeholder:
+                # Template-Platzhalter: Orange und fett
+                font = QFont()
+                font.setBold(True)
+                list_item.setFont(font)
+                list_item.setForeground(QColor(200, 120, 0))  # Orange
+            elif indent_level > 0:
+                # Sub-Items: Grau
+                list_item.setForeground(Qt.gray)
+            
+            self.list_widget.addItem(list_item)
+        
+        logger.info(f"📂 {self.menu_type}: {len(items)} Items geladen (hierarchisch)")
+    
+    def get_items(self) -> Dict[str, Dict[str, Any]]:
+        """Gibt aktuelle Items zurück als Dictionary (GUID → Item)"""
+        items_dict = {}
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item_data = item.data(Qt.UserRole).copy()
+            
+            # Temporäre Darstellungs-Felder entfernen
+            item_data.pop('_indent_level', None)
+            
+            # sort_order nur für Items gleicher Ebene aktualisieren
+            # (vereinfacht: alle Items bekommen ihre Position)
+            item_data['sort_order'] = i
+            
+            # GUID als Key verwenden (oder generieren)
+            guid = item_data.get('guid', self._generate_guid())
+            item_data['guid'] = guid
+            items_dict[guid] = item_data
+        return items_dict
+    
+    def _generate_guid(self) -> str:
+        """Generiert eine neue GUID"""
+        import uuid
+        return str(uuid.uuid4())
+    
+    def _on_items_reordered(self):
+        """Drag & Drop abgeschlossen"""
+        logger.info(f"🔄 {self.menu_type}: Reihenfolge geändert")
+        self.items_changed.emit()
+    
+    def _on_item_selected(self, current, previous):
+        """Item ausgewählt"""
+        if current:
+            item_data = current.data(Qt.UserRole)
+            
+            # Template-Platzhalter können bearbeitet werden
+            # (nur dynamisch eingefügte Template-Items wären read-only, aber die sind hier nicht gespeichert)
+            self.btn_duplicate.setEnabled(True)
+            self.btn_delete.setEnabled(True)
+            
+            self.item_selected.emit(item_data)
+        else:
+            self.btn_duplicate.setEnabled(False)
+            self.btn_delete.setEnabled(False)
+    
+    def _on_add_clicked(self):
+        """Neues Item hinzufügen"""
+        # Neues Item mit GUID erstellen
+        new_item = {
+            'guid': self._generate_guid(),
+            'label': 'Neuer Menüpunkt',
+            'type': 'BUTTON',
+            'icon': None,
+            'command': None,
+            'parent_guid': None,  # Top-Level
+            'template_guid': None,
+            'sort_order': len(self.items),
+            'visible': True,
+            'enabled': True,
+            'tooltip': None
+        }
+        self.items.append(new_item)
+        self.load_items(self.items)
+        self.items_changed.emit()
+        logger.info(f"➕ {self.menu_type}: Neues Item erstellt")
+    
+    def _on_duplicate_clicked(self):
+        """Aktuelles Item duplizieren"""
+        current_item = self.list_widget.currentItem()
+        if not current_item:
+            return
+        
+        item_data = current_item.data(Qt.UserRole).copy()
+        item_data['guid'] = self._generate_guid()  # Neue GUID
+        item_data['label'] = f"{item_data['label']} (Kopie)"
+        item_data['sort_order'] = len(self.items)
+        
+        self.items.append(item_data)
+        self.load_items(self.items)
+        self.items_changed.emit()
+        logger.info(f"📋 {self.menu_type}: Item dupliziert")
+    
+    def _on_delete_clicked(self):
+        """Aktuelles Item löschen"""
+        current_item = self.list_widget.currentItem()
+        if not current_item:
+            return
+        
+        item_data = current_item.data(Qt.UserRole)
+        label = item_data.get('label', 'Unbenannt')
+        
+        reply = QMessageBox.question(
+            self,
+            "Löschen bestätigen",
+            f"Menüpunkt '{label}' wirklich löschen?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            row = self.list_widget.row(current_item)
+            self.items.pop(row)
+            self.load_items(self.items)
+            self.items_changed.emit()
+            logger.info(f"🗑️ {self.menu_type}: Item gelöscht: {label}")
+
+
+class PdvmMenuEditorWidget(QWidget):
+    """
+    🎯 Haupt-Widget für Menu-Editor (Plugin für Dialog)
+    
+    DATENFLUSS:
+    1. Dialog gibt menu_guid
+    2. Widget lädt JSON aus sys_menudaten
+    3. Bearbeitung in Tabs (Vertikal/Grund/Zusatz)
+    4. Save schreibt zurück in JSON
+    
+    GEKAPSELT: Hat nichts mit anderen edit_type zu tun!
+    """
+    
+    data_changed = pyqtSignal()
+    
+    def __init__(self, menu_guid: str, parent=None):
+        super().__init__(parent)
+        self.menu_guid = menu_guid
+        self.gcs = get_gcs()
+        self.original_data: Optional[Dict[str, Any]] = None
+        self.current_data: Optional[Dict[str, Any]] = None
+        self.template: Optional[Dict[str, Any]] = None
+        self.is_modified = False
+        
+        self._init_ui()
+        self._load_data()
+    
+    def _generate_guid(self) -> str:
+        """Generiert eine neue GUID"""
+        import uuid
+        return str(uuid.uuid4())
+    
+    def _init_ui(self):
+        """UI aufbauen"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Splitter: Liste (60%) | Editor (40%)
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Linke Seite: Tabs für Menü-Typen
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.tabs = QTabWidget()
+        
+        # Tab 1: Vertikalmenü
+        self.vertikal_list = MenuListWidget("VERTIKAL")
+        self.vertikal_list.items_changed.connect(self._on_data_changed)
+        self.vertikal_list.item_selected.connect(self._on_item_selected)
+        self.tabs.addTab(self.vertikal_list, "📌 Vertikalmenü")
+        
+        # Tab 2: Grundmenü
+        self.grund_list = MenuListWidget("GRUND")
+        self.grund_list.items_changed.connect(self._on_data_changed)
+        self.grund_list.item_selected.connect(self._on_item_selected)
+        self.tabs.addTab(self.grund_list, "🏠 Grundmenü")
+        
+        # Tab 3: Zusatzmenü
+        self.zusatz_list = MenuListWidget("ZUSATZ")
+        self.zusatz_list.items_changed.connect(self._on_data_changed)
+        self.zusatz_list.item_selected.connect(self._on_item_selected)
+        self.tabs.addTab(self.zusatz_list, "➕ Zusatzmenü")
+        
+        left_layout.addWidget(self.tabs)
+        
+        # Rechte Seite: Item-Editor
+        self.item_editor = MenuItemEditor({})  # Template kommt später
+        self.item_editor.item_changed.connect(self._on_data_changed)
+        
+        splitter.addWidget(left_widget)
+        splitter.addWidget(self.item_editor)
+        splitter.setSizes([600, 400])
+        
+        layout.addWidget(splitter)
+    
+    def _load_data(self):
+        """Lädt Menüdaten aus Datenbank strukturiert nach Gruppe/Feld"""
+        try:
+            if not self.gcs:
+                logger.error("❌ GCS nicht verfügbar!")
+                return
+            
+            # Datenbank-Instanz für sys_menudaten erstellen
+            db = PdvmCentralDatenbank('sys_menudaten', self.menu_guid)
+            db._load_data()  # Daten aus DB laden
+            
+            # Menüdaten direkt aus Top-Level Gruppen laden
+            # Struktur: db.data = {"META": {...}, "VERTIKAL": {...}, "GRUND": {...}, "ZUSATZ": {...}}
+            vertikal_data = db.data.get('VERTIKAL', {})
+            grund_data = db.data.get('GRUND', {})
+            zusatz_data = db.data.get('ZUSATZ', {})
+            
+            # Original-Daten zusammensetzen
+            self.original_data = {
+                'VERTIKAL': vertikal_data if isinstance(vertikal_data, dict) else {},
+                'GRUND': grund_data if isinstance(grund_data, dict) else {},
+                'ZUSATZ': zusatz_data if isinstance(zusatz_data, dict) else {}
+            }
+            
+            # Prüfen ob Daten vorhanden
+            total_items = sum(len(v) if isinstance(v, dict) else 0 for v in self.original_data.values())
+            if total_items == 0:
+                logger.warning(f"⚠️ Keine Menüdaten für GUID: {self.menu_guid}")
+            
+            # V3-Struktur validieren (Dictionary mit GUIDs als Keys)
+            for menu_type in ['VERTIKAL', 'GRUND', 'ZUSATZ']:
+                if not isinstance(self.original_data[menu_type], dict):
+                    # Fallback für alte Array-Struktur
+                    if isinstance(self.original_data[menu_type], list):
+                        logger.warning(f"⚠️ {menu_type} ist Array - konvertiere zu Dict")
+                        items_dict = {}
+                        for item in self.original_data[menu_type]:
+                            guid = item.get('guid', self._generate_guid())
+                            items_dict[guid] = item
+                        self.original_data[menu_type] = items_dict
+                    else:
+                        self.original_data[menu_type] = {}
+            
+            # Kopie für Bearbeitung
+            self.current_data = json.loads(json.dumps(self.original_data))
+            
+            # In Listen laden (Dictionary → Liste)
+            self.vertikal_list.load_items(self.current_data.get('VERTIKAL', {}))
+            self.grund_list.load_items(self.current_data.get('GRUND', {}))
+            self.zusatz_list.load_items(self.current_data.get('ZUSATZ', {}))
+            
+            logger.info(f"✅ Menü geladen: {self.menu_guid}")
+            
+            # Items zählen (gesamt und Top-Level)
+            v_total = len(self.current_data.get('VERTIKAL', {}))
+            v_top = sum(1 for item in self.current_data.get('VERTIKAL', {}).values() if item.get('parent_guid') is None)
+            g_total = len(self.current_data.get('GRUND', {}))
+            g_top = sum(1 for item in self.current_data.get('GRUND', {}).values() if item.get('parent_guid') is None)
+            z_total = len(self.current_data.get('ZUSATZ', {}))
+            z_top = sum(1 for item in self.current_data.get('ZUSATZ', {}).values() if item.get('parent_guid') is None)
+            
+            logger.info(f"   → VERTIKAL: {v_top} Top-Level Items ({v_total} gesamt)")
+            logger.info(f"   → GRUND: {g_top} Top-Level Items ({g_total} gesamt)")
+            logger.info(f"   → ZUSATZ: {z_top} Top-Level Items ({z_total} gesamt)")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Fehler beim Laden",
+                f"Menüdaten konnten nicht geladen werden:\n{str(e)}"
+            )
+    
+    def _on_data_changed(self):
+        """Daten wurden geändert"""
+        self.is_modified = True
+        self.data_changed.emit()
+        logger.debug("📝 Daten geändert")
+    
+    def _on_item_selected(self, item_data: Dict[str, Any]):
+        """Item ausgewählt → Editor befüllen"""
+        self.item_editor.load_item(item_data)
+        
+        # Parent-Optionen aktualisieren (alle Items aus aktuellem Tab)
+        current_tab = self.tabs.currentIndex()
+        if current_tab == 0:
+            items = self.current_data.get('VERTIKAL', {})
+        elif current_tab == 1:
+            items = self.current_data.get('GRUND', {})
+        else:
+            items = self.current_data.get('ZUSATZ', {})
+        
+        current_guid = item_data.get('guid')
+        self.item_editor.update_parent_options(items, current_guid)
+    
+    def save_data(self) -> bool:
+        """
+        Speichert Daten zurück in Datenbank
+        
+        Returns:
+            bool: True bei Erfolg
+        """
+        try:
+            if not self.is_modified:
+                logger.info("ℹ️ Keine Änderungen zum Speichern")
+                return True
+            
+            # Aktuelle Daten aus Listen holen
+            self.current_data['VERTIKAL'] = self.vertikal_list.get_items()
+            self.current_data['GRUND'] = self.grund_list.get_items()
+            self.current_data['ZUSATZ'] = self.zusatz_list.get_items()
+            
+            # Datenbank-Instanz erstellen und speichern
+            db = PdvmCentralDatenbank('sys_menudaten', self.menu_guid)
+            db._load_data()
+            
+            # Direkt die Top-Level Gruppen im db.data Dictionary setzen
+            # Struktur: db.data = {"META": {...}, "VERTIKAL": {...}, "GRUND": {...}, "ZUSATZ": {...}}
+            db.data['VERTIKAL'] = self.current_data['VERTIKAL']
+            db.data['GRUND'] = self.current_data['GRUND']
+            db.data['ZUSATZ'] = self.current_data['ZUSATZ']
+            
+            # Gesamte Instanz persistent speichern
+            db.save_all_values()
+            
+            # Original-Daten aktualisieren
+            self.original_data = json.loads(json.dumps(self.current_data))
+            self.is_modified = False
+            
+            logger.info(f"✅ Menü gespeichert: {self.menu_guid}")
+            QMessageBox.information(
+                self,
+                "Gespeichert",
+                "Menüdaten wurden erfolgreich gespeichert."
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Fehler beim Speichern",
+                f"Menüdaten konnten nicht gespeichert werden:\n{str(e)}"
+            )
+            return False
+    
+    def undo_changes(self):
+        """Änderungen rückgängig machen"""
+        if not self.is_modified:
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Änderungen verwerfen",
+            "Alle Änderungen verwerfen und Original wiederherstellen?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Original wiederherstellen
+            self.current_data = json.loads(json.dumps(self.original_data))
+            
+            # Listen neu laden
+            self.vertikal_list.load_items(self.current_data.get('VERTIKAL', []))
+            self.grund_list.load_items(self.current_data.get('GRUND', []))
+            self.zusatz_list.load_items(self.current_data.get('ZUSATZ', []))
+            
+            self.is_modified = False
+            logger.info("↩️ Änderungen rückgängig gemacht")
+    
+    def has_unsaved_changes(self) -> bool:
+        """Prüft ob ungespeicherte Änderungen vorhanden"""
+        return self.is_modified
+
+
+# ============================================================================
+# Factory-Funktion für Dialog-Integration
+# ============================================================================
+
+def create_menu_editor_widget(menu_guid: str, parent=None) -> PdvmMenuEditorWidget:
+    """
+    Factory-Funktion für Dialog-System
+    
+    Args:
+        menu_guid: GUID des zu bearbeitenden Menüs (aus View)
+        parent: Parent-Widget
+    
+    Returns:
+        PdvmMenuEditorWidget: Fertig initialisiertes Widget
+    """
+    return PdvmMenuEditorWidget(menu_guid, parent)

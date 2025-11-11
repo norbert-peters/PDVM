@@ -1,25 +1,23 @@
 """
 V3 Menu Handler
 ===============
-Einfacher, linearer Handler für V3-Menü
+ULTRA EINFACH: EINE Routine für ALLES!
 
-DESIGN-PRINZIPIEN:
-- Linear: BASIS → WIDGETS → ANZEIGEN
-- Keine komplexen Refresh-Logiken
-- Ein Aufruf = Komplettes Menü
-- Template-Integration automatisch durch LinearMenuLoader
+Verwendet: create_menu_from_items() aus pdvm_menu_simple
 
 Autor: PDVM V3.0
-Datum: 02.11.2025
+Datum: 08.11.2025
 """
 
 import logging
-from typing import Optional, Dict, Any
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from typing import Optional, Dict, Any, List
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMenuBar, QPushButton
 
 from v3_menu_system import LinearMenuLoader, MenuItem
-from v3_menu_widgets import V3VerticalMenu, V3HorizontalMenu
+from pdvm_menu_simple import create_menu_from_items
+from pdvm_menu_schema import MenuItemType
 from pdvm_central_systemsteuerung import get_gcs
+from pdvm_command_handler import get_command_handler
 
 logger = logging.getLogger(__name__)
 

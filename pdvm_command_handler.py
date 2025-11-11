@@ -1,5 +1,5 @@
 """
-V2 Command Handler
+PDVM Command Handler
 ==================
 Führt Menü-Commands mit Security-Prüfung aus
 
@@ -25,7 +25,7 @@ from handlers import get_handler_registry
 logger = logging.getLogger(__name__)
 
 
-class V2CommandHandler:
+class PdvmCommandHandler:
     """
     Command Handler mit Security-Prüfung
     
@@ -48,7 +48,7 @@ class V2CommandHandler:
         # Handler-Registry (dynamisches Laden)
         self.handler_registry = get_handler_registry()
         
-        logger.info("✅ V2CommandHandler initialisiert")
+        logger.info("✅ PdvmCommandHandler initialisiert")
     
     def register_handler(self, handler_name: str, handler_func: callable):
         """
@@ -172,20 +172,20 @@ class V2CommandHandler:
 
 
 # ===== GLOBAL INSTANCE =====
-_handler_instance: Optional[V2CommandHandler] = None
+_handler_instance: Optional[PdvmCommandHandler] = None
 
 
-def get_command_handler() -> Optional[V2CommandHandler]:
+def get_command_handler() -> Optional[PdvmCommandHandler]:
     """
     Gibt globale Command Handler Instanz zurück
     
-    Singleton-Pattern für V2CommandHandler
+    Singleton-Pattern für PdvmCommandHandler
     """
     global _handler_instance
     
     if _handler_instance is None:
         try:
-            _handler_instance = V2CommandHandler()
+            _handler_instance = PdvmCommandHandler()
         except Exception as e:
             logger.error(f"❌ Fehler beim Initialisieren von Command Handler: {e}")
             return None
@@ -195,10 +195,10 @@ def get_command_handler() -> Optional[V2CommandHandler]:
 
 if __name__ == "__main__":
     # ===== TEST =====
-    print("🧪 V2 Command Handler Test")
+    print("🧪 PDVM Command Handler Test")
     print("=" * 60)
     print("⚠️ HINWEIS: Test benötigt initialisiertes GCS")
-    print("   Führe v2_main.py aus für vollständigen Test")
+    print("   Führe main.py aus für vollständigen Test")
     print("=" * 60)
     
     # Teste nur Import
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     
     print("\n✅ Import erfolgreich")
     print("   MenuCommand: ✓")
-    print("   V2CommandHandler: ✓")
+    print("   PdvmCommandHandler: ✓")
     
     # Teste Command-Erstellung
     cmd = create_command(
