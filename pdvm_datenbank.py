@@ -28,17 +28,32 @@ class PdvmDatenbank:
     """
     SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000"
 
+    # Liste der zentralen System-Tabellen
+    SYSTEM_TABLES = {
+        'sys_beschreibungen',
+        'sys_dialogdaten',
+        'sys_dropdowndaten',
+        'sys_framedaten',
+        'sys_menudaten',
+        'sys_viewdaten'
+    }
+
     def __init__(self, table_name="sys_menudaten"):
         """
         V2.0: Initialisiert die Datenbankverbindung.
         
         DB-Pfad wird aus GCS geholt (gcs.db_path) - zentrale Konfiguration!
         
+        SYSTEM-DB ROUTING:
+        - System-Tabellen → pdvm_system.db (aus Mandanten METADATEN.SYSTEM_DB)
+        - Andere Tabellen → Mandanten-DB (gcs.db_path)
+        
         Args:
             table_name: Name der Tabelle (Standard: sys_menudaten)
         
         Raises:
             ValueError: Wenn table_name fehlt oder GCS nicht initialisiert
+            RuntimeError: Wenn SYSTEM_DB nicht konfiguriert ist (bei System-Tabellen)
         """
         if not table_name:
             raise ValueError("❌ Tabellenname muss angegeben werden!")
@@ -52,10 +67,19 @@ class PdvmDatenbank:
         
         if not hasattr(gcs, 'db_path') or not gcs.db_path:
             raise ValueError("❌ GCS.db_path nicht gesetzt!")
-            
-        self.db_name = gcs.db_path
+        
+        # SYSTEM-DB ROUTING: Prüfe ob System-Tabelle
         self.table_name = table_name
-        logger.info(f"✅ V2.0: Datenbank aus GCS: {gcs.db_path} → {table_name}")
+        self.is_system_table = table_name in self.SYSTEM_TABLES
+        
+        if self.is_system_table:
+            # System-Tabelle → pdvm_system.db
+            self.db_name = self._get_system_db_path(gcs)
+            logger.info(f"✅ System-Tabelle: {self.db_name} → {table_name}")
+        else:
+            # Mandanten-Tabelle → Mandanten-DB
+            self.db_name = gcs.db_path
+            logger.info(f"✅ Mandanten-Tabelle: {gcs.db_path} → {table_name}")
         
         # Tabelle erstellen falls nicht vorhanden
         self._ensure_table_exists()
@@ -66,33 +90,90 @@ class PdvmDatenbank:
         logger.info(f"PdvmDatenbank initialisiert: {self.db_name}.{table_name} (historisch: {self.historisch})")
 
     def _ensure_table_exists(self):
-        """Erstellt die Tabelle falls sie nicht existiert."""
+        """Erstellt die Tabelle falls sie nicht existiert mit vollständiger PDVM-Struktur."""
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         
         create_table_query = f'''
         CREATE TABLE IF NOT EXISTS {self.table_name} (
-            uid TEXT PRIMARY KEY,
-            name TEXT DEFAULT '',
-            daten TEXT NOT NULL,
-            modified_at TEXT NOT NULL DEFAULT ''
+            uid          TEXT    PRIMARY KEY,
+            daten        TEXT    NOT NULL,
+            name         TEXT,
+            historisch   INTEGER DEFAULT 0,
+            source_hash  TEXT,
+            sec_id       TEXT,
+            gilt_bis     TEXT    DEFAULT '9999365.00000',
+            created_at   TEXT,
+            modified_at  TEXT,
+            daten_backup TEXT
         )'''
         
         cursor.execute(create_table_query)
-        
-        # Prüfe ob 'name' Spalte existiert (für bestehende Tabellen)
-        cursor.execute(f"PRAGMA table_info({self.table_name})")
-        columns = [row[1] for row in cursor.fetchall()]
-        
-        if 'name' not in columns:
-            # Füge 'name' Spalte zu bestehender Tabelle hinzu
-            cursor.execute(f"ALTER TABLE {self.table_name} ADD COLUMN name TEXT DEFAULT ''")
-            logger.info(f"'name' Spalte zu {self.table_name} hinzugefügt")
-        
         conn.commit()
         conn.close()
         
-        logger.debug(f"Tabelle {self.table_name} sichergestellt")
+        logger.debug(f"Tabelle {self.table_name} mit vollständiger PDVM-Struktur sichergestellt")
+    
+    def _get_system_db_path(self, gcs):
+        """
+        Ermittelt Pfad zur System-Datenbank aus Mandanten-Metadaten.
+        
+        Liest METADATEN.SYSTEM_DB aus gcs._mandant_data und baut DB-Pfad.
+        
+        Args:
+            gcs: GlobalCentralSystemsteuerung Instanz
+            
+        Returns:
+            str: Vollständiger Pfad zur System-DB (z.B. "Daten/pdvm_system.db")
+            
+        Raises:
+            RuntimeError: Wenn SYSTEM_DB nicht konfiguriert ist
+        """
+        import os
+        
+        try:
+            # Hole SYSTEM_DB aus Mandanten-Metadaten
+            metadaten = gcs._mandant_data.get('METADATEN', {})
+            system_db_name = metadaten.get('SYSTEM_DB')
+            
+            if not system_db_name:
+                logger.error("❌ KRITISCH: METADATEN.SYSTEM_DB nicht in Mandanten-Daten definiert!")
+                logger.error("   System-Tabelle kann nicht geladen werden.")
+                logger.error("   Bitte METADATEN.SYSTEM_DB in Mandanten-Daten setzen (z.B. 'pdvm_system')")
+                raise RuntimeError(
+                    "SYSTEM_DB nicht konfiguriert!\n\n"
+                    "Die System-Datenbank ist nicht in den Mandanten-Daten konfiguriert.\n"
+                    "Bitte setzen Sie METADATEN.SYSTEM_DB in den Mandanten-Daten.\n\n"
+                    "Beispiel: METADATEN.SYSTEM_DB = 'pdvm_system'\n\n"
+                    "Das System kann ohne System-Datenbank nicht gestartet werden."
+                )
+            
+            # Baue DB-Pfad (System-DB ist eine Ebene höher als Mandanten-DB)
+            # Mandanten-DB: z.B. "Daten/mandant_001/datenbank.db"
+            # System-DB:    z.B. "Daten/pdvm_system.db"
+            mandant_dir = os.path.dirname(gcs.db_path)  # z.B. "Daten/mandant_001"
+            daten_dir = os.path.dirname(mandant_dir)     # z.B. "Daten"
+            system_db_path = os.path.join(daten_dir, f"{system_db_name}.db")
+            
+            # Prüfe ob System-DB existiert
+            if not os.path.exists(system_db_path):
+                logger.error(f"❌ KRITISCH: System-Datenbank nicht gefunden: {system_db_path}")
+                logger.error("   Bitte erstellen Sie die System-Datenbank mit create_pdvm_system_db.py")
+                raise RuntimeError(
+                    f"System-Datenbank nicht gefunden!\n\n"
+                    f"Erwartet: {system_db_path}\n"
+                    f"Konfiguriert in METADATEN.SYSTEM_DB: {system_db_name}\n\n"
+                    f"Bitte erstellen Sie die System-Datenbank mit:\n"
+                    f"  python create_pdvm_system_db.py\n\n"
+                    f"Das System kann ohne System-Datenbank nicht gestartet werden."
+                )
+            
+            logger.debug(f"   System-DB gefunden: {system_db_path}")
+            return system_db_path
+            
+        except KeyError as e:
+            logger.error(f"❌ Fehler beim Zugriff auf Mandanten-Metadaten: {e}")
+            raise RuntimeError(f"Fehler beim Zugriff auf METADATEN: {e}")
 
     def _ermittle_historisch_status(self):
         """
