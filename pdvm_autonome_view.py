@@ -116,15 +116,25 @@ class PdvmAutonomeView(QWidget):
             
             logger.info(f"📅 Stichtag: {self.stichtag}")
             
-            # [4] METADATEN.{TABLE}.controls holen
-            table_upper = self.view_table.upper()
-            metadaten, _ = view_db.get_value('METADATEN', table_upper, self.stichtag)
+            # [4] NO_DATA Flag prüfen (für Tabellen ohne Metadaten wie Menüs)
+            no_data_flag, _ = view_db.get_value('ROOT', 'NO_DATA', self.stichtag)
+            self.no_data_mode = bool(no_data_flag)  # False wenn nicht gesetzt
             
-            if not metadaten or 'controls' not in metadaten:
-                raise ValueError(f"METADATEN.{table_upper}.controls nicht gefunden")
-            
-            self.controls = metadaten['controls']
-            logger.info(f"✅ {len(self.controls)} Controls geladen: {list(self.controls.keys())}")
+            if self.no_data_mode:
+                logger.info("🎯 NO_DATA Modus aktiviert - überspringe METADATEN-Ladung")
+                # Nur automatische Spalten (uid, name)
+                self.controls = {}  # Keine benutzerdefinierten Controls
+                logger.info("✅ NO_DATA Modus - nur automatische Spalten (uid, name)")
+            else:
+                # [4b] METADATEN.{TABLE}.controls holen (nur wenn NOT no_data_mode)
+                table_upper = self.view_table.upper()
+                metadaten, _ = view_db.get_value('METADATEN', table_upper, self.stichtag)
+                
+                if not metadaten or 'controls' not in metadaten:
+                    raise ValueError(f"METADATEN.{table_upper}.controls nicht gefunden")
+                
+                self.controls = metadaten['controls']
+                logger.info(f"✅ {len(self.controls)} Controls geladen: {list(self.controls.keys())}")
             
             # [5] call_daten für ViewController erstellen
             call_daten = {

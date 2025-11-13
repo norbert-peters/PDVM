@@ -32,11 +32,11 @@ def get_next_log_filename():
     
     LOGIK:
     - Bei jedem 10. Start wird die Nummer hochgezählt
-    - Start-Counter wird in '.v2_main_starts' gespeichert
-    - Log-Dateien: v2_main_1.log, v2_main_2.log, v2_main_3.log, ...
+    - Start-Counter wird in '.pdvm_main_starts' gespeichert
+    - Log-Dateien: pdvm_main_1.log, pdvm_main_2.log, pdvm_main_3.log, ...
     
     Returns:
-        str: Log-Dateiname (z.B. "v2_main_1.log")
+        str: Log-Dateiname (z.B. "pdvm_main_1.log")
     """
     counter_file = '.pdvm_main_starts'
     
@@ -289,7 +289,7 @@ def main():
     # PHASE 3: HAUPTANWENDUNG
     print("\n[3/3] Hauptanwendung mit Menü starten...")
     
-    # V2.0: Verwende v2_systemstart.py als Hauptanwendung
+    # V2.0: Verwende pdvm_systemstart.py als Hauptanwendung
     from pdvm_systemstart import V2MainAppComplete
     main_window = V2MainAppComplete()
     

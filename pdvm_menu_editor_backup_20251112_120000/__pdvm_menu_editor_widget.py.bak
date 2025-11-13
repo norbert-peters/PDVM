@@ -1,0 +1,25 @@
+"""
+Backup of pdvm_menu_editor_widget.py
+Created: 2025-11-12
+"""
+
+"""
+--- original pdvm_menu_editor_widget.py content ---
+The original file was a thin wrapper delegating to pdvm_menu_editor_simple.
+This backup preserves the previous implementation.
+"""
+
+import logging
+from pdvm_menu_editor_simple import PdvmMenuEditorSimple
+
+logger = logging.getLogger(__name__)
+
+
+class PdvmMenuEditorWidget(PdvmMenuEditorSimple):
+    """Wrapper for compatibility"""
+    pass
+
+
+def create_menu_editor_widget(menu_guid: str, parent=None):
+    logger.info(f"Backup wrapper called for: {menu_guid}")
+    return PdvmMenuEditorWidget(menu_guid, parent)

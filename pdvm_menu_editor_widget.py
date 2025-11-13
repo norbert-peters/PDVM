@@ -15,21 +15,32 @@ Grund: Komplette Vereinfachung nach User-Feedback
 """
 
 import logging
-from pdvm_menu_editor_simple import PdvmMenuEditorSimple
+
+# Neuer Wrapper: Leitet Aufrufe an die optimierte Implementierung weiter
+from pdvm_menu_editor_optimized import (
+    PdvmMenuEditorOptimized,
+    create_menu_editor_widget as create_optimized_widget,
+    create_menu_editor_dialog as create_optimized_dialog,
+)
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# WRAPPER-Klasse für Kompatibilität mit bestehendem Code
-# ============================================================================
-
-class PdvmMenuEditorWidget(PdvmMenuEditorSimple):
-    """Wrapper für alte Aufrufe - leitet zu neuer einfacher Version weiter"""
+# Backward-compatible wrapper class
+class PdvmMenuEditorWidget(PdvmMenuEditorOptimized):
+    """Kompatibler Wrapper: Erweitert die optimierte Implementierung."""
     pass
 
 
 def create_menu_editor_widget(menu_guid: str, parent=None):
-    """Factory-Funktion (kompatibel mit altem Code)"""
-    logger.info(f"🎯 Menu-Editor erstellt für: {menu_guid}")
+    """Factory-Funktion (kompatibel mit altem Code)
+
+    Leitet zur optimierten Implementierung weiter.
+    """
+    logger.info(f"🎯 Menü-Editor (wrapper) erstellt für: {menu_guid}")
     return PdvmMenuEditorWidget(menu_guid, parent)
+
+
+def create_menu_editor_dialog(menu_guid: str, parent=None):
+    """Kompatibler Dialog Factory (optional)"""
+    return create_optimized_dialog(menu_guid, parent)

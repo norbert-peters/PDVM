@@ -1,0 +1,16 @@
+"""
+Backup of pdvm_menu_editor_simple.py
+Created: 2025-11-12
+"""
+
+"""
+--- original pdvm_menu_editor_simple.py content (truncated) ---
+This backup preserves the previous implementation of the simple editor.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+def info():
+    logger.info("This is a backup placeholder for pdvm_menu_editor_simple.py")

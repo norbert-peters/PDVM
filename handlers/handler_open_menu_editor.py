@@ -57,7 +57,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
         from pdvm_view_dialog import PdvmViewDialog
         
         view_dialog = PdvmViewDialog(
-            view_guid=view_guid,
+            view_guid=frame_guid,
             parent=main_app,
             title="Menü zum Bearbeiten auswählen",
             selection_mode='single'
@@ -88,12 +88,12 @@ def execute(params: dict, context: dict, gcs) -> bool:
         
         logger.info(f"✅ Menü ausgewählt: {menu_name} ({menu_guid})")
         
-        # STEP 2: Menu-Editor-Dialog öffnen
-        from pdvm_menu_editor_dialog import PdvmMenuEditorDialog
+        # STEP 2: Menu-Editor-Dialog öffnen (OPTIMIERTE VERSION)
+        from pdvm_menu_editor_optimized import create_menu_editor_dialog
         
-        logger.info("🎨 Öffne Menu-Editor-Dialog...")
+        logger.info("🎨 Öffne Menu-Editor-Dialog (optimiert)...")
         
-        editor_dialog = PdvmMenuEditorDialog(
+        editor_dialog = create_menu_editor_dialog(
             menu_guid=menu_guid,
             parent=main_app
         )
