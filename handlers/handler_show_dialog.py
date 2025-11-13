@@ -67,21 +67,20 @@ def execute(params: dict, context: dict, gcs) -> bool:
             main_app=main_app
         )
         
-        # Altes Widget im workspace_container entfernen
+        # Workspace clearen: Nur Widgets entfernen, Layout behalten!
         workspace_layout = main_app.workspace_container.layout()
+        if workspace_layout is None:
+            logger.error("❌ Workspace-Container hat kein Layout!")
+            return False
         
-        # Falls kein Layout vorhanden, erstelle eins
-        if not workspace_layout:
-            from PyQt5.QtWidgets import QVBoxLayout
-            workspace_layout = QVBoxLayout(main_app.workspace_container)
-            workspace_layout.setContentsMargins(0, 0, 0, 0)
-            workspace_layout.setSpacing(0)
-        
-        # Altes Widget entfernen
         while workspace_layout.count():
             child = workspace_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+        
+        # Event-Loop verarbeiten, damit Widgets SOFORT gelöscht werden
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
         
         # Dialog-Widget einfügen
         workspace_layout.addWidget(dialog_widget)

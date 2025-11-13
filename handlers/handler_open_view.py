@@ -106,24 +106,22 @@ def execute(params: dict, context: dict, gcs) -> bool:
             
             logger.info("✅ View-Widget erfolgreich erstellt")
             
-            # V3.1: Widget direkt in workspace_container einfügen
-            # Workspace-Container hat schon ein Layout (aus pdvm_systemstart.py)
+            # Workspace clearen: Nur Widgets entfernen, Layout behalten!
             workspace_layout = main_app.workspace_container.layout()
+            if workspace_layout is None:
+                logger.error("❌ Workspace-Container hat kein Layout!")
+                return False
             
-            # Falls kein Layout vorhanden, erstelle eins
-            if not workspace_layout:
-                from PyQt5.QtWidgets import QVBoxLayout
-                workspace_layout = QVBoxLayout(main_app.workspace_container)
-                workspace_layout.setContentsMargins(0, 0, 0, 0)
-                workspace_layout.setSpacing(0)
-            
-            # Altes Widget entfernen (falls vorhanden)
             while workspace_layout.count():
                 child = workspace_layout.takeAt(0)
                 if child.widget():
                     child.widget().deleteLater()
             
-            # Neues Widget einfügen
+            # Event-Loop verarbeiten, damit Widgets SOFORT gelöscht werden
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # View-Widget einfügen
             workspace_layout.addWidget(view_widget)
             
             # Referenz für Stichtag-Refresh speichern

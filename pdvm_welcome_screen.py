@@ -59,9 +59,18 @@ class PdvmWelcomeScreen:
         
         logger.info("✅ GCS verfügbar")
         
-        # Layout erstellen
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Layout holen (wurde bei Startup erstellt)
+        logger.info(f"🔍 DEBUG: Container-Typ: {type(container)}")
+        logger.info(f"🔍 DEBUG: Container-ID: {id(container)}")
+        layout = container.layout()
+        logger.info(f"🔍 DEBUG: Layout von container.layout(): {layout}")
+        logger.info(f"🔍 DEBUG: Layout ist None? {layout is None}")
+        logger.info(f"🔍 DEBUG: Layout bool()? {bool(layout)}")
+        logger.info(f"🔍 DEBUG: Layout count()? {layout.count() if layout else 'N/A'}")
+        
+        if layout is None:
+            logger.error("❌ Workspace-Container hat kein Layout! Dies sollte nicht passieren.")
+            return
         
         # TextEdit Widget erstellen
         welcome_widget = QTextEdit()
@@ -120,6 +129,12 @@ class PdvmWelcomeScreen:
         # Version aus GCS
         version = gcs.version if hasattr(gcs, 'version') else '0.0'
         
+        # Titel anpassen basierend auf App-Name
+        if app_name:
+            title = f"🎉 Willkommen im PDVM {app_name}"
+        else:
+            title = "🎉 Willkommen im PDVM-System"
+        
         # HTML erstellen
         html = f"""
         <html>
@@ -164,29 +179,10 @@ class PdvmWelcomeScreen:
                     margin-left: 10px;
                     color: #333;
                 }}
-                .app-box {{
-                    background-color: #f9f9f9;
-                    color: #333;
-                    border: 2px solid #667eea;
-                    border-radius: 10px;
-                    padding: 25px;
-                    margin: 30px 0;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                }}
-                .app-name {{
-                    font-size: 24px;
-                    font-weight: bold;
-                    color: #667eea;
-                    margin-bottom: 10px;
-                }}
-                .app-hint {{
-                    font-size: 14px;
-                    color: #666;
-                }}
             </style>
         </head>
         <body>
-            <h1>🎉 Willkommen im PDVM-System</h1>
+            <h1>{title}</h1>
             <div class="subtitle">Personal Daten Verwaltungs Management System</div>
             
             <div class="info-box">
@@ -203,18 +199,6 @@ class PdvmWelcomeScreen:
                     <span class="info-value">{version}</span>
                 </div>
             </div>
-        """
-        
-        # App-Name hinzufügen (falls vorhanden)
-        if app_name:
-            html += f"""
-            <div class="app-box">
-                <div class="app-name">📂 {app_name}</div>
-                <div class="app-hint">Wählen Sie eine Aktion aus dem Menü</div>
-            </div>
-            """
-        
-        html += """
         </body>
         </html>
         """

@@ -210,7 +210,7 @@ class PdvmMenuSystemAutonomous:
                     }
                 """)
                 
-                # Toggle-Funktion für Popup-Menü
+                # Toggle-Funktion für Popup-Menü (REKURSIV für alle Ebenen!)
                 def show_submenu_popup(checked=False, parent_widget=btn, matrix=matrix, guid=guid, handler=menu_handler, label=label):
                     from PyQt5.QtWidgets import QMenu, QAction
                     from PyQt5.QtCore import QPoint
@@ -241,24 +241,40 @@ class PdvmMenuSystemAutonomous:
                         }
                     """)
                     
-                    # Child-Items finden und zu Popup hinzufügen
-                    children = [item for item in matrix if item.get('parent_guid') == guid]
-                    children.sort(key=lambda x: x.get('sort_order', 0))
-                    
-                    for child in children:
-                        child_type = child.get('type', 'BUTTON')
-                        child_label = child.get('label', 'Item')
+                    # REKURSIVE Funktion zum Hinzufügen aller Ebenen
+                    def add_menu_items_recursive(parent_menu, parent_guid):
+                        """Fügt alle Kinder rekursiv zum Menü hinzu"""
+                        children = [item for item in matrix if item.get('parent_guid') == parent_guid]
+                        children.sort(key=lambda x: x.get('sort_order', 0))
                         
-                        if child_type == 'BUTTON':
-                            action = QAction(child_label, popup_menu)
-                            command = child.get('command')
-                            if command and handler:
-                                action.triggered.connect(
-                                    lambda checked=False, cmd=command: handler.execute_command(cmd)
-                                )
-                            popup_menu.addAction(action)
-                        elif child_type == 'SEPARATOR':
-                            popup_menu.addSeparator()
+                        for child in children:
+                            child_type = child.get('type', 'BUTTON')
+                            child_label = child.get('label', 'Item')
+                            child_guid = child.get('guid')
+                            
+                            if child_type == 'SUBMENU':
+                                # Submenu → Rekursiv weitere Ebene hinzufügen
+                                submenu = parent_menu.addMenu(child_label)
+                                submenu.setStyleSheet(parent_menu.styleSheet())  # Gleicher Style
+                                add_menu_items_recursive(submenu, child_guid)  # REKURSION!
+                                logger.debug(f"    📁 Submenu '{child_label}' hinzugefügt (rekursiv)")
+                            elif child_type == 'BUTTON':
+                                # Button → Action hinzufügen
+                                action = QAction(child_label, parent_menu)
+                                command = child.get('command')
+                                if command and handler:
+                                    action.triggered.connect(
+                                        lambda checked=False, cmd=command: handler.execute_command(cmd)
+                                    )
+                                parent_menu.addAction(action)
+                            elif child_type == 'SEPARATOR':
+                                parent_menu.addSeparator()
+                            elif child_type == 'SPACER':
+                                # Spacer ignorieren (nur im Editor sichtbar)
+                                pass
+                    
+                    # Rekursiv alle Ebenen hinzufügen
+                    add_menu_items_recursive(popup_menu, guid)
                     
                     # Popup unter dem Button anzeigen
                     button_pos = parent_widget.mapToGlobal(QPoint(0, parent_widget.height()))

@@ -117,6 +117,10 @@ def execute(params: dict, context: dict, gcs) -> bool:
         
         logger.info(f"   Menu-GUID: {menu_guid}")
         
+        # V3.2: App-Name VOR load_menu setzen (für Welcome-Screen!)
+        main_app._current_app_name = app_name
+        logger.info(f"✅ App-Name gesetzt für Welcome-Screen: {app_name}")
+        
         # V3.2: Menü laden (Pipeline fügt Welcome-Screen automatisch ein!)
         try:
             if hasattr(menu_handler, 'load_menu'):
@@ -124,14 +128,6 @@ def execute(params: dict, context: dict, gcs) -> bool:
                 
                 if success:
                     logger.info(f"✅ App-Menü geladen: {app_name}")
-                    
-                    # V3.2: KEIN _show_welcome_message() mehr!
-                    # Pipeline erstellt NEUES Widget in STEP 3.3 (altes wurde in STEP 3.1 gelöscht)
-                    
-                    # V3.2: Speichere App-Name für Welcome-Screen Anpassung
-                    main_app._current_app_name = app_name
-                    logger.info(f"✅ App-Name gespeichert für Welcome-Screen: {app_name}")
-                    
                     return True
                 else:
                     logger.error(f"❌ Menü '{menu_guid}' konnte nicht geladen werden")

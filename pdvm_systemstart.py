@@ -142,6 +142,18 @@ class V2MainAppComplete(QMainWindow):
         # Workspace Container (dynamischer Bereich)
         self.workspace_container = QFrame()
         self.workspace_container.setStyleSheet("background-color: white;")
+        
+        # Layout SOFORT erstellen und SETZEN (v0.9: persistent workspace_layout als MEMBER!)
+        self.workspace_layout = QVBoxLayout()
+        self.workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace_layout.setSpacing(0)
+        self.workspace_container.setLayout(self.workspace_layout)
+        
+        # DEBUG: Prüfe ob Layout gesetzt wurde
+        test_layout = self.workspace_container.layout()
+        logger.info(f"🔍 DEBUG: Layout nach setLayout(): {test_layout}")
+        logger.info(f"🔍 DEBUG: Ist Layout == self.workspace_layout? {test_layout == self.workspace_layout}")
+        
         right_side_layout.addWidget(self.workspace_container)
         logger.info("✅ Workspace-Container erstellt")
         

@@ -98,6 +98,52 @@ class PdvmMenuHandler:
         self.handler_registry.register(name, handler)
         logger.info(f"✅ Handler registriert: {name}")
     
+    def _clear_workspace_and_show_welcome(self) -> None:
+        """
+        Cleart den Workspace-Container und zeigt Welcome-Screen an.
+        
+        V0.9-Style: Entfernt nur Widgets, behält Layout bei.
+        """
+        try:
+            workspace = self.main_window.workspace_container
+            logger.info(f"🔍 DEBUG: Workspace-Container-Typ: {type(workspace)}")
+            logger.info(f"🔍 DEBUG: Workspace-Container-ID: {id(workspace)}")
+            layout = workspace.layout()
+            logger.info(f"🔍 DEBUG: Layout von workspace.layout(): {layout}")
+            logger.info(f"🔍 DEBUG: Layout ist None? {layout is None}")
+            logger.info(f"🔍 DEBUG: Layout bool()? {bool(layout)}")
+            
+            if layout is None:
+                logger.error("❌ Workspace hat kein Layout! Dies sollte nicht passieren.")
+                return
+            
+            # Alle Widgets entfernen (Layout bleibt!)
+            widget_count = layout.count()
+            logger.info(f"🧹 Entferne {widget_count} Widgets aus Workspace...")
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    widget = child.widget()
+                    logger.debug(f"  🗑️ Entferne Widget: {widget.__class__.__name__}")
+                    widget.deleteLater()
+            
+            # WICHTIG: Event-Loop verarbeiten, damit Widgets SOFORT gelöscht werden
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            logger.info("🧹 Workspace geleert")
+            
+            # Welcome-Screen anzeigen (mit aktuellem App-Namen, falls vorhanden)
+            from pdvm_welcome_screen import PdvmWelcomeScreen
+            app_name = getattr(self.main_window, '_current_app_name', None)
+            PdvmWelcomeScreen.render(workspace, app_name)
+            logger.info(f"✅ Welcome-Screen angezeigt (App: {app_name or 'PDVM System'})")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Clearen des Workspace: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def load_startmenu(self) -> bool:
         """
         Lädt Startmenü neu (kehrt zum Hauptmenü zurück)
@@ -117,6 +163,12 @@ class PdvmMenuHandler:
             if not gcs:
                 logger.error("❌ GCS nicht verfügbar")
                 return False
+            
+            # Beim Startmenü-Wechsel App-Name zurücksetzen (Hauptmenü)
+            self.main_window._current_app_name = None
+            
+            # MENÜWECHSEL: Workspace clearen + Welcome-Screen anzeigen
+            self._clear_workspace_and_show_welcome()
             
             # Hole Startmenü-GUID aus menu_system_db
             try:
@@ -151,7 +203,7 @@ class PdvmMenuHandler:
     
     def load_menu(self, menu_guid: str) -> bool:
         """
-        Lädt ein spezifisches Menü (z.B. App-Menü)
+        Lädt spezifisches Menü
         
         Args:
             menu_guid: GUID des zu ladenden Menüs
@@ -166,23 +218,29 @@ class PdvmMenuHandler:
             from pdvm_menu_system_autonomous import PdvmMenuSystemAutonomous
             
             gcs = get_gcs()
+            if not gcs:
+                logger.error("❌ GCS nicht verfügbar")
+                return False
             
-            # ULTRA EINFACH: Setze neue GUID in menu_system_db
+            # MENÜWECHSEL: Workspace clearen + Welcome-Screen anzeigen
+            self._clear_workspace_and_show_welcome()
+            
+            # Setze GUID in menu_system_db
             gcs._menu_system_db.set_guid(menu_guid)
-            logger.info(f"✅ Menu-System-DB GUID gewechselt: {menu_guid}")
+            logger.info(f"✅ Menu-System-DB GUID gesetzt: {menu_guid}")
             
-            # Rendere Menü (mit neuer GUID in DB)
+            # Rendere Menü
             PdvmMenuSystemAutonomous.load_startmenu(menu_guid, self)
             
             # Stelle Menü-Sichtbarkeit wieder her
             if hasattr(self.main_window, 'restore_menu_visibility'):
                 self.main_window.restore_menu_visibility()
             
-            logger.info(f"✅ Menü geladen: {menu_guid}")
+            logger.info("✅ Menü geladen")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Fehler beim Laden des Menüs {menu_guid}: {e}")
+            logger.error(f"❌ Fehler beim Laden des Menüs: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
