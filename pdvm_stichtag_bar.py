@@ -174,21 +174,36 @@ class PdvmStichtagBar:
         def on_refresh():
             try:
                 logger.info("🔄 Stichtag Refresh triggered")
-                # Aktuellen Wert aus Picker holen
+                
+                # KRITISCH: save() ZUERST aufrufen um Widget-Werte zu übernehmen!
+                # Änderungen liegen in picker.initial bis save() aufgerufen wird
+                if hasattr(stichtag_picker, 'save'):
+                    stichtag_picker.save()
+                    logger.info("💾 Picker save() aufgerufen - Widget-Werte übernommen")
+                
+                # Jetzt Wert aus Picker holen (ist jetzt aktuell!)
                 if hasattr(stichtag_picker, 'get_pdvm_datetime'):
                     new_stichtag = stichtag_picker.get_pdvm_datetime()
-                    gcs.st_inst.PdvmDateTime = new_stichtag.PdvmDateTime
-                    logger.info(f"✅ Stichtag aktualisiert: {new_stichtag.FormTimeStamp}")
+                    logger.info(f"📅 Neuer Stichtag aus Picker: {new_stichtag.PdvmDateTime} ({new_stichtag.FormTimeStamp})")
                     
                     # Display aktualisieren
                     stichtag_display.setText(new_stichtag.FormTimeStamp)
                     
-                    # TODO: Trigger View-Refresh (Event-System?)
-                    logger.info("📢 Stichtag-Refresh abgeschlossen - Views sollten aktualisiert werden")
+                    # KRITISCH: update_stichtag() aufrufen um:
+                    # 1. Stichtag in DB zu speichern
+                    # 2. stichtag_changed Signal zu emittieren
+                    # 3. Alle Views zu aktualisieren
+                    if hasattr(gcs, 'update_stichtag'):
+                        gcs.update_stichtag()
+                        logger.info("🔔 update_stichtag() aufgerufen → Signal emittiert, Views werden aktualisiert")
+                    else:
+                        logger.warning("⚠️ GCS hat keine update_stichtag() Methode")
                 else:
                     logger.warning("⚠️ Picker hat keine get_pdvm_datetime() Methode")
             except Exception as e:
                 logger.error(f"❌ Fehler beim Refresh: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
         
         refresh_button.clicked.connect(on_refresh)
         layout.addWidget(refresh_button)
