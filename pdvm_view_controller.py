@@ -670,11 +670,12 @@ class V2PdvmViewController(QObject):
         View neu laden (Zahnrad-Menü)
         
         MATRIX-PIPELINE KOMPLETT NEU DURCHLAUFEN:
-        1. BasisMatrix neu erstellen (aktueller Stichtag aus GCS)
-        2. Filter anwenden
-        3. Sort anwenden
-        4. Projektion anwenden
-        5. UI aktualisieren
+        1. Daten aus DB neu laden (optimized_instances)
+        2. BasisMatrix neu erstellen (aktueller Stichtag aus GCS)
+        3. Filter anwenden
+        4. Sort anwenden
+        5. Projektion anwenden
+        6. UI aktualisieren
         
         Diese Methode wird vom Zahnrad-Menü "🔄 Aktualisieren" aufgerufen.
         """
@@ -684,6 +685,10 @@ class V2PdvmViewController(QObject):
             # Hole aktuellen Stichtag aus GCS
             current_stichtag = self.gcs.stichtag if self.gcs else None
             logger.info(f"  📅 Aktueller Stichtag: {current_stichtag}")
+            
+            # SCHRITT 0: Daten aus DB neu laden
+            logger.info("  🔧 SCHRITT 0: Daten neu laden...")
+            self._load_data()
             
             # SCHRITT 1: BasisMatrix komplett neu erstellen
             logger.info("  🔧 SCHRITT 1: BasisMatrix neu erstellen...")

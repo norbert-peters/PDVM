@@ -36,7 +36,8 @@ class PdvmCentralDatenbank:
     def __init__(
         self,
         table_name: str = "sys_menudaten",
-        guid: Optional[str] = None
+        guid: Optional[str] = None,
+        no_save: bool = False
     ):
         """
         V2.0: Initialisiert die Business-Logic-Schicht.
@@ -46,9 +47,11 @@ class PdvmCentralDatenbank:
         Args:
             table_name: Name der Tabelle (Standard: sys_menudaten)
             guid: GUID des Datensatzes (falls None, muss später gesetzt werden)
+            no_save: Wenn True, verhindert save_all_values() die Persistierung (für temporäre Strukturen wie Menü-Rendering)
         """
         self.table_name = table_name
         self.guid = guid
+        self.no_save = no_save  # Sicherheitsschalter für temporäre Daten
         
         # Basis-Datenbankschicht initialisiert sich selbst aus GCS
         self._database = PdvmDatenbank(
@@ -65,11 +68,14 @@ class PdvmCentralDatenbank:
         self.data: Dict[str, Any] = {}
         self._data_loaded = False
         
+        # Pending name (für neue Datensätze via set_new_data_container)
+        self._pending_name = None
+        
         # Automatische Initialisierung falls GUID vorhanden
         if self.guid:
             self._load_data()
         
-        logger.info(f"PdvmCentralDatenbank initialisiert: {table_name}.{guid} (historisch: {self.historisch})")
+        logger.info(f"PdvmCentralDatenbank initialisiert: {table_name}.{guid} (historisch: {self.historisch}, no_save: {no_save})")
 
     @classmethod
     def create_with_data(
@@ -193,6 +199,35 @@ class PdvmCentralDatenbank:
             logger.error(f"Fehler in set_data: {e}")
             self.data = {}
             self._data_loaded = False
+    
+    def set_new_data_container(self, guid: str, name: str):
+        """
+        Initialisiert einen neuen Daten-Container für einen neuen Datensatz.
+        
+        Workflow:
+        1. Setzt GUID in der Instanz
+        2. Erstellt leeres Daten-Dictionary
+        3. Beim nächsten save_all_values() wird der Datensatz in DB geschrieben
+        4. Name wird separat in name-Spalte gespeichert
+        
+        Args:
+            guid: Neue GUID für den Datensatz
+            name: Name für die name-Spalte
+        """
+        logger.info(f"🆕 Initialisiere neuen Daten-Container: {guid}")
+        
+        # GUID setzen
+        self.guid = guid
+        
+        # Leeres Dictionary erstellen
+        self.data = {}
+        self._data_loaded = True
+        
+        # Name in _pending_name speichern (wird bei save_all_values() geschrieben)
+        self._pending_name = name
+        
+        logger.info(f"  ✅ Container bereit: GUID={guid}, Name={name}")
+        logger.info(f"  ℹ️ Bei save_all_values() wird Datensatz in DB angelegt")
 
     def get_value(self, gruppe: str, feld: str, ab_zeit: Optional[float] = None) -> Any:
         """
@@ -343,6 +378,17 @@ class PdvmCentralDatenbank:
         if self.historisch:
             raise ValueError("❌ get_static_value kann nicht auf historische Tabellen angewendet werden")
             
+        # Gruppe existiert?
+        if gruppe not in self.data:
+            logger.warning(f"⚠️ Gruppe '{gruppe}' nicht gefunden - erstelle leer")
+            self.data[gruppe] = {}
+        
+        # Feld existiert?
+        if feld not in self.data[gruppe]:
+            logger.info(f"📋 Feld '{feld}' in Gruppe '{gruppe}' nicht gefunden - erstelle leeres Dict")
+            self.data[gruppe][feld] = {}
+            return {}
+        
         # Direkter Zugriff auf geladene Daten
         feld_data = self.data[gruppe][feld]
         
@@ -459,7 +505,16 @@ class PdvmCentralDatenbank:
         return self.data.copy()
 
     def save_all_values(self):
-        """Speichert alle Daten in die Datenbank."""
+        """
+        Speichert alle Daten in die Datenbank.
+        
+        SICHERHEITSSCHALTER: Wenn no_save=True wurde, wird nichts gespeichert.
+        Dies verhindert Persistierung von temporären Strukturen (z.B. Menü-Rendering mit Templates).
+        """
+        if self.no_save:
+            logger.debug(f"⚠️ save_all_values() übersprungen (no_save=True) für {self.table_name}.{self.guid}")
+            return
+        
         if not self.guid:
             raise ValueError("GUID muss gesetzt sein um Daten zu speichern")
         
@@ -468,6 +523,13 @@ class PdvmCentralDatenbank:
         data_to_save = all.convert_to_time(self.data)
         
         self._database.speichern(self.guid, data_to_save)
+        
+        # Wenn _pending_name gesetzt ist → name-Spalte aktualisieren
+        if self._pending_name:
+            self._database.set_name(self.guid, self._pending_name)
+            self._pending_name = None  # Reset nach Speicherung
+            logger.info(f"  ✅ Name-Spalte gesetzt für {self.guid}")
+        
         logger.info(f"Alle Daten gespeichert für GUID {self.guid}")
 
     def delete_group(self, gruppe: str):

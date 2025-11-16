@@ -391,6 +391,29 @@ class V2PdvmGenerellerDialog(QWidget):
             view_layout = QVBoxLayout(view_container)
             view_layout.setContentsMargins(0, 0, 0, 0)
             
+            # === NEU-BUTTON (über View) ===
+            button_layout = QHBoxLayout()
+            button_layout.addStretch()
+            
+            btn_neu = QPushButton("➕ Neuer Datensatz")
+            btn_neu.setStyleSheet("""
+                QPushButton {
+                    background-color: #27ae60;
+                    color: white;
+                    font-weight: bold;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #2ecc71;
+                }
+            """)
+            btn_neu.clicked.connect(self._create_new_datensatz)
+            button_layout.addWidget(btn_neu)
+            
+            view_layout.addLayout(button_layout)
+            
             # V2: View-Controller initialisieren
             from pdvm_view_controller import V2PdvmViewController
             
@@ -498,6 +521,99 @@ class V2PdvmGenerellerDialog(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler bei Edit-Tab-Erstellung: {e}")
             raise
+    
+    def _create_new_datensatz(self):
+        """
+        Erstellt einen neuen Datensatz
+        
+        Workflow:
+        1. Mini-Dialog: Name eingeben (db name)
+        2. Neue GUID generieren
+        3. Editor mit set_guid initialisieren
+        4. Tab 2 (Edit) öffnen
+        5. Mit save_all_values() in DB speichern
+        """
+        logger.info("➕ Neuen Datensatz erstellen...")
+        
+        try:
+            from PyQt5.QtWidgets import QInputDialog
+            import uuid
+            
+            # 1. Mini-Dialog: Name eingeben (mit Validierung)
+            while True:
+                name, ok = QInputDialog.getText(
+                    self,
+                    "Neuer Datensatz",
+                    "Name für neuen Datensatz eingeben:\n(Pflichtfeld - darf nicht leer sein)",
+                    text=""
+                )
+                
+                # Abbruch
+                if not ok:
+                    logger.info("  ℹ️ Abgebrochen - Dialog geschlossen")
+                    return
+                
+                # Validierung: Name darf nicht leer sein
+                name = name.strip()
+                if not name:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.warning(
+                        self,
+                        "Name erforderlich",
+                        "Bitte geben Sie einen Namen ein.\n\nDer Name ist ein Pflichtfeld und darf nicht leer sein."
+                    )
+                    continue  # Dialog erneut anzeigen
+                
+                # Name ist gültig → Schleife verlassen
+                break
+            
+            logger.info(f"  📝 Name: {name}")
+            
+            # 2. Neue GUID generieren
+            neue_guid = str(uuid.uuid4())
+            logger.info(f"  🆔 Neue GUID: {neue_guid}")
+            
+            # 3. Neuen Daten-Container initialisieren
+            # Hole ROOT_TABLE aus Framedaten
+            if not self.root_table:
+                raise ValueError("ROOT_TABLE nicht verfügbar!")
+            
+            # Datenbank-Instanz erstellen
+            db = PdvmCentralDatenbank(self.root_table)
+            
+            # Neuen Container initialisieren (GUID + Name setzen, leeres Dict)
+            db.set_new_data_container(neue_guid, name)
+            
+            # Speichern (erstellt Datensatz in DB)
+            db.save_all_values()
+            
+            logger.info(f"  ✅ Datensatz in DB angelegt: {self.root_table}/{neue_guid}")
+            
+            # 4. GUID in Systemsteuerung speichern (für Last-Selection)
+            self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', neue_guid)
+            self.gcs._db.save_all_values()
+            
+            # 5. Datensatz-Auswahl triggern (öffnet Edit-Tab)
+            self.datensatz_ausgewaehlt.emit(neue_guid)
+            
+            # 6. Zu Tab 2 (Edit) wechseln
+            self.tab_widget.setCurrentIndex(1)
+            
+            # 7. View aktualisieren (neuer Datensatz soll erscheinen)
+            if self.view_controller and hasattr(self.view_controller, 'refresh'):
+                self.view_controller.refresh()
+                logger.info("  🔄 View aktualisiert (BasisMatrix neu geladen)")
+            
+            logger.info(f"✅ Neuer Datensatz '{name}' erfolgreich erstellt")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Erstellen des Datensatzes: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Fehler",
+                f"Datensatz konnte nicht erstellt werden:\n\n{str(e)}"
+            )
     
     def _on_view_row_selected(self, row_data):
         """
@@ -618,12 +734,18 @@ class V2PdvmGenerellerDialog(QWidget):
                 self.current_edit_module.refresh_requested.connect(self.refresh)
                 logger.info("  🔗 refresh_requested Signal verbunden")
             
-            # Signal verbinden: save_completed → Edit-Tab neu laden
+            # Signal verbinden: save_completed → Edit-Tab neu laden + View aktualisieren
             if hasattr(self.current_edit_module, 'save_completed'):
-                self.current_edit_module.save_completed.connect(
-                    lambda: self._on_datensatz_ausgewaehlt(self.current_selected_guid)
-                )
-                logger.info("  🔗 save_completed Signal verbunden → Neuaufbau Edit-Tab")
+                def on_save_completed():
+                    # Edit-Tab neu laden
+                    self._on_datensatz_ausgewaehlt(self.current_selected_guid)
+                    # View aktualisieren (damit Änderungen sofort sichtbar sind)
+                    if self.view_controller and hasattr(self.view_controller, 'refresh'):
+                        self.view_controller.refresh()
+                        logger.info("  🔄 View nach Speichern aktualisiert")
+                
+                self.current_edit_module.save_completed.connect(on_save_completed)
+                logger.info("  🔗 save_completed Signal verbunden → Neuaufbau Edit-Tab + View Refresh")
             
             # ✅ KRITISCH: Signal verbinden: stichtag_changed → Input Controls aktualisieren
             # Wenn der Benutzer den Stichtag ändert, müssen die Input Controls

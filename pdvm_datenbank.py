@@ -291,24 +291,60 @@ class PdvmDatenbank:
         exists = cursor.fetchone()[0] > 0
         
         if exists:
-            # Update
+            # Update (created_at bleibt unverändert)
             cursor.execute(
                 f'UPDATE {self.table_name} SET daten = ?, modified_at = ? WHERE uid = ?',
                 (json_daten, timestamp, guid)
             )
             logger.debug(f"Datensatz aktualisiert: {guid}")
         else:
-            # Insert
+            # Insert (created_at wird mit aktuellem Zeitstempel gesetzt)
             cursor.execute(
-                f'INSERT INTO {self.table_name} (uid, daten, modified_at) VALUES (?, ?, ?)',
-                (guid, json_daten, timestamp)
+                f'INSERT INTO {self.table_name} (uid, daten, created_at, modified_at) VALUES (?, ?, ?, ?)',
+                (guid, json_daten, timestamp, timestamp)
             )
-            logger.debug(f"Datensatz eingefügt: {guid}")
+            logger.debug(f"Datensatz eingefügt: {guid} (created_at={timestamp})")
         
         conn.commit()
         conn.close()
         
         logger.info(f"Datensatz gespeichert: {guid} ({len(json_daten)} Zeichen)")
+    
+    def set_name(self, guid, name):
+        """
+        Setzt die name-Spalte für einen Datensatz.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            name (str): Name-Wert
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        if not name:
+            raise ValueError("Name darf nicht leer sein")
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # Prüfen ob Datensatz existiert
+        cursor.execute(f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?', (guid,))
+        exists = cursor.fetchone()[0] > 0
+        
+        if exists:
+            # Update name
+            cursor.execute(
+                f'UPDATE {self.table_name} SET name = ? WHERE uid = ?',
+                (name, guid)
+            )
+            logger.debug(f"Name aktualisiert für {guid}: {name}")
+        else:
+            # Name kann nur für existierende Datensätze gesetzt werden
+            raise ValueError(f"Datensatz {guid} existiert nicht - kann name nicht setzen")
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Name gesetzt für {guid}: {name}")
 
     def lesen(self, guid):
         """
