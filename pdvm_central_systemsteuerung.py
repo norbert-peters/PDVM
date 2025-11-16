@@ -150,8 +150,8 @@ class PdvmCentralSystemsteuerung(QObject):
         # WICHTIG: Menü wird über UID aus sys_menudaten geladen
         # Standard: Admin-Startmenü (TODO: Aus User-Profil laden)
         start_menu_uid = '5ca6674e-b9ce-4581-9756-64e742883f80'  # Admin-Startmenü
-        self._menu_system_db = PdvmCentralDatenbank('sys_menudaten', start_menu_uid)
-        logger.info(f"✅ System-Menü-Datenbank geladen mit UID={start_menu_uid}")
+        self._menu_system_db = PdvmCentralDatenbank('sys_menudaten', start_menu_uid, no_save=True)
+        logger.info(f"✅ System-Menü-Datenbank geladen mit UID={start_menu_uid} (no_save=True - temporär für Rendering)")
         
         # Menu-Pipeline Instanzen (Lazy Initialization)
         self._menu_pipeline_vertikal = None
@@ -264,6 +264,19 @@ class PdvmCentralSystemsteuerung(QObject):
         """Prüfe ob initialisiert"""
         if not self._initialized:
             raise RuntimeError("Systemsteuerung nicht initialisiert! Rufe initialize() auf.")
+    
+    def set_menu_system_db_guid(self, menu_guid):
+        """
+        Lädt Menü-Datenbank mit neuer GUID.
+        
+        WICHTIG: no_save=True → Menü wird nur temporär für Rendering geladen!
+        
+        Args:
+            menu_guid: GUID des zu ladenden Menüs
+        """
+        logger.info(f"🔄 Lade Menü-Datenbank mit GUID: {menu_guid}")
+        self._menu_system_db = PdvmCentralDatenbank('sys_menudaten', menu_guid, no_save=True)
+        logger.info(f"✅ Menü-Datenbank geladen (no_save=True)")
     
     def get_property(self, property_name, db_type='s', gruppe=None):
         """
@@ -437,6 +450,399 @@ class PdvmCentralSystemsteuerung(QObject):
             logger.info("✅ Zusatz Menu-Container registriert")
         
         logger.info(f"📦 {len(self._menu_containers)}/3 Menu-Container in GCS registriert")
+    
+    def get_container(self, name):
+        """
+        Holt registrierten Container.
+        
+        Args:
+            name: Container-Name ('vertical_menu_container', 'grund_menu_container', 'zusatz_menu_container')
+        
+        Returns:
+            QWidget oder None
+        """
+        # Mapping von alten Namen zu neuen Namen
+        name_mapping = {
+            'vertical_menu_container': 'vertical',
+            'grund_menu_container': 'grund',
+            'zusatz_menu_container': 'zusatz'
+        }
+        
+        container_key = name_mapping.get(name, name)
+        container = self._menu_containers.get(container_key)
+        
+        if not container:
+            logger.warning(f"⚠️ Container '{name}' nicht gefunden!")
+        
+        return container
+    
+    # ========================================
+    # ZUSATZMENÜ-VERWALTUNG (LINEAR & EINFACH)
+    # ========================================
+    
+    def expand_templates_in_gruppe(self, gruppe: str):
+        """
+        Expandiert Templates DIREKT IN GCS-Datenbank (no_save=True).
+        
+        LINEARER ABLAUF:
+        1. Lade Gruppe aus GCS
+        2. Finde SPACER mit template_guid
+        3. Lade Template-Items
+        4. Ersetze SPACER durch erstes Template-Item (SUBMENU)
+        5. Füge restliche Template-Items ein
+        6. Schreibe ALLES zurück in GCS
+        
+        Args:
+            gruppe: Menü-Gruppe (GRUND, VERTIKAL, ZUSATZ)
+        """
+        logger.info(f"🔧 Expandiere Templates in {gruppe}...")
+        
+        try:
+            # 1. Gruppe aus GCS laden
+            gruppe_data = self._menu_system_db.get_gruppe(gruppe)
+            if not gruppe_data or not isinstance(gruppe_data, dict):
+                logger.debug(f"  ℹ️ Gruppe {gruppe} leer oder ungültig")
+                return
+            
+            # 2. SPACER mit template_guid finden
+            import json
+            spacers_to_expand = []
+            
+            for guid, item_value in gruppe_data.items():
+                try:
+                    if isinstance(item_value, str):
+                        item_data = json.loads(item_value)
+                    else:
+                        item_data = item_value
+                    
+                    if (isinstance(item_data, dict) and 
+                        item_data.get('type') == 'SPACER' and 
+                        item_data.get('template_guid')):
+                        spacers_to_expand.append({
+                            'guid': guid,
+                            'data': item_data,
+                            'template_guid': item_data['template_guid']
+                        })
+                except:
+                    continue
+            
+            if not spacers_to_expand:
+                logger.debug(f"  ℹ️ Keine Templates in {gruppe}")
+                return
+            
+            logger.info(f"  🎯 {len(spacers_to_expand)} Template(s) gefunden")
+            
+            # 3. Für jeden SPACER: Template expandieren
+            for spacer_info in spacers_to_expand:
+                spacer_guid = spacer_info['guid']
+                spacer_data = spacer_info['data']
+                template_guid = spacer_info['template_guid']
+                
+                logger.info(f"    🔄 Expandiere Template: {template_guid}")
+                
+                # Template-Items aus sys_menudaten laden
+                from pdvm_central_datenbank import PdvmCentralDatenbank
+                template_db = PdvmCentralDatenbank('sys_menudaten', template_guid)
+                template_data = template_db.get_value_by_group(gruppe)
+                
+                if not template_data:
+                    logger.warning(f"      ⚠️ Kein Template in {gruppe} für {template_guid}")
+                    continue
+                
+                # Template-Items parsen
+                template_items = []
+                for item_guid, item_value in template_data.items():
+                    try:
+                        if isinstance(item_value, str):
+                            item_data = json.loads(item_value)
+                        else:
+                            item_data = item_value
+                        
+                        if isinstance(item_data, dict):
+                            item_data['guid'] = item_guid
+                            template_items.append(item_data)
+                    except:
+                        continue
+                
+                if not template_items:
+                    logger.warning(f"      ⚠️ Template {template_guid} hat keine Items")
+                    continue
+                
+                # Sortieren nach sort_order
+                template_items.sort(key=lambda x: x.get('sort_order', 0))
+                
+                # 4. Erstes Item muss SUBMENU sein
+                first_item = template_items[0]
+                if first_item.get('type') != 'SUBMENU':
+                    logger.warning(f"      ⚠️ Erstes Template-Item ist kein SUBMENU")
+                    continue
+                
+                # Übernehme parent_guid und sort_order vom SPACER
+                first_item['parent_guid'] = spacer_data.get('parent_guid')
+                first_item['sort_order'] = spacer_data.get('sort_order', 0)
+                
+                logger.info(f"      ✅ Ersetze SPACER {spacer_guid} mit SUBMENU {first_item['guid']}")
+                
+                # 5. SPACER durch erstes Item ersetzen IN GCS!
+                first_item_json = json.dumps(first_item, ensure_ascii=False)
+                self._menu_system_db.set_value(gruppe, first_item['guid'], first_item_json)
+                
+                # SPACER aus GCS löschen
+                self._menu_system_db.set_value(gruppe, spacer_guid, None)
+                
+                # 6. Restliche Template-Items einfügen IN GCS!
+                for item in template_items[1:]:
+                    item_json = json.dumps(item, ensure_ascii=False)
+                    self._menu_system_db.set_value(gruppe, item['guid'], item_json)
+                    logger.debug(f"      📎 Template-Item hinzugefügt: {item['guid']}")
+                
+                logger.info(f"      ✅ {len(template_items)} Template-Items in GCS geschrieben")
+            
+            logger.info(f"  ✅ Templates in {gruppe} expanded (in GCS!)")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Expandieren von Templates in {gruppe}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def prepare_menu_with_zusatz(self):
+        """
+        Bereitet Menü-Struktur vor: Templates + Zusatzmenü-GUIDs eintragen.
+        
+        LINEARER ABLAUF:
+        1. Templates in Struktur übernehmen (falls vorhanden)
+        2. Zusatzmenüs verteilen: Von ZUSATZ-Gruppe ausgehend, GUIDs in Items eintragen
+        3. Nach Hierarchie: Parent → Children Vererbung
+        
+        Arbeitet direkt auf self._menu_system_db (no_save=True, wird nicht persistent!)
+        """
+        logger.info("🔧 Bereite Menü-Struktur vor (Templates + Zusatzmenüs)...")
+        
+        # SCHRITT 1: ZUSATZ-Gruppe laden
+        try:
+            zusatz_gruppe = self._menu_system_db.get_gruppe('ZUSATZ')
+            if not isinstance(zusatz_gruppe, dict):
+                logger.info("  📋 Keine ZUSATZ-Gruppe vorhanden")
+                return
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Laden der ZUSATZ-Gruppe: {e}")
+            return
+        
+        logger.info(f"  ✅ ZUSATZ-Gruppe geladen: {len(zusatz_gruppe)} Einträge")
+        
+        # SCHRITT 2: Root-SUBMENUs identifizieren (parent_guid=null, type=SUBMENU)
+        zusatz_roots = {}
+        for guid, item_data in zusatz_gruppe.items():
+            if (item_data.get('type') == 'SUBMENU' 
+                and item_data.get('parent_guid') is None):
+                zusatz_roots[guid] = item_data
+                logger.debug(f"    📎 Zusatzmenü gefunden: {guid} → {item_data.get('label')}")
+        
+        if not zusatz_roots:
+            logger.info("  📋 Keine Zusatzmenüs definiert (keine Root-SUBMENUs)")
+            return
+        
+        logger.info(f"  ✅ {len(zusatz_roots)} Zusatzmenü(s) gefunden")
+        
+        # SCHRITT 3: Zusatzmenü-GUIDs in Menü-Items eintragen (VERTIKAL + GRUND)
+        for gruppe_name in ['VERTIKAL', 'GRUND']:
+            try:
+                gruppe = self._menu_system_db.get_gruppe(gruppe_name)
+                if not isinstance(gruppe, dict):
+                    continue
+                
+                logger.info(f"  🔧 Verarbeite {gruppe_name}-Gruppe...")
+                
+                # Für jedes Zusatzmenü: Wenn Item-GUID == Zusatzmenü-GUID, eintragen
+                for zusatz_guid in zusatz_roots.keys():
+                    if zusatz_guid in gruppe:
+                        # Item hat Zusatzmenü!
+                        item = gruppe[zusatz_guid]
+                        item['zusatz_guid'] = zusatz_guid
+                        logger.info(f"    📎 Zusatzmenü verknüpft: {item.get('label')} → {zusatz_guid}")
+                        
+                        # Vererbung: An alle Children weitergeben (rekursiv)
+                        self._propagate_zusatz_to_children(gruppe, zusatz_guid, zusatz_guid)
+                
+            except Exception as e:
+                logger.error(f"❌ Fehler bei {gruppe_name}: {e}")
+        
+        logger.info("✅ Menü-Struktur vorbereitet (Templates + Zusatzmenüs)")
+    
+    def _propagate_zusatz_to_children(self, gruppe: dict, parent_guid: str, zusatz_guid: str):
+        """
+        Vererbt Zusatzmenü-GUID rekursiv an alle Children.
+        
+        Args:
+            gruppe: Menu-Gruppe (dict)
+            parent_guid: GUID des Parents
+            zusatz_guid: GUID des Zusatzmenüs (wird vererbt)
+        """
+        # Alle Children finden
+        children = [
+            (guid, item) for guid, item in gruppe.items()
+            if item.get('parent_guid') == parent_guid
+        ]
+        
+        for child_guid, child_item in children:
+            # Nur setzen wenn noch nicht vorhanden (eigenes überschreibt Vererbung)
+            if 'zusatz_guid' not in child_item:
+                child_item['zusatz_guid'] = zusatz_guid
+                logger.debug(f"      🔗 Vererbt an: {child_item.get('label')} → {zusatz_guid}")
+            
+            # Rekursiv an Enkel-Children weitergeben
+            self._propagate_zusatz_to_children(gruppe, child_guid, child_item.get('zusatz_guid', zusatz_guid))
+    
+    def build_zusatzmenu_mapping(self, menu_matrix: list) -> dict:
+        """
+        Baut Zusatzmenü-Zuordnung mit Vererbungslogik bei Menü-Load auf.
+        
+        Temporäre Instanz die bei jedem Haupt-Menüwechsel neu aufgebaut wird.
+        Ordnet jedem Item-GUID das zuständige Zusatzmenü-GUID zu (mit Vererbung).
+        
+        Args:
+            menu_matrix: Komplette Menu-Matrix (VERTIKAL oder GRUND)
+        
+        Returns:
+            dict: {item_guid: zusatzmenu_guid} Mapping
+        """
+        mapping = {}
+        
+        # ZUSATZ-Gruppe einmal laden für Performance
+        try:
+            zusatz_gruppe = self._menu_system_db.get_gruppe('ZUSATZ')
+            if not isinstance(zusatz_gruppe, dict):
+                zusatz_gruppe = {}
+        except:
+            zusatz_gruppe = {}
+        
+        # Rekursive Funktion für Vererbung
+        def process_item(item, inherited_zusatz_guid=None):
+            """
+            Verarbeitet Item und Kinder mit Vererbungslogik.
+            
+            Args:
+                item: Menu-Item Dict
+                inherited_zusatz_guid: Von Parent vererbtes Zusatzmenü
+            """
+            item_guid = item.get('guid')
+            if not item_guid:
+                return
+            
+            # Hat Item eigenes Zusatzmenü?
+            # Zusatzmenü existiert wenn Root-SUBMENU mit item_guid in ZUSATZ-Gruppe vorhanden
+            zusatz_root = zusatz_gruppe.get(item_guid)
+            has_zusatzmenu = (
+                zusatz_root is not None 
+                and zusatz_root.get('type') == 'SUBMENU'
+                and zusatz_root.get('parent_guid') is None
+            )
+            
+            if has_zusatzmenu:
+                # Eigenes Zusatzmenü vorhanden → verwenden
+                current_zusatz = item_guid
+                logger.debug(f"  📎 Item '{item.get('label')}' hat eigenes Zusatzmenü: {item_guid}")
+            else:
+                # Kein eigenes → vererbt von Parent
+                current_zusatz = inherited_zusatz_guid
+                if current_zusatz:
+                    logger.debug(f"  🔗 Item '{item.get('label')}' erbt Zusatzmenü: {current_zusatz}")
+            
+            # Mapping speichern
+            if current_zusatz:
+                mapping[item_guid] = current_zusatz
+            
+            # Kinder verarbeiten (mit Vererbung)
+            children = [child for child in menu_matrix if child.get('parent_guid') == item_guid]
+            for child in children:
+                process_item(child, current_zusatz)
+        
+        # Root-Items finden und verarbeiten
+        root_items = [item for item in menu_matrix if item.get('parent_guid') is None]
+        for root_item in root_items:
+            process_item(root_item, None)
+        
+        logger.info(f"✅ Zusatzmenü-Mapping erstellt: {len(mapping)} Items mit Zusatzmenüs")
+        return mapping
+    
+    def get_zusatzmenu_for_item(self, item_guid: str, zusatz_mapping: dict) -> str:
+        """
+        Ermittelt Zusatzmenü-GUID für Item aus vorgefertigtem Mapping.
+        
+        Args:
+            item_guid: GUID des geklickten Items
+            zusatz_mapping: Mapping aus build_zusatzmenu_mapping()
+        
+        Returns:
+            Zusatzmenü-GUID oder None
+        """
+        return zusatz_mapping.get(item_guid)
+    
+    def load_zusatzmenu_data(self, zusatzmenu_guid: str) -> list:
+        """
+        Lädt Zusatzmenü-Daten aus ZUSATZ-Gruppe.
+        
+        Die ZUSATZ-Gruppe enthält für jedes Zusatzmenü:
+        - Root-SUBMENU mit GUID = zusatzmenu_guid (parent_guid=null)
+        - Children des Root-SUBMENU (parent_guid = zusatzmenu_guid)
+        
+        Beim Rendern wird das Root-SUBMENU übersprungen,
+        nur die Children werden horizontal angezeigt.
+        
+        Args:
+            zusatzmenu_guid: GUID des Zusatzmenüs (= Item-GUID aus Hauptmenü)
+        
+        Returns:
+            list: Menu-Matrix mit NUR den Children (ohne Root-SUBMENU)
+        """
+        if not zusatzmenu_guid:
+            return []
+        
+        try:
+            # Gesamte ZUSATZ-Gruppe laden
+            zusatz_gruppe = self._menu_system_db.get_gruppe('ZUSATZ')
+            
+            if not zusatz_gruppe or not isinstance(zusatz_gruppe, dict):
+                logger.warning(f"⚠️ ZUSATZ-Gruppe leer oder ungültig")
+                return []
+            
+            # Root-SUBMENU suchen
+            root_submenu = zusatz_gruppe.get(zusatzmenu_guid)
+            if not root_submenu:
+                logger.warning(f"⚠️ Zusatzmenü nicht gefunden: {zusatzmenu_guid}")
+                return []
+            
+            if root_submenu.get('type') != 'SUBMENU' or root_submenu.get('parent_guid') is not None:
+                logger.warning(f"⚠️ Ungültiges Root-SUBMENU: {zusatzmenu_guid}")
+                return []
+            
+            # Children des Root-SUBMENU sammeln (rekursiv für Hierarchie)
+            menu_matrix = []
+            
+            def collect_children(parent_guid):
+                """Sammelt alle Nachkommen rekursiv"""
+                for guid, item_data in zusatz_gruppe.items():
+                    if item_data.get('parent_guid') == parent_guid:
+                        # Item zur Matrix hinzufügen
+                        item_copy = item_data.copy()
+                        item_copy['guid'] = guid
+                        menu_matrix.append(item_copy)
+                        
+                        # Rekursiv Kinder sammeln
+                        if item_data.get('type') == 'SUBMENU':
+                            collect_children(guid)
+            
+            # Children des Root-SUBMENU sammeln (nicht Root selbst!)
+            collect_children(zusatzmenu_guid)
+            
+            logger.info(f"✅ Zusatzmenü geladen: {zusatzmenu_guid} ({len(menu_matrix)} Items)")
+            return menu_matrix
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden von Zusatzmenü {zusatzmenu_guid}: {e}", exc_info=True)
+            return []
+    
+    # ========================================
     
     def get_menu_panel_visible(self, menu_guid):
         """

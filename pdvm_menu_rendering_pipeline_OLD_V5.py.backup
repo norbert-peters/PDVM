@@ -1,0 +1,421 @@
+"""
+PDVM Menu Rendering Pipeline V5 - VEREINFACHT & ALTE OPTIK
+
+ÄNDERUNGEN:
+1. ✅ Keine META-Auswertung mehr - FEST: VERTIKAL=vertikal, GRUND+ZUSATZ=horizontal
+2. ✅ Voller Button-Text (kein 4-Buchstaben-Limit)
+3. ✅ execute_command() Fix - nur command_data übergeben
+4. ✅ Debug-Ausgaben - Menu-ID + zusatz_guid-Struktur
+5. ✅ Alte Optik vor Zusatzmenü-Einbau
+
+VERWENDUNG:
+    render_menu_from_gcs('VERTIKAL', container, gcs, menu_handler)  # Vertikal
+    render_grund_with_zusatz(container, gcs, active_item_guid, menu_handler)  # Horizontal
+"""
+
+import logging
+import json
+from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QMenu
+from PyQt5.QtCore import Qt
+
+logger = logging.getLogger(__name__)
+
+
+def render_menu_from_gcs(gruppe, container, gcs, menu_handler=None, active_item_guid=None):
+    """
+    VEREINFACHTE RENDERING-PIPELINE - KEINE META-Auswertung!
+    
+    FEST:
+    - VERTIKAL → Immer vertikal
+    - GRUND → Immer horizontal
+    - ZUSATZ → Immer horizontal
+    
+    Args:
+        gruppe: 'VERTIKAL', 'GRUND', oder 'ZUSATZ'
+        container: Qt-Container
+        gcs: GCS-Instanz
+        menu_handler: Menu-Handler
+        active_item_guid: Optional - Für GRUND (aktives VERTIKAL-Item)
+    """
+    logger.info(f"🎯 render_menu_from_gcs({gruppe})...")
+    
+    # SCHRITT 1: Daten aus GCS holen
+    gruppe_data = gcs._menu_system_db.get_gruppe(gruppe)
+    
+    if not gruppe_data:
+        logger.warning(f"⚠️ Keine Daten für {gruppe}")
+        return 0
+    
+    # SCHRITT 2: Zu Matrix konvertieren
+    matrix = []
+    for guid, item_value in gruppe_data.items():
+        try:
+            if isinstance(item_value, str):
+                item_data = json.loads(item_value)
+            else:
+                item_data = item_value
+            
+            if isinstance(item_data, dict):
+                item_data['guid'] = guid
+                matrix.append(item_data)
+        except Exception as e:
+            logger.debug(f"  Überspringe Item {guid}: {e}")
+            continue
+    
+    if not matrix:
+        logger.warning(f"⚠️ Keine Items für {gruppe}")
+        return 0
+    
+    # Nach sort_order sortieren
+    matrix.sort(key=lambda x: x.get('sort_order', 0))
+    logger.info(f"  ✅ {len(matrix)} Items aus GCS geladen")
+    
+    # SCHRITT 3: Richtung FEST (keine META-Auswertung!)
+    if gruppe == 'VERTIKAL':
+        direction = 'vertical'
+    else:  # GRUND oder ZUSATZ
+        direction = 'horizontal'
+    
+    logger.info(f"  🎨 Rendering: {direction} (FEST für {gruppe})")
+    
+    # SCHRITT 4: Rendern (Widget-Löschung passiert in _render_simple_button_menu)
+    _render_simple_button_menu(matrix, container, direction, menu_handler, gcs)
+    
+    logger.info(f"✅ {gruppe} gerendert ({direction}, {len(matrix)} Items)")
+    return len(matrix)
+
+
+def render_grund_with_zusatz(container, gcs, active_item_guid, menu_handler=None):
+    """
+    Rendert GRUND + ZUSATZ horizontal mit DEBUG-Ausgaben.
+    
+    DEBUG:
+    - Zeigt geklickte Menu-ID
+    - Zeigt zusatz_guid wenn vorhanden
+    - Zeigt Struktur des Zusatzmenüs
+    """
+    logger.info(f"🎯 render_grund_with_zusatz(active_item: {active_item_guid})...")
+    logger.info(f"  🔍 DEBUG: Geklickte Menu-ID = {active_item_guid}")
+    
+    # SCHRITT 1: GRUND aus GCS
+    grund_data = gcs._menu_system_db.get_gruppe('GRUND')
+    grund_matrix = []
+    
+    if grund_data:
+        for guid, item_value in grund_data.items():
+            try:
+                if isinstance(item_value, str):
+                    item_data = json.loads(item_value)
+                else:
+                    item_data = item_value
+                
+                if isinstance(item_data, dict):
+                    item_data['guid'] = guid
+                    grund_matrix.append(item_data)
+            except:
+                continue
+        
+        grund_matrix.sort(key=lambda x: x.get('sort_order', 0))
+    
+    logger.info(f"  📊 GRUND: {len(grund_matrix)} Items")
+    
+    # SCHRITT 2: zusatz_guid für active_item holen
+    zusatz_guid = None
+    vertikal_data = gcs._menu_system_db.get_gruppe('VERTIKAL')
+    
+    if vertikal_data and active_item_guid in vertikal_data:
+        active_item_value = vertikal_data[active_item_guid]
+        
+        if isinstance(active_item_value, str):
+            active_item = json.loads(active_item_value)
+        else:
+            active_item = active_item_value
+        
+        zusatz_guid = active_item.get('zusatz_guid')
+        
+        # DEBUG-Ausgabe
+        if zusatz_guid:
+            logger.info(f"  📎 DEBUG: zusatz_guid gefunden = {zusatz_guid}")
+        else:
+            logger.info(f"  ℹ️ DEBUG: Kein zusatz_guid eingetragen")
+    
+    # SCHRITT 3: ZUSATZ-Children laden (falls vorhanden)
+    zusatz_matrix = []
+    if zusatz_guid:
+        zusatz_matrix = gcs.load_zusatzmenu_data(zusatz_guid)
+        logger.info(f"  📊 ZUSATZ: {len(zusatz_matrix)} Items")
+        
+        # DEBUG: Struktur ausgeben
+        logger.info(f"  🔍 DEBUG: Zusatzmenü-Struktur:")
+        for item in zusatz_matrix:
+            logger.info(f"      - {item.get('label')} (type={item.get('type')}, guid={item.get('guid')})")
+    
+    # SCHRITT 4: Kombinieren
+    combined_matrix = grund_matrix + zusatz_matrix
+    logger.info(f"  📊 KOMBINIERT: {len(combined_matrix)} Items (GRUND={len(grund_matrix)}, ZUSATZ={len(zusatz_matrix)})")
+    
+    # SCHRITT 5: Rendern (horizontal - Widget-Löschung passiert in _render_simple_button_menu)
+    _render_simple_button_menu(combined_matrix, container, 'horizontal', menu_handler, gcs)
+    
+    logger.info(f"✅ GRUND+ZUSATZ horizontal gerendert")
+    return (len(grund_matrix), len(zusatz_matrix))
+
+
+def _render_simple_button_menu(matrix, container, direction, menu_handler, gcs):
+    """
+    Rendert Button-Menü mit SUBMENU-Unterstützung.
+    
+    - Voller Button-Text (kein Limit)
+    - Rekursive Submenus
+    - Alte Optik
+    
+    Args:
+        matrix: Menu-Items
+        container: Qt-Container
+        direction: 'vertical' oder 'horizontal'
+        menu_handler: Menu-Handler
+        gcs: GCS-Instanz
+    """
+    logger.info(f"  🔧 Rendere Button-Menü mit Submenus ({direction})...")
+    
+    # Layout holen oder erstellen (NIEMALS neu setzen wenn vorhanden!)
+    layout = container.layout()
+    
+    if not layout:
+        logger.info(f"  📦 Erstelle neues {direction} Layout")
+        if direction == 'vertical':
+            layout = QVBoxLayout(container)
+        else:
+            layout = QHBoxLayout(container)
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
+    else:
+        logger.info(f"  ♻️ Verwende existierendes Layout, lösche alte Widgets...")
+        # Alle alten Widgets entfernen
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        logger.info(f"  🗑️ Alle alten Widgets entfernt")
+    
+    # Nur Root-Items (parent_guid=None)
+    root_items = [item for item in matrix if item.get('parent_guid') is None]
+    
+    # Rekursive Funktion für Submenu-Rendering
+    def render_item_recursive(item, parent_layout, level=0):
+        """Rendert Item und seine Kinder rekursiv"""
+        label = item.get('label', 'Unbenannt')
+        guid = item.get('guid')
+        command = item.get('command')
+        item_type = item.get('type', 'BUTTON')
+        
+        # SUBMENU: Erstelle Popup-Menu
+        if item_type == 'SUBMENU':
+            logger.info(f"  📋 Submenu gefunden: {label} (guid={guid})")
+            
+            # Kinder finden
+            children = [m for m in matrix if m.get('parent_guid') == guid]
+            logger.info(f"     → {len(children)} Kinder gefunden")
+            
+            # Submenu-Button mit Menu (auch wenn keine Kinder!)
+            submenu_button = QPushButton(f"{label} ▼")
+            submenu_button.setMinimumHeight(35)
+            submenu_button.setMinimumWidth(100)
+            submenu_button.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 15px;
+                    background-color: #2c3e50;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #34495e;
+                }
+                QPushButton::menu-indicator {
+                    width: 0px;
+                }
+            """)
+            
+            if children:
+                # QMenu für Popup erstellen
+                popup_menu = QMenu(submenu_button)
+                popup_menu.setStyleSheet("""
+                    QMenu {
+                        background-color: white;
+                        border: 1px solid #bdc3c7;
+                        padding: 5px;
+                    }
+                    QMenu::item {
+                        padding: 8px 20px;
+                        background-color: transparent;
+                    }
+                    QMenu::item:selected {
+                        background-color: #3498db;
+                        color: white;
+                    }
+                """)
+                
+                # Kinder als Menu-Actions hinzufügen
+                for child in sorted(children, key=lambda x: x.get('sort_order', 0)):
+                    child_label = child.get('label', 'Unbenannt')
+                    child_command = child.get('command')
+                    child_type = child.get('type', 'BUTTON')
+                    child_guid = child.get('guid')
+                    child_zusatz = child.get('zusatz_guid')  # ✅ ZUSATZ HOLEN
+                    
+                    if child_type == 'SEPARATOR' or child_type == 'SPACER':
+                        # Separator hinzufügen
+                        popup_menu.addSeparator()
+                    elif child_type == 'SUBMENU':
+                        # Rekursiv: Sub-Submenu
+                        grandchildren = [m for m in matrix if m.get('parent_guid') == child_guid]
+                        if grandchildren:
+                            sub_submenu = popup_menu.addMenu(f"{child_label} ▶")
+                            for grandchild in sorted(grandchildren, key=lambda x: x.get('sort_order', 0)):
+                                gc_label = grandchild.get('label', 'Unbenannt')
+                                gc_command = grandchild.get('command')
+                                gc_guid = grandchild.get('guid')
+                                gc_zusatz = grandchild.get('zusatz_guid')  # ✅ ZUSATZ HOLEN
+                                
+                                # ✅ ULTRA EINFACH: Zeige alles, mache alles was vorhanden ist
+                                action = sub_submenu.addAction(gc_label)
+                                
+                                def make_gc_handler(cmd, zusatz, guid_val, lbl):
+                                    def on_action():
+                                        logger.info(f"🖱️ Sub-Submenu geklickt: {lbl} (guid={guid_val})")
+                                        
+                                        # Command ausführen
+                                        if cmd and menu_handler:
+                                            logger.info(f"  🔍 Führe Command aus: {cmd}")
+                                            menu_handler.execute_command(cmd)
+                                        
+                                        # Zusatzmenü aktivieren
+                                        if zusatz:
+                                            logger.info(f"  🔍 Aktiviere Zusatzmenü: {zusatz}")
+                                            grund_container = gcs.get_container('grund')
+                                            if grund_container:
+                                                render_grund_with_zusatz(grund_container, gcs, zusatz, menu_handler)
+                                        
+                                        # Platzhalter
+                                        if not cmd and not zusatz:
+                                            logger.info(f"  ℹ️ Platzhalter ohne Command/Zusatz")
+                                    
+                                    return on_action
+                                
+                                action.triggered.connect(make_gc_handler(gc_command, gc_zusatz, gc_guid, gc_label))
+                    else:
+                        # Normaler Button-Eintrag (IMMER anzeigen, auch ohne Command!)
+                        action = popup_menu.addAction(child_label)
+                        
+                        # ✅ ULTRA EINFACH: Zeige alles, mache alles was vorhanden ist
+                        def make_child_handler(cmd, zusatz, guid_val, lbl):
+                            def on_action():
+                                logger.info(f"🖱️ Submenu geklickt: {lbl} (guid={guid_val})")
+                                
+                                # Command ausführen
+                                if cmd and menu_handler:
+                                    logger.info(f"  🔍 Führe Command aus: {cmd}")
+                                    menu_handler.execute_command(cmd)
+                                
+                                # Zusatzmenü aktivieren
+                                if zusatz:
+                                    logger.info(f"  🔍 Aktiviere Zusatzmenü: {zusatz}")
+                                    grund_container = gcs.get_container('grund')
+                                    if grund_container:
+                                        render_grund_with_zusatz(grund_container, gcs, zusatz, menu_handler)
+                                
+                                # Platzhalter
+                                if not cmd and not zusatz:
+                                    logger.info(f"  ℹ️ Platzhalter ohne Command/Zusatz")
+                            
+                            return on_action
+                        
+                        action.triggered.connect(make_child_handler(child_command, child_zusatz, child_guid, child_label))
+                
+                submenu_button.setMenu(popup_menu)
+                logger.info(f"     ✅ Popup-Menu mit {len(children)} Einträgen erstellt")
+            else:
+                logger.info(f"     ⚠️ Submenu ohne Kinder - nur Button")
+            
+            parent_layout.addWidget(submenu_button)
+            logger.info(f"     ✅ Button '{label}' zum Layout hinzugefügt (Position {parent_layout.count()})")
+            
+        # BUTTON: Normaler Button
+        else:
+            button = QPushButton(label)
+            button.setMinimumHeight(35)
+            button.setMinimumWidth(100)
+            
+            # Zusatzmenü-GUID holen (falls vorhanden)
+            zusatz_guid = item.get('zusatz_guid')
+            
+            # Style - ALTE OPTIK
+            button.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 15px;
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+                QPushButton:pressed {
+                    background-color: #1f6391;
+                }
+            """)
+            
+            # Click-Handler - ULTRA EINFACH: Führe aus, was vorhanden ist!
+            def make_handler(item_guid, cmd, zusatz):
+                def on_click():
+                    logger.info(f"🖱️ Button geklickt: {label} (guid={item_guid})")
+                    
+                    # 1. Command ausführen (falls vorhanden)
+                    if cmd and menu_handler:
+                        logger.info(f"  🔍 Führe Command aus: {cmd}")
+                        menu_handler.execute_command(cmd)
+                    
+                    # 2. Zusatzmenü aktivieren (falls vorhanden)
+                    if zusatz:
+                        logger.info(f"  🔍 Aktiviere Zusatzmenü: {zusatz}")
+                        grund_container = gcs.get_container('grund')
+                        if grund_container:
+                            render_grund_with_zusatz(grund_container, gcs, zusatz, menu_handler)
+                    
+                    # Kein Command und kein Zusatz? Auch OK - Button ist Platzhalter
+                    if not cmd and not zusatz:
+                        logger.info(f"  ℹ️ Button ohne Command/Zusatz (Platzhalter)")
+                
+                return on_click
+            
+            button.clicked.connect(make_handler(guid, command, zusatz_guid))
+            
+            parent_layout.addWidget(button)
+    
+    # Alle Root-Items rendern
+    logger.info(f"  🔄 Rendere {len(root_items)} Root-Items...")
+    for idx, item in enumerate(root_items, 1):
+        item_label = item.get('label', 'Unbenannt')
+        item_guid = item.get('guid', 'keine-guid')[:8]
+        logger.info(f"     {idx}. Rendere: {item_label} (guid={item_guid}...)")
+        render_item_recursive(item, layout)
+    
+    # Stretch hinzufügen für kompakte Anordnung
+    layout.addStretch()
+    
+    # Layout ist bereits gesetzt - NICHT nochmal setzen!
+    logger.info(f"  ✅ {len(root_items)} Root-Items gerendert (mit Submenus)")
+    logger.info(f"  🔍 DEBUG: Layout hat jetzt {layout.count()} Widgets (inkl. Stretch)")
+
+
+# Für Kompatibilität
+def render_horizontal_menu_from_gcs(container, gcs, active_item_guid, menu_handler=None):
+    """Alias für render_grund_with_zusatz()"""
+    return render_grund_with_zusatz(container, gcs, active_item_guid, menu_handler)
