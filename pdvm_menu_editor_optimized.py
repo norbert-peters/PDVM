@@ -1,8 +1,8 @@
 """
-🎯 PDVM Menu-Editor - OPTIMIERTE VERSION
-=========================================
+🎯 PDVM Menu-Editor - OPTIMIERTE VERSION (V6)
+==============================================
 
-KONZEPT (nach User-Feedback 12.11.2025):
+KONZEPT (nach User-Feedback 12.11.2025 + V6-Update 16.11.2025):
 
 1. EBENEN-LOGIK:
    - root = -1 (kein Parent)
@@ -25,8 +25,24 @@ KONZEPT (nach User-Feedback 12.11.2025):
    - Keine Vermischung mit GCS-Menu-System
    - Editor rendert Menu nur zur Darstellung (kein Handler-Aufruf)
 
+5. ZUSATZMENÜ V6 (GUID-MATCHING):
+   - Zusatzmenü = Root-SUBMENU in ZUSATZ-Gruppe
+   - **GLEICHE GUID wie zugehöriges Menü-Item** (Automatische Verlinkung!)
+   - Children haben parent_guid = Root-SUBMENU-GUID
+   - prepare_menu_with_zusatz() erkennt Verlinkung automatisch
+   - **KEINE manuelle zusatz_guid-Eintragung nötig!**
+
+ZUSATZMENÜ-ABLAUF:
+==================
+1. User wählt Item (BUTTON/SUBMENU) und klickt "Zusatzmenü bearbeiten"
+2. Editor prüft ob Root-SUBMENU existiert (GUID = Item-GUID)
+3. Falls nicht: Erstellt Root-SUBMENU mit gleicher GUID
+4. Editor zeigt Children des Root-SUBMENU
+5. User bearbeitet Zusatzmenü-Items
+6. Speichern → System erkennt automatisch Verlinkung via GUID-Matching
+
 Autor: PDVM V2.0
-Datum: 12.11.2025
+Datum: 12.11.2025 (V6-Update: 16.11.2025)
 """
 
 import logging
@@ -96,7 +112,15 @@ class MenuItemEditor(QFrame):
         self.db: Optional[PdvmCentralDatenbank] = None
         self.current_gruppe: Optional[str] = None
         self.current_guid: Optional[str] = None
+        self.zusatzmenu_root_guid: Optional[str] = None  # Für ZUSATZ: Parent für neue Items
         self._init_ui()
+    
+    def set_zusatzmenu_root(self, root_guid: str):
+        """
+        Setzt Root-GUID für Zusatzmenü.
+        Neue Items bekommen dieses SUBMENU als parent_guid.
+        """
+        self.zusatzmenu_root_guid = root_guid
     
     def _init_ui(self):
         """UI aufbauen"""
@@ -157,6 +181,19 @@ class MenuItemEditor(QFrame):
         
         layout.addLayout(form)
         
+        # === ZUSATZMENÜ-BUTTON (für BUTTON und SUBMENU) ===
+        self.btn_edit_zusatzmenu = QPushButton("📎 Zusatzmenü bearbeiten")
+        self.btn_edit_zusatzmenu.setStyleSheet(
+            "background-color: #9C27B0; color: white; "
+            "font-weight: bold; padding: 10px; font-size: 13px;"
+        )
+        self.btn_edit_zusatzmenu.clicked.connect(self._open_zusatzmenu_editor)
+        self.btn_edit_zusatzmenu.setToolTip(
+            "Öffnet Editor für Zusatzmenü dieses Items.\n"
+            "Zusatzmenü erscheint horizontal neben GRUND-Menü."
+        )
+        layout.addWidget(self.btn_edit_zusatzmenu)
+        
         # Übernehmen Button
         self.btn_apply = QPushButton("✅ Übernehmen")
         self.btn_apply.setStyleSheet(
@@ -207,6 +244,238 @@ class MenuItemEditor(QFrame):
         except Exception as e:
             logger.error(f"❌ Fehler beim Öffnen des Template-Dialogs: {e}", exc_info=True)
     
+    def _open_zusatzmenu_editor(self):
+        """
+        Öffnet Zusatzmenü-Editor für aktuelles Item.
+        
+        V6-ARCHITEKTUR (GUID-MATCHING):
+        ===============================
+        1. Zusatzmenü hat GLEICHE GUID wie Menü-Item (Automatische Verlinkung!)
+        2. Zusatzmenü ist ein Root-SUBMENU in ZUSATZ-Gruppe (parent_guid=None)
+        3. Children des Zusatzmenüs haben parent_guid=item_guid
+        4. prepare_menu_with_zusatz() erkennt automatisch die Verlinkung
+        
+        KEINE manuelle zusatz_guid-Eintr
+
+agung nötig!
+        """
+        if not self.current_guid or not self.current_gruppe:
+            QMessageBox.warning(
+                self, 
+                "Kein Item", 
+                "Bitte wähle zuerst ein Item aus der Liste."
+            )
+            return
+        
+        try:
+            logger.info(f"📎 Öffne Zusatzmenü-Editor (V6) für Item: {self.current_guid}")
+            
+            # Aktuelles Item laden
+            item_data = self.db.get_static_value(self.current_gruppe, self.current_guid)
+            if not item_data:
+                QMessageBox.warning(self, "Fehler", "Item konnte nicht geladen werden.")
+                return
+            
+            item_label = item_data.get('label', 'Unbekannt')
+            item_type = item_data.get('type', 'BUTTON')
+            
+            # Zusatzmenü-Dialog erstellen
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Zusatzmenü für: {item_label}")
+            dialog.resize(1200, 800)
+            
+            # Layout
+            dialog_layout = QVBoxLayout(dialog)
+            
+            # === INFO-HEADER (V6-Architektur erklären) ===
+            info_label = QLabel(
+                f"<b>Zusatzmenü-Editor V6 (GUID-Matching)</b><br>"
+                f"<hr>"
+                f"<b>Menü-Item:</b> <i>{item_label}</i> ({item_type})<br>"
+                f"<b>Item-GUID:</b> <code>{self.current_guid}</code><br>"
+                f"<hr>"
+                f"<b>ℹ️ Funktionsweise:</b><br>"
+                f"• Zusatzmenü wird als <b>Root-SUBMENU</b> mit <b>GLEICHER GUID</b> erstellt<br>"
+                f"• System erkennt Verlinkung automatisch (GUID-Matching)<br>"
+                f"• Zusatzmenü erscheint horizontal neben GRUND-Menü<br>"
+                f"• <b>KEINE manuelle Verlinkung nötig!</b>"
+            )
+            info_label.setStyleSheet(
+                "background-color: #E3F2FD; padding: 15px; "
+                "border-radius: 5px; border: 2px solid #2196F3;"
+            )
+            info_label.setWordWrap(True)
+            dialog_layout.addWidget(info_label)
+            
+            # === ZUSATZMENU PRÜFEN/ERSTELLEN ===
+            from pdvm_central_systemsteuerung import get_gcs
+            gcs = get_gcs()
+            if not gcs:
+                QMessageBox.critical(self, "Fehler", "GCS nicht verfügbar!")
+                return
+            
+            stichtag = gcs.st_inst.PdvmDateTime
+            
+            # Prüfe ob Root-SUBMENU existiert
+            zusatz_root = self.db.get_static_value("ZUSATZ", self.current_guid)
+            
+            if not zusatz_root:
+                # Root-SUBMENU erstellen (mit GLEICHER GUID wie Item!)
+                logger.info(f"🆕 Erstelle neues Root-SUBMENU für Zusatzmenü: {self.current_guid}")
+                zusatz_root = {
+                    'type': 'SUBMENU',
+                    'label': f'Zusatzmenü: {item_label}',
+                    'icon': None,
+                    'command': None,
+                    'parent_guid': None,  # MUSS None sein (Root!)
+                    'sort_order': 0,
+                    'visible': True,
+                    'enabled': True,
+                    'tooltip': f'Zusatzmenü für {item_label}',
+                    'template_guid': None
+                }
+                self.db.set_value("ZUSATZ", self.current_guid, zusatz_root, stichtag)
+                logger.info("✅ Root-SUBMENU erstellt")
+            else:
+                logger.info(f"✅ Root-SUBMENU existiert bereits")
+                # Sicherstellen dass es SUBMENU mit parent_guid=None ist
+                if zusatz_root.get('type') != 'SUBMENU' or zusatz_root.get('parent_guid') is not None:
+                    logger.warning("⚠️ Root-SUBMENU hat falsche Struktur - korrigiere...")
+                    zusatz_root['type'] = 'SUBMENU'
+                    zusatz_root['parent_guid'] = None
+                    self.db.set_value("ZUSATZ", self.current_guid, zusatz_root, stichtag)
+            
+            # === ZUSATZMENU-LISTE (nur Children des Root-SUBMENU) ===
+            zusatz_list = MenuListWidget("ZUSATZ")
+            zusatz_list.set_database(self.db)
+            zusatz_list.set_root_filter(self.current_guid)  # Nur Children anzeigen
+            
+            # === ITEM-EDITOR für Zusatzmenü ===
+            zusatz_editor = MenuItemEditor()
+            zusatz_editor.set_database(self.db)
+            zusatz_editor.set_zusatzmenu_root(self.current_guid)  # Für neue Items: parent_guid setzen
+            
+            # ❌ Zusatzmenü-Button PERMANENT ausblenden (verhindert Rekursion!)
+            # Wird bei jedem Item-Load erneut ausgeblendet
+            def hide_zusatzmenu_button_permanently():
+                zusatz_editor.btn_edit_zusatzmenu.setVisible(False)
+            
+            # Übernehmen-Button schließt Dialog
+            def on_apply_close():
+                dialog.accept()
+                logger.info(f"✅ Zusatzmenü-Editor geschlossen (Änderungen werden über Hauptfenster gespeichert)")
+            
+            zusatz_editor.btn_apply.clicked.disconnect()  # Alte Verbindung trennen
+            zusatz_editor.btn_apply.clicked.connect(on_apply_close)  # Dialog schließen
+            
+            # Signals verbinden
+            zusatz_list.item_selected.connect(
+                lambda gruppe, guid: (
+                    zusatz_editor.load_item(gruppe, guid),
+                    hide_zusatzmenu_button_permanently()  # Nach jedem Load ausblenden!
+                )
+            )
+            zusatz_editor.item_changed.connect(
+                lambda guid: zusatz_list.mark_modified(guid)
+            )
+            
+            # Initial ausblenden
+            hide_zusatzmenu_button_permanently()
+            
+            # === SPLITTER (Liste | Editor) ===
+            zusatz_splitter = QSplitter(Qt.Horizontal)
+            zusatz_splitter.addWidget(zusatz_list)
+            zusatz_splitter.addWidget(zusatz_editor)
+            zusatz_splitter.setSizes([700, 500])
+            
+            dialog_layout.addWidget(zusatz_splitter)
+            
+            # === BUTTONS ===
+            button_layout = QHBoxLayout()
+            button_layout.addStretch()
+            
+            # Löschen-Button (löscht komplettes Zusatzmenü!)
+            btn_delete = QPushButton("🗑️ Zusatzmenü löschen")
+            btn_delete.setStyleSheet(
+                "background-color: #F44336; color: white; "
+                "font-weight: bold; padding: 8px; min-width: 120px;"
+            )
+            def delete_zusatzmenu():
+                reply = QMessageBox.question(
+                    dialog,
+                    "Zusatzmenü löschen",
+                    f"Komplettes Zusatzmenü für '{item_label}' wirklich löschen?\n\n"
+                    "Dies löscht das Root-SUBMENU und ALLE Children!",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    try:
+                        # Alle Children finden und löschen
+                        items = self.db.get_gruppe("ZUSATZ")
+                        to_delete = [self.current_guid]  # Root
+                        
+                        # Rekursiv alle Descendants finden
+                        def find_descendants(parent_guid):
+                            for guid, item in items.items():
+                                if item and item.get('parent_guid') == parent_guid:
+                                    to_delete.append(guid)
+                                    find_descendants(guid)
+                        
+                        find_descendants(self.current_guid)
+                        
+                        logger.info(f"🗑️ Lösche Zusatzmenü: {len(to_delete)} Items")
+                        
+                        # Alle löschen
+                        for guid in to_delete:
+                            self.db.delete_field("ZUSATZ", guid)
+                        
+                        # Speichern
+                        self.db.save_all_values()
+                        
+                        QMessageBox.information(
+                            dialog,
+                            "Gelöscht",
+                            f"Zusatzmenü für '{item_label}' wurde gelöscht."
+                        )
+                        
+                        logger.info(f"✅ Zusatzmenü gelöscht: {self.current_guid}")
+                        dialog.accept()
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Fehler beim Löschen: {e}", exc_info=True)
+                        QMessageBox.critical(dialog, "Fehler", f"Löschen fehlgeschlagen:\n{str(e)}")
+            
+            btn_delete.clicked.connect(delete_zusatzmenu)
+            button_layout.addWidget(btn_delete)
+            
+            # Schließen-Button
+            btn_close = QPushButton("Schließen")
+            btn_close.setStyleSheet(
+                "padding: 8px; min-width: 100px;"
+            )
+            btn_close.clicked.connect(dialog.reject)
+            button_layout.addWidget(btn_close)
+            
+            dialog_layout.addLayout(button_layout)
+            
+            # === LISTE LADEN ===
+            zusatz_list.load_items()
+            
+            # === DIALOG ANZEIGEN ===
+            dialog.exec_()
+            
+            logger.info("✅ Zusatzmenü-Editor (V6) geschlossen")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Öffnen des Zusatzmenü-Editors: {e}", exc_info=True)
+            QMessageBox.critical(
+                self, 
+                "Fehler", 
+                f"Zusatzmenü-Editor konnte nicht geöffnet werden:\n{str(e)}"
+            )
+    
     def _set_enabled(self, enabled: bool):
         """Aktiviert/Deaktiviert Editor"""
         self.type_combo.setEnabled(enabled)
@@ -216,10 +485,11 @@ class MenuItemEditor(QFrame):
         self.params_edit.setEnabled(enabled)
         self.template_edit.setEnabled(enabled)
         self.btn_select_template.setEnabled(enabled)
+        self.btn_edit_zusatzmenu.setEnabled(enabled)
         self.btn_apply.setEnabled(enabled)
     
     def _on_type_changed(self, index: int):
-        """Type geändert → Handler/Params/Template ein/ausblenden"""
+        """Type geändert → Handler/Params/Template/Zusatzmenü ein/ausblenden"""
         type_map = ['BUTTON', 'SUBMENU', 'SEPARATOR', 'SPACER']
         item_type = type_map[index]
         
@@ -235,6 +505,10 @@ class MenuItemEditor(QFrame):
         self.template_label.setVisible(show_template)
         self.template_edit.setVisible(show_template)
         self.btn_select_template.setVisible(show_template)
+        
+        # Zusatzmenü nur bei BUTTON und SUBMENU
+        show_zusatz = (item_type in ['BUTTON', 'SUBMENU'])
+        self.btn_edit_zusatzmenu.setVisible(show_zusatz)
     
     def set_database(self, db: PdvmCentralDatenbank):
         """Setzt Datenbank-Instanz"""
@@ -424,7 +698,15 @@ class MenuListWidget(QWidget):
         self.gruppe = gruppe
         self.db: Optional[PdvmCentralDatenbank] = None
         self.modified_guids: Set[str] = set()
+        self.root_filter_guid: Optional[str] = None  # Für ZUSATZ: Nur Children dieses SUBMENU
         self._init_ui()
+    
+    def set_root_filter(self, root_guid: str):
+        """
+        Setzt Root-Filter für ZUSATZ-Gruppe.
+        Lädt nur Items die Children des Root-SUBMENU sind.
+        """
+        self.root_filter_guid = root_guid
     
     def _init_ui(self):
         """UI aufbauen"""
@@ -480,9 +762,47 @@ class MenuListWidget(QWidget):
             # Gruppe aus DB holen
             items = self.db.get_gruppe(self.gruppe)
             
+            # Prüfe ob items ein Dict ist (nicht Liste oder None)
+            if not isinstance(items, dict):
+                logger.info(f"📋 {self.gruppe}: Keine Items vorhanden (leer oder ungültiger Typ)")
+                return
+            
             if not items:
                 logger.info(f"📋 {self.gruppe}: Keine Items vorhanden")
                 return
+            
+            # ZUSATZ-Filter: Nur Children des Root-SUBMENU laden
+            if self.root_filter_guid:
+                # Root-SUBMENU muss existieren
+                if self.root_filter_guid not in items:
+                    logger.warning(f"⚠️ Root-SUBMENU {self.root_filter_guid} nicht gefunden - erstelle es")
+                    # Root-SUBMENU erstellen
+                    from pdvm_central_systemsteuerung import get_gcs
+                    gcs = get_gcs()
+                    if gcs:
+                        root_submenu = {
+                            'type': 'SUBMENU',
+                            'label': f'Zusatzmenü',
+                            'icon': None,
+                            'command': None,
+                            'parent_guid': None,
+                            'sort_order': 0,
+                            'visible': True,
+                            'enabled': True,
+                            'tooltip': None,
+                            'template_guid': None
+                        }
+                        self.db.set_value(self.gruppe, self.root_filter_guid, root_submenu, gcs.st_inst.PdvmDateTime)
+                        items[self.root_filter_guid] = root_submenu
+                
+                # Root-SUBMENU UND alle Children anzeigen
+                filtered_items = {
+                    guid: data for guid, data in items.items()
+                    if guid == self.root_filter_guid  # Root-SUBMENU selbst
+                    or data.get('parent_guid') == self.root_filter_guid  # Direkte Children
+                    or self._is_descendant_of_root(guid, items)  # Oder Nachkommen
+                }
+                items = filtered_items
             
             # Hierarchisch sortieren (OHNE Parent-Level-Mapping!)
             sorted_items = self._build_hierarchy(items)
@@ -495,6 +815,21 @@ class MenuListWidget(QWidget):
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Laden von {self.gruppe}: {e}", exc_info=True)
+    
+    def _is_descendant_of_root(self, guid: str, items: Dict) -> bool:
+        """Prüft ob Item ein Nachkomme des Root-SUBMENU ist"""
+        if not self.root_filter_guid:
+            return False
+        
+        current = items.get(guid)
+        while current:
+            parent_guid = current.get('parent_guid')
+            if parent_guid == self.root_filter_guid:
+                return True
+            if parent_guid is None:
+                return False
+            current = items.get(parent_guid)
+        return False
     
     def _build_hierarchy(self, items: Dict[str, Any]) -> List[Tuple[str, Dict, int]]:
         """
@@ -614,24 +949,35 @@ class MenuListWidget(QWidget):
             
             # sort_order = Anzahl Top-Level Items (parent_guid = None)
             items = self.db.get_gruppe(self.gruppe)
-            top_level_count = len([
-                d for d in items.values() 
-                if d is not None and d.get('parent_guid') is None
-            ])
             
-            # Neues Item erstellen (IMMER in Root!)
+            # ZUSATZ-Modus: Parent ist Root-SUBMENU, nicht None!
+            if self.root_filter_guid:
+                parent_for_new = self.root_filter_guid
+                # Zähle Children des Root-SUBMENU
+                top_level_count = len([
+                    d for d in items.values()
+                    if d is not None and d.get('parent_guid') == self.root_filter_guid
+                ])
+            else:
+                parent_for_new = None
+                # Zähle Root-Level Items
+                top_level_count = len([
+                    d for d in items.values()
+                    if d is not None and d.get('parent_guid') is None
+                ])
+            
+            # Neues Item erstellen
             new_item = {
-                'guid': new_guid,
                 'type': 'BUTTON',
                 'label': 'Neuer Menüpunkt',
                 'icon': None,
                 'command': None,
-                'parent_guid': None,  # IMMER Root!
+                'parent_guid': parent_for_new,  # Root-SUBMENU oder None
                 'sort_order': top_level_count,
                 'visible': True,
                 'enabled': True,
                 'tooltip': None,
-                '_gruppe': self.gruppe
+                'template_guid': None
             }
             
             # In DB schreiben
@@ -792,14 +1138,31 @@ class MenuListWidget(QWidget):
                 self.db.set_value(self.gruppe, moved_guid, moved_data, stichtag)
                 self.mark_modified(moved_guid)
             
-            # 4. SORT_ORDER FÜR ALTE + NEUE EBENE NEU NUMMERIEREN
-            if old_parent != new_parent:
-                # Beide Ebenen neu sortieren
-                resort_parent_children(items, old_parent, stichtag, self.db)
-                resort_parent_children(items, new_parent, stichtag, self.db)
-            else:
-                # Gleicher Parent → Nur eine Ebene sortieren
-                resort_parent_children(items, old_parent, stichtag, self.db)
+            # 4. SORT_ORDER FÜR ALLE BETROFFENEN ITEMS AUS AKTUELLER LISTE NEU SETZEN
+            # WICHTIG: Reihenfolge aus LISTE nehmen (visuelle Reihenfolge nach Drag&Drop)
+            for list_index in range(self.list_widget.count()):
+                list_item = self.list_widget.item(list_index)
+                item_guid = list_item.data(Qt.UserRole)
+                item_data = items.get(item_guid)
+                
+                if item_data:
+                    # Neue sort_order = Position in Liste unter gleichem Parent
+                    item_parent = item_data.get('parent_guid')
+                    
+                    # Zähle wie viele Items mit gleichem Parent VOR diesem kommen
+                    position_under_parent = 0
+                    for prev_index in range(list_index):
+                        prev_item = self.list_widget.item(prev_index)
+                        prev_guid = prev_item.data(Qt.UserRole)
+                        prev_data = items.get(prev_guid)
+                        if prev_data and prev_data.get('parent_guid') == item_parent:
+                            position_under_parent += 1
+                    
+                    # sort_order setzen
+                    if item_data.get('sort_order') != position_under_parent:
+                        item_data['sort_order'] = position_under_parent
+                        self.db.set_value(self.gruppe, item_guid, item_data, stichtag)
+                        logger.debug(f"  ↻ {item_data.get('label')}: sort_order → {position_under_parent}")
             
             # 5. LISTE NEU LADEN (rendert Hierarchie aus DB)
             self.load_items()
