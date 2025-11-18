@@ -102,7 +102,8 @@ class V2PdvmGenerellerDialog(QWidget):
         # GCS wird NICHT übergeben → globaler Import in jedem Modul!
         self.edit_modules = {
             'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ PDVM 0.9 VERSION
-            'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration (Phase 1: Platzhalter)
+            'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration
+            'view_editor': 'pdvm_view_editor.PdvmViewEditor',  # ✅ View-Editor für sys_viewdaten
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
