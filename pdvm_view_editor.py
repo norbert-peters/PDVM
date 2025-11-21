@@ -122,6 +122,10 @@ class PdvmViewEditor(QWidget):
         self.main_app = main_app
         self.gcs = gcs if gcs else get_gcs()
         
+        # Modus automatisch erkennen (Template vs. normale View)
+        self.edit_mode = 'template' if selected_guid == '55555555-5555-5555-5555-555555555555' else 'view'
+        logger.info(f"  🎯 Edit-Modus: {self.edit_mode.upper()}")
+        
         # Framedaten-Instanz übernehmen
         self.framedaten_db = framedaten_db
         
@@ -135,9 +139,6 @@ class PdvmViewEditor(QWidget):
         
         # View-Daten laden (passiert automatisch im Constructor)
         self._load_view_data()
-        
-        # Frame-Daten (Metadaten für Editor) bereits in framedaten_db
-        self._load_frame_data()
         
         # Templates laden (passiert automatisch im Constructor)
         self._load_templates()
@@ -160,27 +161,25 @@ class PdvmViewEditor(QWidget):
             
         logger.info(f"  ✅ View-Daten geladen: {self.view_data.get('ROOT', {}).get('VIEW_TABLE', 'N/A')}")
         
-    def _load_frame_data(self):
-        """Lädt Frame-Daten (Editor-Metadaten) aus framedaten_db"""
-        logger.info(f"📂 Lade Frame-Daten: {self.frame_guid}")
-        
-        # Daten bereits in framedaten_db geladen
-        self.frame_data = self.framedaten_db.data
-        
-        # ROOT_CONTROLS extrahieren
-        self.root_controls = self.frame_data.get('METADATEN', {}).get('ROOT_CONTROLS', [])
-        self.control_properties = self.frame_data.get('METADATEN', {}).get('CONTROL_PROPERTIES', [])
-        
-        logger.info(f"  ✅ Frame-Daten geladen: {len(self.root_controls)} ROOT-Controls")
-        
     def _load_templates(self):
-        """Lädt Control-Templates aus bereits geladener Instanz"""
+        """Lädt Control-Templates UND Control-Properties aus Template-DB"""
         logger.info(f"📂 Hole Control-Templates")
         
         # Daten sind bereits geladen (Constructor mit template_guid)
-        self.templates = self.template_db.data.get('METADATEN', {}).get('TEMPLATES', {})
+        template_metadaten = self.template_db.data.get('METADATEN', {})
         
+        # ROOT_CONTROLS aus Template laden
+        self.root_controls = template_metadaten.get('ROOT_CONTROLS', {})
+        
+        # Templates für neue Controls
+        self.templates = template_metadaten.get('TEMPLATES', {})
+        
+        # Control-Properties für Editor
+        self.control_properties = template_metadaten.get('CONTROL_PROPERTIES', {})
+        
+        logger.info(f"  ✅ {len(self.root_controls)} ROOT-Controls aus Template geladen")
         logger.info(f"  ✅ {len(self.templates)} Templates geladen: {list(self.templates.keys())}")
+        logger.info(f"  ✅ {len(self.control_properties)} Control-Properties geladen")
         
     def _setup_ui(self):
         """Baut die UI auf"""
@@ -188,6 +187,28 @@ class PdvmViewEditor(QWidget):
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Modus-Auswahl Header
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("📋 Modus:")
+        mode_label.setFont(QFont("Arial", 10, QFont.Bold))
+        mode_layout.addWidget(mode_label)
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Normal View", "Template"])
+        self.mode_combo.setCurrentIndex(1 if self.edit_mode == 'template' else 0)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.mode_combo.setEnabled(False)  # Deaktiviert - automatische Erkennung
+        mode_layout.addWidget(self.mode_combo)
+        
+        # Info-Label
+        self.mode_info_label = QLabel()
+        self.mode_info_label.setStyleSheet("color: #666; font-style: italic;")
+        self._update_mode_info_label()
+        mode_layout.addWidget(self.mode_info_label)
+        
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
         
         # Tab-Widget erstellen
         self.tabs = QTabWidget()
@@ -227,6 +248,26 @@ class PdvmViewEditor(QWidget):
         
         logger.info("✅ View-Editor UI aufgebaut")
         
+    def _on_mode_changed(self, index):
+        """Handler: Modus geändert"""
+        old_mode = self.edit_mode
+        self.edit_mode = 'template' if index == 1 else 'view'
+        logger.info(f"🔄 Modus gewechselt: {old_mode} → {self.edit_mode}")
+        
+        # Info-Label aktualisieren
+        self._update_mode_info_label()
+        
+        # Tab 2 neu laden (andere Struktur)
+        self._refresh_field_list()
+        
+    def _update_mode_info_label(self):
+        """Aktualisiert das Modus-Info-Label"""
+        if self.edit_mode == 'template':
+            self.mode_info_label.setText("✨ Template-Bearbeitungsmodus (GUID: 55555...)")
+        else:
+            view_name = self.view_data.get('ROOT', {}).get('VIEW_NAME', 'Unbenannt')
+            self.mode_info_label.setText(f"📄 View: {view_name}")
+        
     def get_widget(self):
         """
         Gibt das Widget für Einbettung im Dialog zurück
@@ -256,47 +297,203 @@ class PdvmViewEditor(QWidget):
         logger.info("✅ View-Editor UI aufgebaut")
         
     def _create_root_tab(self):
-        """Tab 1: ROOT-Felder bearbeiten"""
+        """Tab 1: ROOT-Felder bearbeiten mit +/- Buttons"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Scroll-Bereich für Felder
+        # Header mit Buttons
+        header_layout = QHBoxLayout()
+        header_label = QLabel("📋 Basis-Eigenschaften")
+        header_label.setFont(QFont("Arial", 12, QFont.Bold))
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        
+        add_prop_btn = QPushButton("+ Eigenschaft")
+        add_prop_btn.clicked.connect(self._add_root_property)
+        header_layout.addWidget(add_prop_btn)
+        
+        remove_prop_btn = QPushButton("- Eigenschaft")
+        remove_prop_btn.clicked.connect(self._remove_root_property)
+        header_layout.addWidget(remove_prop_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Scroll-Bereich
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        form_layout = QFormLayout(scroll_content)
+        self.root_scroll_content = QWidget()
+        self.root_form_layout = QFormLayout(self.root_scroll_content)
         
-        # ROOT-Controls dynamisch erstellen
+        self.root_widgets = {}
+        self._rebuild_root_form()
+        
+        scroll.setWidget(self.root_scroll_content)
+        layout.addWidget(scroll)
+        
+        return widget
+    
+    def _rebuild_root_form(self):
+        """Baut ROOT-Formular neu auf"""
+        # Altes Layout leeren
+        while self.root_form_layout.count():
+            child = self.root_form_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
         self.root_widgets = {}
         
-        for control in sorted(self.root_controls, key=lambda x: x.get('display_order', 999)):
-            control_key = control['control_key']
+        # Alle Keys sammeln: Template + zusätzliche aus view_data['ROOT']
+        all_keys = set(self.root_controls.keys()) | set(self.view_data.get('ROOT', {}).keys())
+        
+        # Nach display_order sortieren (Template-Keys zuerst, dann alphabetisch)
+        def sort_key(key):
+            if key in self.root_controls:
+                return (0, self.root_controls[key].get('display_order', 999), key)
+            else:
+                return (1, 999, key)  # Zusätzliche Keys am Ende
+        
+        sorted_keys = sorted(all_keys, key=sort_key)
+        
+        for control_key in sorted_keys:
+            # Control-Definition holen (falls im Template)
+            control = self.root_controls.get(control_key, {
+                'label': control_key,
+                'control_type': 'text',
+                'readonly': False
+            })
             label = control['label']
             control_type = control.get('control_type', 'text')
+            # Problem 5: Alle Felder editierbar (außer explizit readonly wie VIEW_GUID)
             readonly = control.get('readonly', False)
             
             # Widget erstellen
             if control_type == 'checkbox':
                 widget_input = QCheckBox()
-                value = self.view_data['ROOT'].get(control_key, False)
+                # Default-Wert aus Template verwenden, falls Feld nicht existiert
+                default_value = control.get('default_value', False)
+                value = self.view_data['ROOT'].get(control_key, default_value)
                 widget_input.setChecked(bool(value))
                 
-                # Signal für NO_DATA: Struktur generieren wenn auf false gesetzt
+                # Signal: Änderungen direkt in view_data schreiben
+                widget_input.stateChanged.connect(
+                    lambda state, key=control_key: self.view_data['ROOT'].__setitem__(key, bool(state))
+                )
+                
+                # Spezial-Signal für NO_DATA: Struktur generieren
                 if control_key == 'NO_DATA':
                     widget_input.stateChanged.connect(self._on_no_data_changed)
+            elif control_type == 'combo':
+                widget_input = QComboBox()
+                widget_input.setEditable(False)
+                options = control.get('options', [])
+                widget_input.addItems(options)
+                # Default-Wert aus Template verwenden
+                default_value = control.get('default_value', '')
+                value = self.view_data['ROOT'].get(control_key, default_value)
+                index = widget_input.findText(str(value))
+                if index >= 0:
+                    widget_input.setCurrentIndex(index)
+                
+                # Signal: Änderungen direkt in view_data schreiben
+                widget_input.currentTextChanged.connect(
+                    lambda text, key=control_key: self.view_data['ROOT'].__setitem__(key, text)
+                )
             else:
                 widget_input = QLineEdit()
-                value = self.view_data['ROOT'].get(control_key, '')
+                # Default-Wert aus Template verwenden
+                default_value = control.get('default_value', '')
+                value = self.view_data['ROOT'].get(control_key, default_value)
                 widget_input.setText(str(value))
                 widget_input.setReadOnly(readonly)
+                
+                # Signal: Änderungen direkt in view_data schreiben
+                if not readonly:
+                    widget_input.textChanged.connect(
+                        lambda text, key=control_key: self.view_data['ROOT'].__setitem__(key, text)
+                    )
             
             self.root_widgets[control_key] = widget_input
-            form_layout.addRow(f"{label}:", widget_input)
+            self.root_form_layout.addRow(f"{label}:", widget_input)
+    
+    def _add_root_property(self):
+        """Fügt neue ROOT-Eigenschaft hinzu"""
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
         
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
+        # Key abfragen
+        key, ok = QInputDialog.getText(
+            self,
+            "Neue Eigenschaft",
+            "Eigenschafts-Name (z.B. 'CUSTOM_FIELD'):"
+        )
         
-        return widget
+        if not ok or not key.strip():
+            return
+        
+        key = key.strip().upper()
+        
+        if key in self.view_data['ROOT']:
+            QMessageBox.warning(self, "Warnung", f"Eigenschaft '{key}' existiert bereits!")
+            return
+        
+        # Wert abfragen
+        value, ok = QInputDialog.getText(
+            self,
+            "Wert",
+            f"Wert für '{key}':"
+        )
+        
+        if not ok:
+            value = ''
+        
+        # In view_data eintragen
+        self.view_data['ROOT'][key] = value
+        
+        # Formular neu aufbauen (zeigt neue Eigenschaft an)
+        self._rebuild_root_form()
+        
+        logger.info(f"✅ ROOT-Eigenschaft '{key}' hinzugefügt")
+    
+    def _remove_root_property(self):
+        """Entfernt ROOT-Eigenschaft"""
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+        
+        if not self.view_data['ROOT']:
+            QMessageBox.warning(self, "Warnung", "Keine Eigenschaften vorhanden!")
+            return
+        
+        # Liste aller Keys
+        keys = list(self.view_data['ROOT'].keys())
+        
+        key, ok = QInputDialog.getItem(
+            self,
+            "Eigenschaft löschen",
+            "Eigenschaft wählen:",
+            keys,
+            0,
+            False
+        )
+        
+        if not ok:
+            return
+        
+        # Bestätigung
+        reply = QMessageBox.question(
+            self,
+            "Löschen bestätigen",
+            f"Eigenschaft '{key}' wirklich löschen?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Löschen
+        del self.view_data['ROOT'][key]
+        
+        # Formular neu aufbauen
+        self._rebuild_root_form()
+        
+        logger.info(f"🗑️ ROOT-Eigenschaft '{key}' gelöscht")
         
     def _create_fields_tab(self):
         """Tab 2: Felder & Controls (Split-View)"""
@@ -373,6 +570,12 @@ class PdvmViewEditor(QWidget):
         """Aktualisiert TreeView mit hierarchischer Struktur"""
         self.field_tree.clear()
         
+        # TEMPLATE-MODUS: METADATEN-Ebenen zeigen
+        if self.edit_mode == 'template':
+            self._refresh_template_list()
+            return
+        
+        # VIEW-MODUS: Normale Tabellen-Struktur
         # View-Table holen
         view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
         if not view_table:
@@ -410,14 +613,65 @@ class PdvmViewEditor(QWidget):
             )
             
             for control_key, control_data in sorted_controls:
-                control_name = control_data.get('name', control_key)
-                child_item = QTreeWidgetItem([f"📄 {control_name}"])
+                # Label als Name + erste 8 Zeichen der GUID
+                control_label = control_data.get('label', 'Unbenannt')
+                guid_short = control_key[:8] if len(control_key) > 8 else control_key
+                display_text = f"📄 {control_label} ({guid_short})"
+                
+                child_item = QTreeWidgetItem([display_text])
                 child_item.setData(0, Qt.UserRole, {
                     'type': 'control',
                     'field_type': field_type,
                     'control_key': control_key
                 })
                 parent_item.addChild(child_item)
+                
+    def _refresh_template_list(self):
+        """Zeigt Template-Struktur: METADATEN-Ebenen (TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES)"""
+        logger.info("🔧 Lade Template-Struktur...")
+        
+        metadaten = self.view_data.get('METADATEN', {})
+        
+        if not metadaten:
+            item = QTreeWidgetItem(["Keine METADATEN vorhanden"])
+            item.setFlags(Qt.NoItemFlags)
+            self.field_tree.addTopLevelItem(item)
+            return
+        
+        # Zeige METADATEN-Ebenen: TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES
+        for meta_key in ['TEMPLATES', 'ROOT_CONTROLS', 'CONTROL_PROPERTIES']:
+            if meta_key not in metadaten:
+                continue
+            
+            # Parent-Item für METADATEN-Ebene
+            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📁')
+            parent_item = QTreeWidgetItem([f"{icon} {meta_key}"])
+            parent_item.setData(0, Qt.UserRole, {'type': 'template_folder', 'meta_key': meta_key})
+            parent_item.setExpanded(True)
+            self.field_tree.addTopLevelItem(parent_item)
+            
+            # Controls/Items darunter
+            items_dict = metadaten[meta_key]
+            sorted_items = sorted(items_dict.items())
+            
+            for item_key, item_data in sorted_items:
+                # Label als Name
+                if isinstance(item_data, dict):
+                    item_label = item_data.get('label', item_key)
+                else:
+                    item_label = item_key
+                
+                display_text = f"📄 {item_label}"
+                
+                child_item = QTreeWidgetItem([display_text])
+                child_item.setData(0, Qt.UserRole, {
+                    'type': 'template_control',
+                    'meta_key': meta_key,
+                    'item_key': item_key
+                })
+                parent_item.addChild(child_item)
+                
+        logger.info(f"  ✅ Template-Struktur geladen: {len(metadaten)} Ebenen")
                 
     def _on_tree_item_clicked(self, item, column):
         """Handler: Tree-Item angeklickt"""
@@ -430,12 +684,43 @@ class PdvmViewEditor(QWidget):
             
         item_type = item_data.get('type')
         
+        # TEMPLATE-MODUS: Template-Folders und Template-Controls
+        if item_type == 'template_folder':
+            # Template-Folder angeklickt → Info anzeigen
+            meta_key = item_data['meta_key']
+            logger.info(f"📁 Template-Folder ausgewählt: {meta_key}")
+            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📁')
+            self.right_header.setText(f"{icon} {meta_key}")
+            self._clear_control_editor()
+            return
+            
+        elif item_type == 'template_control':
+            # Template-Control angeklickt → Editor anzeigen
+            meta_key = item_data['meta_key']
+            item_key = item_data['item_key']
+            logger.info(f"📄 Template-Control ausgewählt: {meta_key}.{item_key}")
+            
+            # Header aktualisieren
+            metadaten = self.view_data['METADATEN'].get(meta_key, {})
+            item_data_dict = metadaten.get(item_key, {})
+            item_label = item_data_dict.get('label', item_key) if isinstance(item_data_dict, dict) else item_key
+            
+            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📄')
+            self.right_header.setText(f"{icon} {item_label}")
+            
+            # Template-Control Editor anzeigen
+            self._build_template_control_editor(meta_key, item_key, item_data_dict)
+            return
+        
+        # VIEW-MODUS: Normale Folders und Controls
         if item_type == 'folder':
-            # Folder angeklickt → Zeige alle Controls
+            # Folder angeklickt → NICHTS anzeigen rechts (keine Editor-Felder)
             field_type = item_data['field_type']
             logger.info(f"📁 Folder ausgewählt: {field_type}")
             self.right_header.setText(f"📁 {field_type}")
-            self._build_control_editor(field_type)
+            
+            # Rechte Seite leeren
+            self._clear_control_editor()
             
         elif item_type == 'control':
             # Einzelnes Control angeklickt → Zeige nur dieses Control
@@ -448,12 +733,100 @@ class PdvmViewEditor(QWidget):
             table_key = view_table.upper()
             metadaten = self.view_data['METADATEN'].get(table_key, {})
             control_data = metadaten.get(field_type, {}).get(control_key, {})
-            control_name = control_data.get('name', control_key)
+            control_label = control_data.get('label', 'Unbenannt')
+            guid_short = control_key[:8] if len(control_key) > 8 else control_key
             
-            self.right_header.setText(f"📄 {control_name}")
+            self.right_header.setText(f"📄 {control_label} ({guid_short})")
             
             # Nur dieses eine Control anzeigen
             self._build_single_control_editor(field_type, control_key, control_data)
+    
+    def _build_template_control_editor(self, meta_key, item_key, item_data):
+        """Baut Editor für Template-Control (TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES)"""
+        self._clear_control_editor()
+        
+        logger.info(f"🔧 Baue Template-Control-Editor: {meta_key}.{item_key}")
+        
+        if not isinstance(item_data, dict):
+            # Kein Dict → einfacher Wert
+            info_label = QLabel(f"Wert: {item_data}")
+            self.control_editor_layout.addWidget(info_label)
+            self.control_editor_layout.addStretch()
+            return
+        
+        # Dict → Alle Felder anzeigen
+        form_layout = QFormLayout()
+        widgets = {}
+        
+        for field_key, field_value in sorted(item_data.items()):
+            label = QLabel(field_key)
+            
+            # Widget basierend auf Wert-Typ
+            if isinstance(field_value, bool):
+                widget = QCheckBox()
+                widget.setChecked(field_value)
+            elif isinstance(field_value, (int, float)):
+                widget = QSpinBox()
+                widget.setRange(-999999, 999999)
+                widget.setValue(int(field_value))
+            elif isinstance(field_value, list):
+                widget = QLineEdit()
+                widget.setText(', '.join(map(str, field_value)))
+                widget.setPlaceholderText("Komma-getrennte Liste")
+            elif isinstance(field_value, dict):
+                widget = QLineEdit()
+                widget.setText(json.dumps(field_value, ensure_ascii=False))
+                widget.setPlaceholderText("JSON-Objekt")
+            else:
+                widget = QLineEdit()
+                widget.setText(str(field_value) if field_value is not None else '')
+            
+            widgets[field_key] = widget
+            form_layout.addRow(label, widget)
+        
+        # Form in Layout einfügen
+        form_widget = QWidget()
+        form_widget.setLayout(form_layout)
+        self.control_editor_layout.addWidget(form_widget)
+        self.control_editor_layout.addStretch()
+        
+        # Speichern bei Änderung
+        def save_template_changes():
+            for field_key, widget in widgets.items():
+                if isinstance(widget, QCheckBox):
+                    item_data[field_key] = widget.isChecked()
+                elif isinstance(widget, QSpinBox):
+                    item_data[field_key] = widget.value()
+                elif isinstance(widget, QLineEdit):
+                    text = widget.text().strip()
+                    if field_key in item_data and isinstance(item_data[field_key], list):
+                        item_data[field_key] = [s.strip() for s in text.split(',') if s.strip()]
+                    elif field_key in item_data and isinstance(item_data[field_key], dict):
+                        try:
+                            item_data[field_key] = json.loads(text)
+                        except json.JSONDecodeError:
+                            logger.warning(f"⚠️ Ungültiges JSON für {field_key}: {text}")
+                    else:
+                        item_data[field_key] = text
+            logger.info(f"💾 Template-Control gespeichert: {meta_key}.{item_key}")
+        
+        # Signals verbinden
+        for widget in widgets.values():
+            if isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(save_template_changes)
+            elif isinstance(widget, QSpinBox):
+                widget.valueChanged.connect(save_template_changes)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(save_template_changes)
+        
+        logger.info(f"  ✅ Template-Control-Editor aufgebaut mit {len(widgets)} Feldern")
+    
+    def _clear_control_editor(self):
+        """Leert die rechte Seite (Control-Editor)"""
+        while self.control_editor_layout.count():
+            child = self.control_editor_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
         
     def _build_control_editor(self, field_type):
         """Baut Control-Editor für gewähltes Feld"""
@@ -605,22 +978,43 @@ class PdvmViewEditor(QWidget):
         
         layout = QFormLayout(group)
         
-        # Control-Properties anzeigen
-        for prop in sorted(self.control_properties, key=lambda x: x.get('display_order', 999)):
-            property_key = prop['property']
+        # Control-Properties anzeigen (jetzt Dictionary mit property_key als Key)
+        # Sortieren nach display_order
+        sorted_props = sorted(
+            self.control_properties.items(),
+            key=lambda item: item[1].get('display_order', 999)
+        )
+        
+        for property_key, prop in sorted_props:
             label = prop['label']
             prop_control_type = prop.get('control_type', 'text')
+            
+            # SPEZIAL: configs als nested Editor
+            if property_key == 'configs':
+                configs_widget = self._create_configs_editor(field_type, control_key, control_data)
+                layout.addRow(f"{label}:", configs_widget)
+                continue
             
             # Widget erstellen
             if prop_control_type == 'checkbox':
                 widget_input = QCheckBox()
                 value = control_data.get(property_key, False)
                 widget_input.setChecked(bool(value))
+                # Signal: Änderung → sofort in view_data schreiben
+                widget_input.stateChanged.connect(
+                    lambda state, ft=field_type, ck=control_key, pk=property_key: 
+                    self._on_control_property_changed(ft, ck, pk, state == Qt.Checked)
+                )
             elif prop_control_type == 'number':
                 widget_input = QSpinBox()
-                widget_input.setRange(0, 999)
+                widget_input.setRange(0, 9999)
                 value = control_data.get(property_key, 0)
                 widget_input.setValue(int(value))
+                # Signal: Wert geändert → sofort in view_data schreiben
+                widget_input.valueChanged.connect(
+                    lambda val, ft=field_type, ck=control_key, pk=property_key: 
+                    self._on_control_property_changed(ft, ck, pk, val)
+                )
             elif prop_control_type == 'dropdown':
                 widget_input = QComboBox()
                 options = prop.get('options', [])
@@ -629,10 +1023,20 @@ class PdvmViewEditor(QWidget):
                 index = widget_input.findText(str(value))
                 if index >= 0:
                     widget_input.setCurrentIndex(index)
+                # Signal: Text geändert → sofort in view_data schreiben
+                widget_input.currentTextChanged.connect(
+                    lambda text, ft=field_type, ck=control_key, pk=property_key: 
+                    self._on_control_property_changed(ft, ck, pk, text)
+                )
             else:
                 widget_input = QLineEdit()
                 value = control_data.get(property_key, '')
                 widget_input.setText(str(value) if value is not None else '')
+                # Signal: Text editiert → sofort in view_data schreiben
+                widget_input.textChanged.connect(
+                    lambda text, ft=field_type, ck=control_key, pk=property_key: 
+                    self._on_control_property_changed(ft, ck, pk, text)
+                )
                 
             layout.addRow(f"{label}:", widget_input)
             
@@ -644,32 +1048,223 @@ class PdvmViewEditor(QWidget):
             if control_key not in self.control_widgets[field_type]:
                 self.control_widgets[field_type][control_key] = {}
             self.control_widgets[field_type][control_key][property_key] = widget_input
-            
+        
         return group
         
+    def _on_control_property_changed(self, field_type, control_key, property_key, value):
+        """Handler: Control-Property wurde geändert → sofort in view_data schreiben"""
+        # View-Table holen
+        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        if not view_table:
+            logger.warning("⚠️ VIEW_TABLE nicht gesetzt - Änderung nicht gespeichert")
+            return
+            
+        table_key = view_table.upper()
+        
+        # Pfad zu Property sicherstellen
+        if table_key not in self.view_data['METADATEN']:
+            self.view_data['METADATEN'][table_key] = {}
+        if field_type not in self.view_data['METADATEN'][table_key]:
+            self.view_data['METADATEN'][table_key][field_type] = {}
+        if control_key not in self.view_data['METADATEN'][table_key][field_type]:
+            self.view_data['METADATEN'][table_key][field_type][control_key] = {}
+            
+        # Wert schreiben
+        self.view_data['METADATEN'][table_key][field_type][control_key][property_key] = value
+        
+        logger.info(f"  ✏️ {control_key}.{property_key} = {value}")
+    
+    def _create_configs_editor(self, field_type, control_key, control_data):
+        """
+        Erstellt Editor für configs-Struktur (dropdown, help, viewtable).
+        
+        Struktur:
+        configs: {
+          dropdown: {table, key, feld, gruppe},
+          help: {table, key, feld, gruppe},
+          viewtable: {table, key, feld}
+        }
+        """
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Configs-Daten holen oder initialisieren
+        configs = control_data.get('configs', {})
+        
+        # Dropdown Config
+        dropdown_group = QGroupBox("Dropdown Config")
+        dropdown_layout = QFormLayout(dropdown_group)
+        
+        dropdown_data = configs.get('dropdown', {})
+        
+        dd_table = QLineEdit(dropdown_data.get('table', ''))
+        dd_table.setPlaceholderText('z.B. dropdowndaten')
+        dd_table.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'dropdown', 'table', text)
+        )
+        dropdown_layout.addRow("Tabelle:", dd_table)
+        
+        dd_key = QLineEdit(dropdown_data.get('key', ''))
+        dd_key.setPlaceholderText('GUID des Dropdown-Datensatzes')
+        dd_key.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'dropdown', 'key', text)
+        )
+        dropdown_layout.addRow("Key (GUID):", dd_key)
+        
+        dd_feld = QLineEdit(dropdown_data.get('feld', ''))
+        dd_feld.setPlaceholderText('z.B. anrede, waehrung')
+        dd_feld.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'dropdown', 'feld', text)
+        )
+        dropdown_layout.addRow("Feld:", dd_feld)
+        
+        dd_gruppe = QLineEdit(dropdown_data.get('gruppe', ''))
+        dd_gruppe.setPlaceholderText('Optional: z.B. DEU, ENG')
+        dd_gruppe.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'dropdown', 'gruppe', text)
+        )
+        dropdown_layout.addRow("Gruppe:", dd_gruppe)
+        
+        main_layout.addWidget(dropdown_group)
+        
+        # Help Config
+        help_group = QGroupBox("Help Config")
+        help_layout = QFormLayout(help_group)
+        
+        help_data = configs.get('help', {})
+        
+        help_table = QLineEdit(help_data.get('table', ''))
+        help_table.setPlaceholderText('z.B. beschreibungen')
+        help_table.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'help', 'table', text)
+        )
+        help_layout.addRow("Tabelle:", help_table)
+        
+        help_key = QLineEdit(help_data.get('key', ''))
+        help_key.setPlaceholderText('GUID des Hilfe-Datensatzes')
+        help_key.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'help', 'key', text)
+        )
+        help_layout.addRow("Key (GUID):", help_key)
+        
+        help_feld = QLineEdit(help_data.get('feld', ''))
+        help_feld.setPlaceholderText('z.B. PERSONDATEN_PERSDATEN_ANREDE')
+        help_feld.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'help', 'feld', text)
+        )
+        help_layout.addRow("Feld:", help_feld)
+        
+        help_gruppe = QLineEdit(help_data.get('gruppe', ''))
+        help_gruppe.setPlaceholderText('Optional: z.B. DEU, ENG')
+        help_gruppe.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'help', 'gruppe', text)
+        )
+        help_layout.addRow("Gruppe:", help_gruppe)
+        
+        main_layout.addWidget(help_group)
+        
+        # Viewtable Config
+        viewtable_group = QGroupBox("Viewtable Config")
+        viewtable_layout = QFormLayout(viewtable_group)
+        
+        viewtable_data = configs.get('viewtable', {})
+        
+        vt_table = QLineEdit(viewtable_data.get('table', ''))
+        vt_table.setPlaceholderText('z.B. sys_viewdaten')
+        vt_table.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'viewtable', 'table', text)
+        )
+        viewtable_layout.addRow("Tabelle:", vt_table)
+        
+        vt_key = QLineEdit(viewtable_data.get('key', ''))
+        vt_key.setPlaceholderText('View-GUID')
+        vt_key.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'viewtable', 'key', text)
+        )
+        viewtable_layout.addRow("Key (GUID):", vt_key)
+        
+        vt_feld = QLineEdit(viewtable_data.get('feld', ''))
+        vt_feld.setPlaceholderText('Optional: Spezifisches Feld')
+        vt_feld.textChanged.connect(
+            lambda text: self._on_config_changed(field_type, control_key, 'viewtable', 'feld', text)
+        )
+        viewtable_layout.addRow("Feld:", vt_feld)
+        
+        main_layout.addWidget(viewtable_group)
+        
+        return container
+    
+    def _on_config_changed(self, field_type, control_key, config_type, config_field, value):
+        """Handler: Config-Wert wurde geändert → sofort in view_data schreiben"""
+        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        if not view_table:
+            logger.warning("⚠️ VIEW_TABLE nicht gesetzt - Änderung nicht gespeichert")
+            return
+            
+        table_key = view_table.upper()
+        
+        # Pfad sicherstellen
+        if table_key not in self.view_data['METADATEN']:
+            self.view_data['METADATEN'][table_key] = {}
+        if field_type not in self.view_data['METADATEN'][table_key]:
+            self.view_data['METADATEN'][table_key][field_type] = {}
+        if control_key not in self.view_data['METADATEN'][table_key][field_type]:
+            self.view_data['METADATEN'][table_key][field_type][control_key] = {}
+        if 'configs' not in self.view_data['METADATEN'][table_key][field_type][control_key]:
+            self.view_data['METADATEN'][table_key][field_type][control_key]['configs'] = {}
+        if config_type not in self.view_data['METADATEN'][table_key][field_type][control_key]['configs']:
+            self.view_data['METADATEN'][table_key][field_type][control_key]['configs'][config_type] = {}
+        
+        # Wert schreiben
+        self.view_data['METADATEN'][table_key][field_type][control_key]['configs'][config_type][config_field] = value
+        
+        logger.info(f"  ✏️ {control_key}.configs.{config_type}.{config_field} = {value}")
+        
     def _add_field(self):
-        """Fügt neues Control zum ausgewählten Folder hinzu"""
+        """Fügt neues Control/Item zum ausgewählten Folder hinzu"""
         # Ausgewähltes Item holen
         current_item = self.field_tree.currentItem()
         if not current_item:
-            QMessageBox.warning(
-                self,
-                "Warnung",
-                "Bitte wähle zuerst einen Folder (controls/standard_controls) aus!"
-            )
+            msg = "Bitte wähle zuerst einen Folder aus!" if self.edit_mode == 'template' else "Bitte wähle zuerst einen Folder (controls/standard_controls) aus!"
+            QMessageBox.warning(self, "Warnung", msg)
             return
             
         # Item-Daten holen
         item_data = current_item.data(0, Qt.UserRole)
         if not item_data:
             return
-            
+        
+        item_type = item_data.get('type')
+        
+        # TEMPLATE-MODUS
+        if self.edit_mode == 'template':
+            # Wenn Template-Control ausgewählt, zum Parent wechseln
+            if item_type == 'template_control':
+                current_item = current_item.parent()
+                item_data = current_item.data(0, Qt.UserRole)
+                item_type = item_data.get('type')
+                
+            if item_type != 'template_folder':
+                QMessageBox.warning(
+                    self,
+                    "Warnung",
+                    "Bitte wähle einen Template-Folder aus (TEMPLATES, ROOT_CONTROLS, etc.)!"
+                )
+                return
+                
+            meta_key = item_data['meta_key']
+            self._add_template_item(meta_key)
+            return
+        
+        # VIEW-MODUS
         # Wenn Control ausgewählt, zum Parent wechseln
-        if item_data.get('type') == 'control':
+        if item_type == 'control':
             current_item = current_item.parent()
             item_data = current_item.data(0, Qt.UserRole)
+            item_type = item_data.get('type')
             
-        if item_data.get('type') != 'folder':
+        if item_type != 'folder':
             QMessageBox.warning(
                 self,
                 "Warnung",
@@ -683,14 +1278,14 @@ class PdvmViewEditor(QWidget):
         self._add_control(field_type)
         
     def _remove_field(self):
-        """Entfernt ausgewähltes Control"""
+        """Entfernt ausgewähltes Control/Item"""
         # Ausgewähltes Item holen
         current_item = self.field_tree.currentItem()
         if not current_item:
             QMessageBox.warning(
                 self,
                 "Warnung",
-                "Bitte wähle zuerst ein Control aus!"
+                "Bitte wähle zuerst ein Control/Item aus!"
             )
             return
             
@@ -698,9 +1293,55 @@ class PdvmViewEditor(QWidget):
         item_data = current_item.data(0, Qt.UserRole)
         if not item_data:
             return
+        
+        item_type = item_data.get('type')
+        
+        # TEMPLATE-MODUS
+        if self.edit_mode == 'template':
+            # Nur Template-Controls können gelöscht werden, keine Folder
+            if item_type != 'template_control':
+                QMessageBox.warning(
+                    self,
+                    "Warnung",
+                    "Bitte wähle ein Template-Item zum Löschen aus (nicht den Folder)!"
+                )
+                return
+                
+            meta_key = item_data['meta_key']
+            item_key = item_data['item_key']
             
+            # Löschen bestätigen
+            reply = QMessageBox.question(
+                self,
+                "Template-Item löschen",
+                f"Template-Item '{item_key}' wirklich löschen?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+                
+            # Aus METADATEN entfernen
+            if meta_key in self.view_data['METADATEN']:
+                if item_key in self.view_data['METADATEN'][meta_key]:
+                    del self.view_data['METADATEN'][meta_key][item_key]
+                    logger.info(f"🗑️ Template-Item '{item_key}' aus {meta_key} gelöscht")
+                    
+            # TreeView aktualisieren
+            self._refresh_field_list()
+            
+            # Editor leeren
+            while self.control_editor_layout.count():
+                child = self.control_editor_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            self.right_header.setText("Wähle ein Feld aus")
+            return
+        
+        # VIEW-MODUS
         # Nur Controls können gelöscht werden, keine Folder
-        if item_data.get('type') != 'control':
+        if item_type != 'control':
             QMessageBox.warning(
                 self,
                 "Warnung",
@@ -743,20 +1384,105 @@ class PdvmViewEditor(QWidget):
                 
         self.right_header.setText("Wähle ein Feld aus")
         
-    def _add_control(self, field_type):
-        """Fügt neues Control zu Feld hinzu"""
-        # Control-Key abfragen
-        control_key, ok = QInputDialog.getText(
+    def _add_template_item(self, meta_key):
+        """Fügt neues Item zu Template-Folder hinzu (TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES)"""
+        logger.info(f"➕ Füge Template-Item zu {meta_key} hinzu")
+        
+        # Item-Key (Name) eingeben
+        item_key, ok = QInputDialog.getText(
             self,
-            "Neues Control",
-            "Control-Key (z.B. 'familienname'):"
+            "Template-Item hinzufügen",
+            f"Name für neues {meta_key}-Item:",
+            QLineEdit.Normal,
+            ""
         )
         
-        if not ok or not control_key.strip():
+        if not ok or not item_key.strip():
             return
-            
-        control_key = control_key.strip().lower()
         
+        item_key = item_key.strip()
+        
+        # Prüfen ob Key bereits existiert
+        if meta_key in self.view_data['METADATEN']:
+            if item_key in self.view_data['METADATEN'][meta_key]:
+                QMessageBox.warning(
+                    self,
+                    "Warnung",
+                    f"Item '{item_key}' existiert bereits in {meta_key}!"
+                )
+                return
+        
+        # Standard-Struktur basierend auf meta_key
+        if meta_key == 'TEMPLATES':
+            # Template für neue Templates: Kopiere view_text als Basis
+            if 'view_text' in self.view_data['METADATEN'][meta_key]:
+                new_item_data = self.view_data['METADATEN'][meta_key]['view_text'].copy()
+            else:
+                new_item_data = {
+                    'table': '',
+                    'gruppe': '',
+                    'feld': '',
+                    'label': '',
+                    'tooltip': '',
+                    'control_type': 'text',
+                    'width': 150,
+                    'visible': True,
+                    'sortable': True,
+                    'filterable': True,
+                    'editable': False,
+                    'alignment': 'left',
+                    'display_order': 0
+                }
+        elif meta_key == 'ROOT_CONTROLS':
+            # Standard ROOT_CONTROL Struktur
+            new_item_data = {
+                'label': item_key,
+                'control_type': 'text',
+                'readonly': False,
+                'display_order': 999,
+                'muss': False,
+                'default_value': '',
+                'options': []
+            }
+        elif meta_key == 'CONTROL_PROPERTIES':
+            # Standard CONTROL_PROPERTY Struktur
+            new_item_data = {
+                'label': item_key,
+                'control_type': 'text',
+                'readonly': False,
+                'display_order': 999
+            }
+        else:
+            # Fallback: Leeres Dict
+            new_item_data = {}
+        
+        # Item hinzufügen
+        if meta_key not in self.view_data['METADATEN']:
+            self.view_data['METADATEN'][meta_key] = {}
+            
+        self.view_data['METADATEN'][meta_key][item_key] = new_item_data
+        logger.info(f"✅ Template-Item '{item_key}' zu {meta_key} hinzugefügt")
+        
+        # TreeView aktualisieren
+        self._refresh_field_list()
+        
+        # Neues Item im Tree suchen und auswählen
+        for i in range(self.field_tree.topLevelItemCount()):
+            folder_item = self.field_tree.topLevelItem(i)
+            folder_data = folder_item.data(0, Qt.UserRole)
+            if folder_data and folder_data.get('meta_key') == meta_key:
+                # Folder gefunden, Kind suchen
+                for j in range(folder_item.childCount()):
+                    child_item = folder_item.child(j)
+                    child_data = child_item.data(0, Qt.UserRole)
+                    if child_data and child_data.get('item_key') == item_key:
+                        self.field_tree.setCurrentItem(child_item)
+                        self._on_tree_item_clicked(child_item, 0)
+                        break
+                break
+        
+    def _add_control(self, field_type):
+        """Fügt neues Control zu Feld hinzu"""
         # Template auswählen
         templates = list(self.templates.keys())
         template_name, ok = QInputDialog.getItem(
@@ -771,8 +1497,12 @@ class PdvmViewEditor(QWidget):
         if not ok:
             return
             
-        # Template kopieren
+        # Template kopieren (KOMPLETTE Kopie mit allen Properties!)
         template_data = self.templates[template_name].copy()
+        
+        # GUID als Key generieren
+        import uuid
+        control_guid = str(uuid.uuid4())
         
         # In View-Daten einfügen
         view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
@@ -783,9 +1513,10 @@ class PdvmViewEditor(QWidget):
         if field_type not in self.view_data['METADATEN'][table_key]:
             self.view_data['METADATEN'][table_key][field_type] = {}
             
-        self.view_data['METADATEN'][table_key][field_type][control_key] = template_data
+        # Template-Daten mit GUID als Key speichern
+        self.view_data['METADATEN'][table_key][field_type][control_guid] = template_data
         
-        logger.info(f"✅ Control '{control_key}' zu {field_type} hinzugefügt")
+        logger.info(f"✅ Control '{control_guid}' ({template_name}) zu {field_type} hinzugefügt")
         
         # TreeView und Editor aktualisieren
         self._refresh_field_list()
@@ -889,31 +1620,57 @@ class PdvmViewEditor(QWidget):
             for control_key, widget in self.root_widgets.items():
                 if isinstance(widget, QCheckBox):
                     self.view_data['ROOT'][control_key] = widget.isChecked()
+                elif isinstance(widget, QComboBox):
+                    self.view_data['ROOT'][control_key] = widget.currentText()
                 else:
                     self.view_data['ROOT'][control_key] = widget.text()
-                    
-            # Control-Widgets übernehmen
-            if hasattr(self, 'control_widgets'):
-                view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+            
+            # SCHRITT 0.5: Prüfe ob METADATEN leer ist und erstelle Struktur mit Dummies
+            view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+            if view_table:
                 table_key = view_table.upper()
                 
-                for field_type, controls in self.control_widgets.items():
-                    for control_key, properties in controls.items():
-                        for property_key, widget in properties.items():
-                            if isinstance(widget, QCheckBox):
-                                value = widget.isChecked()
-                            elif isinstance(widget, QSpinBox):
-                                value = widget.value()
-                            elif isinstance(widget, QComboBox):
-                                value = widget.currentText()
-                            else:
-                                value = widget.text()
-                                
-                            # In View-Daten schreiben
-                            if table_key in self.view_data['METADATEN']:
-                                if field_type in self.view_data['METADATEN'][table_key]:
-                                    if control_key in self.view_data['METADATEN'][table_key][field_type]:
-                                        self.view_data['METADATEN'][table_key][field_type][control_key][property_key] = value
+                # Wenn METADATEN leer oder Tabelle nicht vorhanden
+                if not self.view_data.get('METADATEN') or table_key not in self.view_data['METADATEN']:
+                    logger.info(f"  📦 Erstelle Basis-Struktur für Tabelle '{table_key}'...")
+                    
+                    if 'METADATEN' not in self.view_data:
+                        self.view_data['METADATEN'] = {}
+                    
+                    # Struktur mit controls und standard_controls erstellen
+                    self.view_data['METADATEN'][table_key] = {
+                        'controls': {
+                            'dummy': {
+                                'gruppe': 'SYSTEM',
+                                'feld': 'DUMMY',
+                                'label': 'DUMMY (bitte löschen)',
+                                'display_order': 0,
+                                'type': 'text',
+                                'show': False,
+                                'expert_mode': False
+                            }
+                        },
+                        'standard_controls': {
+                            'dummy': {
+                                'gruppe': 'SYSTEM',
+                                'feld': 'DUMMY_STD',
+                                'label': 'DUMMY STD (bitte löschen)',
+                                'display_order': 0,
+                                'type': 'text',
+                                'show': False,
+                                'expert_mode': False
+                            }
+                        }
+                    }
+                    
+                    logger.info(f"  ✅ Basis-Struktur mit controls/standard_controls erstellt")
+                    
+            # WICHTIG: Control-Daten sind BEREITS in view_data durch Signal-Handling!
+            # Kein Auslesen der Widgets mehr nötig - würde zu "deleted widget" Fehler führen
+            logger.info("  📋 Control-Daten bereits durch Signal-Handling in view_data geschrieben")
+            
+            # display_order aus TreeView aktualisieren (falls geändert)
+            self._update_display_order_from_tree()
             
             # In Datenbank speichern
             self.view_db.data = self.view_data
