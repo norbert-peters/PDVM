@@ -53,7 +53,7 @@ class V2MainAppComplete(QMainWindow):
         logger.info("✅ GCS verfügbar")
         
         # ========================================
-        # [2] WINDOW-TITEL
+        # [2] WINDOW-TITEL & STATE
         # ========================================
         try:
             # Mandant aus GCS
@@ -70,7 +70,9 @@ class V2MainAppComplete(QMainWindow):
             
             # Titel setzen
             self.setWindowTitle(f"PDVM-SYSTEM v{version} - {mandant_name} - {user_name}")
-            self.resize(1200, 700)
+            
+            # Window-State aus GCS laden
+            self._restore_window_state()
             
             logger.info(f"✅ Window-Titel: {mandant_name} / {user_name}")
             
@@ -215,8 +217,11 @@ class V2MainAppComplete(QMainWindow):
                 startmenu_guid = '5ca6674e-b9ce-4581-9756-64e742883f80'
                 logger.info(f"📋 Verwende Standard-Startmenü-GUID: {startmenu_guid}")
             
+            # Verwende das bewährte autonome Menu-System
             from pdvm_menu_system_autonomous import PdvmMenuSystemAutonomous
+            logger.info(f"🚀 Lade Menü: {startmenu_guid}")
             PdvmMenuSystemAutonomous.load_startmenu(startmenu_guid, self.menu_handler)
+            
             logger.info("✅ Menü-System geladen")
             
             # Stelle Menü-Sichtbarkeit wieder her (Startmenü ist immer sichtbar)
@@ -363,6 +368,103 @@ class V2MainAppComplete(QMainWindow):
         # Kurzer Delay damit neuer Prozess startet
         from PyQt5.QtCore import QTimer
         QTimer.singleShot(500, self.close)  # Nach 500ms schließen
+    
+    # ========================================
+    # WINDOW STATE MANAGEMENT
+    # ========================================
+    
+    def _restore_window_state(self):
+        """Stellt gespeicherte Fenster-Position und -Größe wieder her"""
+        try:
+            # Window-State aus Systemsteuerung laden
+            window_x, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_X')
+            window_y, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_Y')
+            window_width, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_WIDTH')
+            window_height, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_HEIGHT')
+            window_maximized, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_MAXIMIZED')
+            window_fullscreen, _ = self.gcs._db.get_value(self.gcs.user_guid, 'WINDOW_FULLSCREEN')
+            
+            # Defaults falls nicht vorhanden
+            if window_width is None:
+                window_width = 1400
+            if window_height is None:
+                window_height = 800
+            
+            # Größe setzen
+            self.resize(int(window_width), int(window_height))
+            
+            # Position setzen (mit Screen-Bounds-Prüfung)
+            if window_x is not None and window_y is not None:
+                # Screen-Geometrie holen
+                from PyQt5.QtWidgets import QApplication, QDesktopWidget
+                desktop = QApplication.desktop()
+                screen_geometry = desktop.availableGeometry()
+                
+                # Prüfe ob Fenster im sichtbaren Bereich liegt
+                x = int(window_x)
+                y = int(window_y)
+                w = int(window_width)
+                h = int(window_height)
+                
+                # Sicherheits-Check: Mind. 100px des Fensters müssen sichtbar sein
+                if (x + w < 100 or x > screen_geometry.width() - 100 or
+                    y + h < 100 or y > screen_geometry.height() - 100):
+                    # Position ist off-screen → zentrieren
+                    logger.warning(f"⚠️ Fenster off-screen ({x}, {y}) - zentriere Fenster")
+                    x = (screen_geometry.width() - w) // 2
+                    y = (screen_geometry.height() - h) // 2
+                    
+                self.move(x, y)
+                logger.info(f"🖥️ Window-State: Position ({x}, {y}), Größe ({w}x{h})")
+            
+            # Maximized/Fullscreen Status
+            if window_fullscreen:
+                self.showFullScreen()
+                logger.info("🖥️ Window-State: Fullscreen wiederhergestellt")
+            elif window_maximized:
+                self.showMaximized()
+                logger.info("🖥️ Window-State: Maximized wiederhergestellt")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Wiederherstellen des Window-States: {e}")
+            # Fallback zu Standard-Größe
+            self.resize(1400, 800)
+    
+    def _save_window_state(self):
+        """Speichert aktuelle Fenster-Position und -Größe"""
+        try:
+            # Aktuellen Zustand ermitteln
+            is_fullscreen = self.isFullScreen()
+            is_maximized = self.isMaximized()
+            
+            # Normale Geometrie speichern (für Restore nach Maximize/Fullscreen)
+            geometry = self.geometry()
+            
+            # In Systemsteuerung speichern
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_X', geometry.x())
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_Y', geometry.y())
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_WIDTH', geometry.width())
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_HEIGHT', geometry.height())
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_MAXIMIZED', is_maximized)
+            self.gcs._db.set_value(self.gcs.user_guid, 'WINDOW_FULLSCREEN', is_fullscreen)
+            
+            # Speichern
+            self.gcs._db.save_all_values()
+            
+            logger.info(f"💾 Window-State gespeichert: ({geometry.x()}, {geometry.y()}) {geometry.width()}x{geometry.height()}, Maximized={is_maximized}, Fullscreen={is_fullscreen}")
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Speichern des Window-States: {e}")
+    
+    def closeEvent(self, event):
+        """Wird beim Schließen des Fensters aufgerufen"""
+        # Window-State vor dem Schließen speichern
+        self._save_window_state()
+        
+        # Event akzeptieren
+        event.accept()
+        
+        logger.info("👋 Hauptfenster geschlossen")
 
 
 def main():

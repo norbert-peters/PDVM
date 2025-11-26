@@ -21,7 +21,7 @@ Features:
 - ✅ Persistierung in dialogdaten.db (NICHT anwendungsdaten!)
 
 Datenbank-Nutzung:
-- framedaten.db: Frame-Konfiguration (ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
+- framedaten.db: Frame-Konfiguration (TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
 - dialogdaten.db: Dialog-Status (Tab-Einstellungen, selected_guid)
 - anwendungsdaten.db: NUR über GCS für User-bezogene Daten (View-Filter, etc.)
 
@@ -47,7 +47,7 @@ class V2PdvmGenerellerDialog(QWidget):
     🎯 V2 Genereller Dialog für alle Datenänderungen
     
     Workflow:
-    1. Frame-GUID → sys_framedaten laden (ROOT_TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
+    1. Frame-GUID → sys_framedaten laden (TABLE, VIEW_GUID, DIALOG_GUID, HEADER_TEXT)
     2. DIALOG_GUID → sys_dialogdaten laden/erstellen (Tab-Konfiguration)
     3. Tab 1: View initialisieren
     4. Tab 2: Edit-Bereich (Phase 1: nur GUID-Anzeige)
@@ -103,7 +103,7 @@ class V2PdvmGenerellerDialog(QWidget):
         self.edit_modules = {
             'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ PDVM 0.9 VERSION
             'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration
-            'view_editor': 'pdvm_view_editor.PdvmViewEditor',  # ✅ View-Editor für sys_viewdaten
+            'system_editor': 'pdvm_system_editor.PdvmSystemEditor',  # ✅ UNIVERSELL: Alle System-Tabellen (sys_viewdaten, sys_framedaten, etc.)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
@@ -204,7 +204,7 @@ class V2PdvmGenerellerDialog(QWidget):
         Lädt die Framedaten aus der Datenbank
         
         Liest aus Gruppe ROOT:
-        - ROOT_TABLE: Tabellenname für Daten
+        - TABLE: Tabellenname für Daten
         - VIEW_GUID: GUID der View-Konfiguration
         - DIALOG_GUID: GUID für Dialog-Persistierung
         - HEADER_TEXT: Überschrift des Dialogs
@@ -218,12 +218,12 @@ class V2PdvmGenerellerDialog(QWidget):
             # ROOT-Gruppe lesen
             gruppe = 'ROOT'
             
-            # ROOT_TABLE
+            # TABLE (neue lineare Struktur)
             # V2: Framedaten ist NICHT historisch → get_static_value
             self.root_table = self.framedaten_db.get_static_value(
-                gruppe, 'ROOT_TABLE'
+                gruppe, 'TABLE'
             )
-            logger.info(f"  📋 ROOT_TABLE: {self.root_table}")
+            logger.info(f"  📋 TABLE: {self.root_table}")
             
             # VIEW_GUID
             self.view_guid = self.framedaten_db.get_static_value(
@@ -253,7 +253,7 @@ class V2PdvmGenerellerDialog(QWidget):
             
             # Validierung
             if not self.root_table:
-                raise ValueError("ROOT_TABLE ist leer!")
+                raise ValueError("TABLE ist leer!")
             if not self.view_guid:
                 raise ValueError("VIEW_GUID ist leer!")
             # DIALOG_GUID kann leer sein (wird dann erstellt)
@@ -525,90 +525,209 @@ class V2PdvmGenerellerDialog(QWidget):
     
     def _create_new_datensatz(self):
         """
-        Erstellt einen neuen Datensatz
+        Erstellt einen neuen Datensatz mit Template-Support (LINEAR - 8 Schritte)
         
-        Workflow:
-        1. Mini-Dialog: Name eingeben (db name)
-        2. Neue GUID generieren
-        3. Editor mit set_guid initialisieren
-        4. Tab 2 (Edit) öffnen
-        5. Mit save_all_values() in DB speichern
+        LINEARER WORKFLOW:
+        1. Button "Neuer Datensatz" → diese Methode
+        2. Name + Tabelle abfragen (beide Pflichtfelder)
+        3. Neue GUID generieren + set_guid
+        4. ROOT aus Template (55555555...) kopieren + TABLE setzen
+        5. METADATEN: controls (leer) + standard_controls (mit dummy) erstellen
+        6. save_all_values() → in DB speichern
+        7. Datensatz-Auswahl triggern
+        8. Tab 2 (Edit) öffnen zum Bearbeiten
         """
-        logger.info("➕ Neuen Datensatz erstellen...")
+        logger.info("➕ Neuen Datensatz erstellen (LINEAR mit Template)...")
         
         try:
-            from PyQt5.QtWidgets import QInputDialog
+            from PyQt5.QtWidgets import QInputDialog, QMessageBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox
             import uuid
             
-            # 1. Mini-Dialog: Name eingeben (mit Validierung)
-            while True:
-                name, ok = QInputDialog.getText(
-                    self,
-                    "Neuer Datensatz",
-                    "Name für neuen Datensatz eingeben:\n(Pflichtfeld - darf nicht leer sein)",
-                    text=""
-                )
-                
-                # Abbruch
-                if not ok:
-                    logger.info("  ℹ️ Abgebrochen - Dialog geschlossen")
-                    return
-                
-                # Validierung: Name darf nicht leer sein
-                name = name.strip()
-                if not name:
-                    from PyQt5.QtWidgets import QMessageBox
-                    QMessageBox.warning(
-                        self,
-                        "Name erforderlich",
-                        "Bitte geben Sie einen Namen ein.\n\nDer Name ist ein Pflichtfeld und darf nicht leer sein."
-                    )
-                    continue  # Dialog erneut anzeigen
-                
-                # Name ist gültig → Schleife verlassen
-                break
+            # SCHRITT 1+2: Name + Tabelle abfragen (Custom Dialog mit beiden Feldern)
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Neuer Datensatz")
+            dialog.setModal(True)
+            
+            layout = QFormLayout(dialog)
+            
+            # Name-Feld
+            name_edit = QLineEdit()
+            name_edit.setPlaceholderText("z.B. 'Personen-Übersicht'")
+            layout.addRow("Name *:", name_edit)
+            
+            # Tabelle-Feld (nur für sys_viewdaten, für sys_framedaten optional)
+            table_edit = QLineEdit()
+            table_edit.setPlaceholderText("z.B. 'personen'")
+            
+            # Prüfen ob VIEW oder FRAME
+            is_view = self.root_table == 'sys_viewdaten'
+            is_frame = self.root_table == 'sys_framedaten'
+            
+            if is_view:
+                layout.addRow("Tabelle *:", table_edit)
+            elif is_frame:
+                layout.addRow("Root-Tabelle *:", table_edit)
+            
+            # Info-Label
+            info_label = QLabel("* = Pflichtfelder")
+            info_label.setStyleSheet("color: gray; font-style: italic; font-size: 10px;")
+            layout.addWidget(info_label)
+            
+            # Buttons
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            
+            # Dialog anzeigen
+            if dialog.exec_() != QDialog.Accepted:
+                logger.info("  ℹ️ Abgebrochen")
+                return
+            
+            # Werte holen und validieren
+            name = name_edit.text().strip()
+            table_name = table_edit.text().strip()
+            
+            if not name:
+                QMessageBox.warning(self, "Fehler", "Name ist ein Pflichtfeld!")
+                return
+            
+            if (is_view or is_frame) and not table_name:
+                QMessageBox.warning(self, "Fehler", "Tabelle ist ein Pflichtfeld!")
+                return
             
             logger.info(f"  📝 Name: {name}")
+            logger.info(f"  📋 Tabelle: {table_name}")
             
-            # 2. Neue GUID generieren
+            # SCHRITT 3: Neue GUID generieren
             neue_guid = str(uuid.uuid4())
             logger.info(f"  🆔 Neue GUID: {neue_guid}")
             
-            # 3. Neuen Daten-Container initialisieren
-            # Hole ROOT_TABLE aus Framedaten
-            if not self.root_table:
-                raise ValueError("ROOT_TABLE nicht verfügbar!")
+            # Tabellenname immer in GROSSBUCHSTABEN für METADATEN
+            table_name_upper = table_name.upper()
+            logger.info(f"  📋 Tabelle (GROSS): {table_name_upper}")
             
-            # Datenbank-Instanz erstellen
+            # Datenbank-Instanz für neuen Datensatz (ohne GUID → leer)
             db = PdvmCentralDatenbank(self.root_table)
             
-            # Neuen Container initialisieren (GUID + Name setzen, leeres Dict)
+            # WICHTIG: Container mit GUID + Name initialisieren
+            # Dies setzt _pending_name, der bei save_all_values() in DB-Spalte 'name' geschrieben wird
             db.set_new_data_container(neue_guid, name)
             
-            # Speichern (erstellt Datensatz in DB)
+            # SCHRITT 4: ROOT aus Template kopieren
+            template_db = PdvmCentralDatenbank(self.root_table, '55555555-5555-5555-5555-555555555555')
+            template_root = template_db.data.get('ROOT', {}).copy()
+            
+            logger.info(f"  📋 Template ROOT geladen: {len(template_root)} Felder")
+            
+            # Name und Tabelle in ROOT setzen
+            if is_view:
+                template_root['VIEW_NAME'] = name
+                template_root['TABLE'] = table_name
+                template_root['VIEW_GUID'] = neue_guid
+            elif is_frame:
+                template_root['TABLE'] = table_name
+                template_root['DIALOG_GUID'] = neue_guid
+                template_root['HEADER_TEXT'] = name
+            
+            # ROOT in neue Instanz schreiben
+            db.data['ROOT'] = template_root
+            
+            logger.info(f"  ✅ ROOT initialisiert mit Template-Defaults")
+            
+            # SCHRITT 5: METADATEN-Struktur erstellen
+            if is_view and table_name:
+                # View: controls (leer) + standard_controls (mit uid + dummy)
+                import uuid as uuid_lib
+                uid_guid = str(uuid_lib.uuid4())
+                dummy_guid = str(uuid_lib.uuid4())
+                
+                db.data['METADATEN'] = {
+                    table_name_upper: {
+                        'controls': {},
+                        'standard_controls': {
+                            uid_guid: {
+                                'table': table_name,
+                                'gruppe': '',
+                                'feld': 'uid',
+                                'label': 'UID',
+                                'control_type': 'text',
+                                'width': 250,
+                                'visible': True,
+                                'display_order': 0
+                            },
+                            dummy_guid: {
+                                'table': table_name,
+                                'gruppe': 'DUMMY',
+                                'feld': 'DUMMY',
+                                'label': 'Dummy-Spalte (bitte löschen)',
+                                'control_type': 'text',
+                                'width': 150,
+                                'visible': True,
+                                'display_order': 1
+                            }
+                        }
+                    }
+                }
+                logger.info(f"  ✅ METADATEN erstellt: {table_name_upper} → controls (leer) + standard_controls (uid + dummy)")
+            
+            elif is_frame and table_name:
+                # Frame: controls (leer) + standard_controls (mit uid + dummy)
+                import uuid as uuid_lib
+                uid_guid = str(uuid_lib.uuid4())
+                dummy_guid = str(uuid_lib.uuid4())
+                
+                db.data['METADATEN'] = {
+                    table_name_upper: {
+                        'controls': {},
+                        'standard_controls': {
+                            uid_guid: {
+                                'table': table_name,
+                                'gruppe': '',
+                                'feld': 'uid',
+                                'label': 'UID',
+                                'type': 'text',
+                                'tab': 1,
+                                'display_order': 0,
+                                'read_only': True
+                            },
+                            dummy_guid: {
+                                'table': table_name,
+                                'gruppe': 'DUMMY',
+                                'feld': 'DUMMY',
+                                'label': 'Dummy-Control (bitte löschen)',
+                                'type': 'text',
+                                'tab': 1,
+                                'display_order': 1
+                            }
+                        }
+                    }
+                }
+                logger.info(f"  ✅ METADATEN erstellt: {table_name_upper} → controls (leer) + standard_controls (uid + dummy)")
+            
+            # SCHRITT 6: In DB speichern
             db.save_all_values()
+            logger.info(f"  💾 Datensatz gespeichert: {self.root_table}/{neue_guid}")
             
-            logger.info(f"  ✅ Datensatz in DB angelegt: {self.root_table}/{neue_guid}")
-            
-            # 4. GUID in Systemsteuerung speichern (für Last-Selection)
+            # SCHRITT 7: GUID in Systemsteuerung speichern
             self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', neue_guid)
             self.gcs._db.save_all_values()
             
-            # 5. Datensatz-Auswahl triggern (öffnet Edit-Tab)
+            # SCHRITT 8: Datensatz-Auswahl triggern + Tab 2 öffnen
             self.datensatz_ausgewaehlt.emit(neue_guid)
-            
-            # 6. Zu Tab 2 (Edit) wechseln
             self.tab_widget.setCurrentIndex(1)
             
-            # 7. View aktualisieren (neuer Datensatz soll erscheinen)
+            # View aktualisieren
             if self.view_controller and hasattr(self.view_controller, 'refresh'):
                 self.view_controller.refresh()
-                logger.info("  🔄 View aktualisiert (BasisMatrix neu geladen)")
+                logger.info("  🔄 View aktualisiert")
             
-            logger.info(f"✅ Neuer Datensatz '{name}' erfolgreich erstellt")
+            logger.info(f"✅ Neuer Datensatz '{name}' erfolgreich erstellt (LINEAR)")
             
         except Exception as e:
             logger.error(f"❌ Fehler beim Erstellen des Datensatzes: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self,
@@ -721,14 +840,32 @@ class V2PdvmGenerellerDialog(QWidget):
             module = importlib.import_module(module_name)
             ModuleClass = getattr(module, class_name)
             
-            # Modul initialisieren mit EINFACHER API
-            # WICHTIG: Als Instanzvariable speichern, damit es nicht garbage-collected wird!
-            self.current_edit_module = ModuleClass(
-                framedaten_db=self.framedaten_db,
-                selected_guid=selected_guid,
-                main_app=self.main_app,  # ✅ MainApp-Referenz durchreichen für menu_editor
-                gcs=self.gcs  # ✅ V2: GCS durchreichen statt get_gcs() Aufruf
-            )
+            # ✅ V3: System-Editor - EINFACH & LINEAR!
+            if self.edit_type == 'system_editor':
+                # ✅ EINFACH: TABLE aus framedaten übergeben
+                # Editor arbeitet in dieser Tabelle mit einem Datensatz
+                logger.info(f"  📦 System-Editor: Tabelle = {self.root_table}")
+                
+                # ✅ NUR 2 Parameter: record_uid + table_name
+                self.current_edit_module = ModuleClass(
+                    record_uid=selected_guid,  # ✅ SELECTED GUID, nicht frame_guid!
+                    table_name=self.root_table,  # ✅ TABLE aus framedaten!
+                    parent=self
+                )
+                logger.info(f"  ✅ System-Editor initialisiert: {self.root_table}")
+                
+            else:
+                # Andere Editoren: Verwenden framedaten_db (sys_framedaten)
+                editor_db = self.framedaten_db
+                logger.info(f"  ✅ Editor-DB: sys_framedaten (Standard)")
+                
+                # Modul initialisieren mit alter API
+                self.current_edit_module = ModuleClass(
+                    framedaten_db=editor_db,
+                    selected_guid=selected_guid,
+                    main_app=self.main_app,
+                    gcs=self.gcs
+                )
             
             # Signal verbinden: refresh_requested → Dialog.refresh()
             if hasattr(self.current_edit_module, 'refresh_requested'):
