@@ -31,12 +31,14 @@ class PdvmDateTimePicker(QWidget):
     def __init__(self, parent, pdvm_datetime: Pdvm_DateTime,
                  display="all", display_time_short=False,
                  default_date: float = None,
+                 gcs=None,
                  *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.pdvm_datetime = pdvm_datetime
         self.display = display
         self.display_time_short = display_time_short
         self.default_date = default_date
+        self.gcs = gcs  # GCS für Layout-System
 
         # ─── 1) temporäre Instanz: "self.initial" ──────────────────────────────
         self.initial = Pdvm_DateTime("DEU")
@@ -84,6 +86,20 @@ class PdvmDateTimePicker(QWidget):
             date_edit.setDate(QDate(self.initial.Year, self.initial.Month, self.initial.Day))
             date_edit.setCalendarPopup(True)
             date_edit.dateChanged.connect(self._on_date_changed)
+            
+            # Layout-Stylesheet anwenden (falls GCS verfügbar)
+            try:
+                from pdvm_central_systemsteuerung import get_gcs
+                gcs = get_gcs()
+                if gcs and hasattr(gcs, 'layout'):
+                    date_style = gcs.layout.get_stylesheet('QDateEdit')
+                    cal_style = gcs.layout.get_stylesheet('QCalendarWidget')
+                    if date_style or cal_style:
+                        combined_style = (date_style or "") + "\n" + (cal_style or "")
+                        date_edit.setStyleSheet(combined_style)
+            except Exception as e:
+                logger.debug(f"Layout-System nicht verfügbar: {e}")
+            
             lo.addWidget(date_edit)
             self._date_edit = date_edit
 
@@ -97,6 +113,18 @@ class PdvmDateTimePicker(QWidget):
             time_edit.setTime(QTime(*t))
             time_edit.setKeyboardTracking(False)
             time_edit.timeChanged.connect(self._on_time_changed)
+            
+            # Layout-Stylesheet anwenden (falls GCS verfügbar)
+            try:
+                from pdvm_central_systemsteuerung import get_gcs
+                gcs = get_gcs()
+                if gcs and hasattr(gcs, 'layout'):
+                    time_style = gcs.layout.get_stylesheet('QTimeEdit')
+                    if time_style:
+                        time_edit.setStyleSheet(time_style)
+            except Exception as e:
+                logger.debug(f"Layout-System nicht verfügbar: {e}")
+            
             lo.addWidget(time_edit)
             self._time_edit = time_edit
         

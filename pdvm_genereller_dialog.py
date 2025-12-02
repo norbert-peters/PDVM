@@ -599,121 +599,60 @@ class V2PdvmGenerellerDialog(QWidget):
             logger.info(f"  📝 Name: {name}")
             logger.info(f"  📋 Tabelle: {table_name}")
             
-            # SCHRITT 3: Neue GUID generieren
-            neue_guid = str(uuid.uuid4())
-            logger.info(f"  🆔 Neue GUID: {neue_guid}")
+            # SCHRITT 3: EGALISIERT - create_new_record() für ALLE Tabellen
+            logger.info("  🔄 Verwende create_new_record() für Template-basierten Aufbau")
             
-            # Tabellenname immer in GROSSBUCHSTABEN für METADATEN
-            table_name_upper = table_name.upper()
-            logger.info(f"  📋 Tabelle (GROSS): {table_name_upper}")
-            
-            # Datenbank-Instanz für neuen Datensatz (ohne GUID → leer)
+            # Datenbank-Instanz für neuen Datensatz
             db = PdvmCentralDatenbank(self.root_table)
             
-            # WICHTIG: Container mit GUID + Name initialisieren
-            # Dies setzt _pending_name, der bei save_all_values() in DB-Spalte 'name' geschrieben wird
-            db.set_new_data_container(neue_guid, name)
+            # create_new_record() macht:
+            # - anlegen({}) → neue GUID von DB
+            # - ROOT aus ROOT_CONTROLS aufbauen
+            # - TABLE/SELF_GUID setzen
+            # - save_all_values()
+            neue_guid = db.create_new_record()
             
-            # SCHRITT 4: ROOT aus Template kopieren
-            template_db = PdvmCentralDatenbank(self.root_table, '55555555-5555-5555-5555-555555555555')
-            template_root = template_db.data.get('ROOT', {}).copy()
+            # Name in DB-Spalte 'name' setzen
+            db.set_name(name, neue_guid)
             
-            logger.info(f"  📋 Template ROOT geladen: {len(template_root)} Felder")
+            logger.info(f"  ✅ Datensatz mit create_new_record() erstellt: {neue_guid}")
+            logger.info(f"  ✅ Name gesetzt: {name}")
             
-            # Name und Tabelle in ROOT setzen
-            if is_view:
-                template_root['VIEW_NAME'] = name
-                template_root['TABLE'] = table_name
-                template_root['VIEW_GUID'] = neue_guid
-            elif is_frame:
-                template_root['TABLE'] = table_name
-                template_root['DIALOG_GUID'] = neue_guid
-                template_root['HEADER_TEXT'] = name
-            
-            # ROOT in neue Instanz schreiben
-            db.data['ROOT'] = template_root
-            
-            logger.info(f"  ✅ ROOT initialisiert mit Template-Defaults")
-            
-            # SCHRITT 5: METADATEN-Struktur erstellen
+            # SCHRITT 4: VIEW/FRAME-spezifische Properties überschreiben (falls nötig)
+            # ROOT wurde bereits von create_new_record() aufgebaut, wir überschreiben nur spezifische Felder
             if is_view and table_name:
-                # View: controls (leer) + standard_controls (mit uid + dummy)
-                import uuid as uuid_lib
-                uid_guid = str(uuid_lib.uuid4())
-                dummy_guid = str(uuid_lib.uuid4())
+                from pdvm_central_systemsteuerung import get_gcs
+                gcs = get_gcs()
+                stichtag = gcs.st_inst.PdvmDateTime if gcs else None
                 
-                db.data['METADATEN'] = {
-                    table_name_upper: {
-                        'controls': {},
-                        'standard_controls': {
-                            uid_guid: {
-                                'table': table_name,
-                                'gruppe': '',
-                                'feld': 'uid',
-                                'label': 'UID',
-                                'control_type': 'text',
-                                'width': 250,
-                                'visible': True,
-                                'display_order': 0
-                            },
-                            dummy_guid: {
-                                'table': table_name,
-                                'gruppe': 'DUMMY',
-                                'feld': 'DUMMY',
-                                'label': 'Dummy-Spalte (bitte löschen)',
-                                'control_type': 'text',
-                                'width': 150,
-                                'visible': True,
-                                'display_order': 1
-                            }
-                        }
-                    }
-                }
-                logger.info(f"  ✅ METADATEN erstellt: {table_name_upper} → controls (leer) + standard_controls (uid + dummy)")
+                # VIEW_NAME, VIEW_GUID überschreiben (falls im Template vorhanden)
+                db.set_value('ROOT', 'VIEW_NAME', name, stichtag)
+                db.set_value('ROOT', 'VIEW_GUID', neue_guid, stichtag)
+                if 'TABLE' in db.data.get('ROOT', {}):
+                    db.set_value('ROOT', 'TABLE', table_name, stichtag)
+                
+                db.save_all_values()
+                logger.info(f"  ✅ VIEW-spezifische Properties überschrieben")
             
             elif is_frame and table_name:
-                # Frame: controls (leer) + standard_controls (mit uid + dummy)
-                import uuid as uuid_lib
-                uid_guid = str(uuid_lib.uuid4())
-                dummy_guid = str(uuid_lib.uuid4())
+                from pdvm_central_systemsteuerung import get_gcs
+                gcs = get_gcs()
+                stichtag = gcs.st_inst.PdvmDateTime if gcs else None
                 
-                db.data['METADATEN'] = {
-                    table_name_upper: {
-                        'controls': {},
-                        'standard_controls': {
-                            uid_guid: {
-                                'table': table_name,
-                                'gruppe': '',
-                                'feld': 'uid',
-                                'label': 'UID',
-                                'type': 'text',
-                                'tab': 1,
-                                'display_order': 0,
-                                'read_only': True
-                            },
-                            dummy_guid: {
-                                'table': table_name,
-                                'gruppe': 'DUMMY',
-                                'feld': 'DUMMY',
-                                'label': 'Dummy-Control (bitte löschen)',
-                                'type': 'text',
-                                'tab': 1,
-                                'display_order': 1
-                            }
-                        }
-                    }
-                }
-                logger.info(f"  ✅ METADATEN erstellt: {table_name_upper} → controls (leer) + standard_controls (uid + dummy)")
+                # DIALOG_GUID, HEADER_TEXT überschreiben (falls im Template vorhanden)
+                db.set_value('ROOT', 'DIALOG_GUID', neue_guid, stichtag)
+                db.set_value('ROOT', 'HEADER_TEXT', name, stichtag)
+                if 'TABLE' in db.data.get('ROOT', {}):
+                    db.set_value('ROOT', 'TABLE', table_name, stichtag)
+                
+                db.save_all_values()
+                logger.info(f"  ✅ FRAME-spezifische Properties überschrieben")
             
-            # SCHRITT 6: In DB speichern
-            db.save_all_values()
-            logger.info(f"  💾 Datensatz gespeichert: {self.root_table}/{neue_guid}")
-            
-            # SCHRITT 7: GUID in Systemsteuerung speichern
+            # SCHRITT 5: GUID in Systemsteuerung speichern
             self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', neue_guid)
             self.gcs._db.save_all_values()
             
-            # SCHRITT 8: Datensatz-Auswahl triggern + Tab 2 öffnen
+            # SCHRITT 6: Datensatz-Auswahl triggern + Tab 2 öffnen
             self.datensatz_ausgewaehlt.emit(neue_guid)
             self.tab_widget.setCurrentIndex(1)
             

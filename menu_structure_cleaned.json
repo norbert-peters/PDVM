@@ -1,0 +1,541 @@
+{
+  "META": {
+    "VERSION": "V3",
+    "MIGRATED_FROM": "V2",
+    "VERTIKAL": "vert",
+    "GRUND": "hori_1",
+    "ZUSATZ": "hori_2"
+  },
+  "VERTIKAL": {
+    "7a24c88b-6e53-4398-9528-ad57872b63f5": {
+      "type": "SUBMENU",
+      "label": "Mein Vertikaler Versuch",
+      "icon": null,
+      "command": null,
+      "parent_guid": null,
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "4a08372c-e05f-4ccd-838b-e5a45b7ed500": {
+      "type": "SEPARATOR",
+      "label": "Separator",
+      "icon": null,
+      "command": null,
+      "parent_guid": "7a24c88b-6e53-4398-9528-ad57872b63f5",
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "5e634c33-023d-47b8-bef7-36a1c6d8a636": {
+      "type": "BUTTON",
+      "label": "wo ist der nun",
+      "icon": null,
+      "command": null,
+      "parent_guid": "7a24c88b-6e53-4398-9528-ad57872b63f5",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "58dd2121-b463-4dd3-b16c-1c29e6bab44c": {
+      "type": "SUBMENU",
+      "label": "zweiter Menüpunkt Vertikal",
+      "icon": null,
+      "command": null,
+      "parent_guid": null,
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "6b93cafd-4da7-426a-9e96-f713bcb4f1e6": {
+      "type": "BUTTON",
+      "label": "Schau mal hier",
+      "icon": null,
+      "command": null,
+      "parent_guid": "58dd2121-b463-4dd3-b16c-1c29e6bab44c",
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3": {
+      "type": "SUBMENU",
+      "label": "Eine Ebene tiefer",
+      "icon": null,
+      "command": null,
+      "parent_guid": "58dd2121-b463-4dd3-b16c-1c29e6bab44c",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "b2cf8ebe-8c6b-4a32-9aa9-b890d978bbb8": {
+      "type": "BUTTON",
+      "label": "ein Menüpunkt",
+      "icon": null,
+      "command": null,
+      "parent_guid": "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3",
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "2af0a8e4-4ec4-46e4-8fb9-90e45b9b08a2": {
+      "type": "SEPARATOR",
+      "label": "Separator",
+      "icon": null,
+      "command": null,
+      "parent_guid": "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "4759b831-c142-4e73-a4d3-2cfece799264": {
+      "type": "BUTTON",
+      "label": "schau mal darunter",
+      "icon": null,
+      "command": null,
+      "parent_guid": "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3",
+      "sort_order": 2,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "96d048d7-65ec-4527-9f5f-3e9f04631b29": {
+      "type": "BUTTON",
+      "label": "ein weiterer Versuch",
+      "icon": null,
+      "command": null,
+      "parent_guid": "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3",
+      "sort_order": 3,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "17ac6504-a80d-4087-a8c2-2cb6235eb3c3": {
+      "type": "SUBMENU",
+      "label": "Neues Submenu",
+      "icon": null,
+      "command": null,
+      "parent_guid": null,
+      "sort_order": 2,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "6b61d628-3607-40d4-8124-8d103a7b49ae": {
+      "type": "BUTTON",
+      "label": "Neuer Menüpunkt darunter",
+      "icon": null,
+      "command": null,
+      "parent_guid": "17ac6504-a80d-4087-a8c2-2cb6235eb3c3",
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "802d1afa-67cf-46e1-9ef2-72fc0f0e024a": {
+      "type": "BUTTON",
+      "label": "Neuer Menüpunkt testen",
+      "icon": null,
+      "command": null,
+      "parent_guid": "17ac6504-a80d-4087-a8c2-2cb6235eb3c3",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    },
+    "1088a12a-dc0e-4e5d-9464-d1e13e16bd2e": {
+      "type": "BUTTON",
+      "label": "Neuer Menüpunkt neuer als neu",
+      "icon": null,
+      "command": null,
+      "parent_guid": "17ac6504-a80d-4087-a8c2-2cb6235eb3c3",
+      "sort_order": 2,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null
+    }
+  },
+  "GRUND": {
+    "84013564-e484-445c-9dba-a1b02c68f153": {
+      "type": "SPACER",
+      "label": "@TEMPLATE:1a653694-3132-48d9-bc3e-a512962ae8e6",
+      "sort_order": 0,
+      "parent_guid": null,
+      "template_guid": "1a653694-3132-48d9-bc3e-a512962ae8e6",
+      "icon": null,
+      "visible": false,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "beb82ac7-2990-46a0-8182-a4af1d39f0c2": {
+      "type": "SUBMENU",
+      "label": "Apps",
+      "sort_order": 1,
+      "parent_guid": null,
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "207b25bb-34df-48b0-8d30-853804127655": {
+      "type": "BUTTON",
+      "label": "MeineApps",
+      "sort_order": 0,
+      "parent_guid": "beb82ac7-2990-46a0-8182-a4af1d39f0c2",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "open_app_menu",
+        "params": {
+          "app_name": "MEINEAPPS"
+        }
+      }
+    },
+    "5b4b9a2e-7d13-4d8d-9838-4888f4fb095b": {
+      "type": "BUTTON",
+      "label": "Finanzen",
+      "sort_order": 1,
+      "parent_guid": "beb82ac7-2990-46a0-8182-a4af1d39f0c2",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "open_app_menu",
+        "params": {
+          "app_name": "FINANZEN"
+        }
+      }
+    },
+    "26b78540-3f5d-42f5-9a28-48f81346980b": {
+      "type": "SEPARATOR",
+      "label": "---",
+      "sort_order": 2,
+      "parent_guid": "beb82ac7-2990-46a0-8182-a4af1d39f0c2",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8": {
+      "type": "SUBMENU",
+      "label": "Testbereich",
+      "sort_order": 2,
+      "parent_guid": null,
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "60389b81-a7bb-4839-bbde-cde190ac1d58": {
+      "type": "BUTTON",
+      "label": "Enhanced Multi-Tab Test",
+      "sort_order": 0,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "show_info",
+        "params": {
+          "title": "Test-Funktion",
+          "message": "Diese Test-Funktion ist in V2.0 nicht mehr verfügbar.\n\nDie Sortier- und Projektions-Diagnose wurde durch das neue View-System ersetzt."
+        }
+      }
+    },
+    "190dded7-706e-4336-96cc-0f72eab587be": {
+      "type": "BUTTON",
+      "label": "Enhanced Multi-Tab SOFORT",
+      "sort_order": 1,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "open_view",
+        "params": {
+          "view_guid": null,
+          "mode": "enhanced"
+        }
+      }
+    },
+    "1779b2ff-c403-42cc-aee9-efcdd3266e67": {
+      "type": "BUTTON",
+      "label": "Current Frame Enhanced",
+      "sort_order": 2,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "reload_view",
+        "params": {}
+      }
+    },
+    "98c351d9-88ba-47b7-a914-7ef59a2ec452": {
+      "type": "SEPARATOR",
+      "label": "---",
+      "sort_order": 3,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "802b542c-3c54-4e75-805f-fb366b7358d0": {
+      "type": "SUBMENU",
+      "label": "System",
+      "sort_order": 4,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "97336928-a2d0-42ad-83cc-a7a3df5d2c3e": {
+      "type": "BUTTON",
+      "label": "Menü umschalten",
+      "sort_order": 0,
+      "parent_guid": "802b542c-3c54-4e75-805f-fb366b7358d0",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "toggle_menu",
+        "params": {}
+      }
+    },
+    "08c705ce-f785-46cc-8d39-aa739befe12d": {
+      "type": "SUBMENU",
+      "label": "Unified Dialog V3",
+      "sort_order": 5,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "9bd032a4-452b-4444-9b3f-4cccedbfe0c2": {
+      "type": "BUTTON",
+      "label": "Standard Dialog",
+      "sort_order": 0,
+      "parent_guid": "08c705ce-f785-46cc-8d39-aa739befe12d",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": {
+        "handler": "open_view",
+        "params": {
+          "view_guid": "0d10a0d0-b1a5-4544-b284-e8a09ca979b5"
+        }
+      }
+    },
+    "dfd6552f-c05a-4e43-a746-a479c637cc5f": {
+      "type": "SEPARATOR",
+      "label": "---",
+      "sort_order": 6,
+      "parent_guid": "bdf31548-8d9b-437a-8d72-6ed0c9fc2fb8",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "3d679b28-16af-4fa3-9208-f6498e929faf": {
+      "type": "SUBMENU",
+      "label": "Admin",
+      "sort_order": 3,
+      "parent_guid": null,
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    },
+    "1e98612d-016b-4e6a-a8d6-1156114a9ac3": {
+      "type": "BUTTON",
+      "label": "Admin-Menü",
+      "sort_order": 0,
+      "parent_guid": "3d679b28-16af-4fa3-9208-f6498e929faf",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": "Nur View zum Testen",
+      "command": {
+        "handler": "open_view",
+        "params": {
+          "view_guid": "0d10a0d0-b1a5-4544-b284-e8a09ca979b5"
+        }
+      }
+    },
+    "ec83be52-3a65-433f-b89b-514b197ae93a": {
+      "type": "BUTTON",
+      "label": "Test View",
+      "sort_order": 1,
+      "parent_guid": "3d679b28-16af-4fa3-9208-f6498e929faf",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": "Dialog 'input_controls'",
+      "command": {
+        "handler": "show_dialog",
+        "params": {
+          "dialog_guid": "4078079f-4028-45ed-879c-3c779ecf3d0d"
+        }
+      }
+    },
+    "9080d2ac-9353-47d1-b946-f442e7500d7e": {
+      "type": "BUTTON",
+      "label": "Admin-Benutzermenü",
+      "sort_order": 2,
+      "parent_guid": "3d679b28-16af-4fa3-9208-f6498e929faf",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": "dialog 'menu_editor'",
+      "command": {
+        "handler": "show_dialog",
+        "params": {
+          "dialog_guid": "794cbfc3-ccb6-4681-b432-efa9f44682c8"
+        }
+      }
+    },
+    "435035d7-d4bf-4324-b874-afe42c7d478e": {
+      "type": "SEPARATOR",
+      "label": "---",
+      "sort_order": 3,
+      "parent_guid": "3d679b28-16af-4fa3-9208-f6498e929faf",
+      "template_guid": null,
+      "icon": null,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "command": null
+    }
+  },
+  "ZUSATZ": {
+    "17ac6504-a80d-4087-a8c2-2cb6235eb3c3": {
+      "type": "SUBMENU",
+      "label": "Zusatzmenü für 17ac6504",
+      "icon": null,
+      "command": null,
+      "parent_guid": null,
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "7e3fea1b-d8d2-4215-b2c4-0889f5e5c630": {
+      "type": "SUBMENU",
+      "label": "Sonderfunktionen",
+      "icon": null,
+      "command": null,
+      "parent_guid": "17ac6504-a80d-4087-a8c2-2cb6235eb3c3",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "174a1cd6-5638-4815-b0ea-95ee2184337d": {
+      "type": "BUTTON",
+      "label": "Speichern",
+      "icon": null,
+      "command": null,
+      "parent_guid": "7e3fea1b-d8d2-4215-b2c4-0889f5e5c630",
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "6801eb6c-8984-4461-a8cd-f48ee99f4298": {
+      "type": "BUTTON",
+      "label": "Ausgeben",
+      "icon": null,
+      "command": null,
+      "parent_guid": "7e3fea1b-d8d2-4215-b2c4-0889f5e5c630",
+      "sort_order": 1,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "22dd25cd-a331-4d9c-8a79-31d907ef522f": {
+      "type": "SEPARATOR",
+      "label": "Separator",
+      "icon": null,
+      "command": null,
+      "parent_guid": "7e3fea1b-d8d2-4215-b2c4-0889f5e5c630",
+      "sort_order": 2,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "625b9878-2cc7-44da-ba6c-e89cdc057f4f": {
+      "type": "BUTTON",
+      "label": "Extrawurst",
+      "icon": null,
+      "command": null,
+      "parent_guid": "17ac6504-a80d-4087-a8c2-2cb6235eb3c3",
+      "sort_order": 2,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    },
+    "e58b7a92-c5c2-4d1e-9ca9-a61e894364e3": {
+      "type": "SUBMENU",
+      "label": "Zusatzmenü für e58b7a92",
+      "icon": null,
+      "command": null,
+      "parent_guid": null,
+      "sort_order": 0,
+      "visible": true,
+      "enabled": true,
+      "tooltip": null,
+      "template_guid": null
+    }
+  }
+}

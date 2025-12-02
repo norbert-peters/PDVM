@@ -68,9 +68,6 @@ class PdvmCentralDatenbank:
         self.data: Dict[str, Any] = {}
         self._data_loaded = False
         
-        # Pending name (für neue Datensätze via set_new_data_container)
-        self._pending_name = None
-        
         # Automatische Initialisierung falls GUID vorhanden
         if self.guid:
             self._load_data()
@@ -200,35 +197,6 @@ class PdvmCentralDatenbank:
             self.data = {}
             self._data_loaded = False
     
-    def set_new_data_container(self, guid: str, name: str):
-        """
-        Initialisiert einen neuen Daten-Container für einen neuen Datensatz.
-        
-        Workflow:
-        1. Setzt GUID in der Instanz
-        2. Erstellt leeres Daten-Dictionary
-        3. Beim nächsten save_all_values() wird der Datensatz in DB geschrieben
-        4. Name wird separat in name-Spalte gespeichert
-        
-        Args:
-            guid: Neue GUID für den Datensatz
-            name: Name für die name-Spalte
-        """
-        logger.info(f"🆕 Initialisiere neuen Daten-Container: {guid}")
-        
-        # GUID setzen
-        self.guid = guid
-        
-        # Leeres Dictionary erstellen
-        self.data = {}
-        self._data_loaded = True
-        
-        # Name in _pending_name speichern (wird bei save_all_values() geschrieben)
-        self._pending_name = name
-        
-        logger.info(f"  ✅ Container bereit: GUID={guid}, Name={name}")
-        logger.info(f"  ℹ️ Bei save_all_values() wird Datensatz in DB angelegt")
-
     def get_value(self, gruppe: str, feld: str, ab_zeit: Optional[float] = None) -> Any:
         """
         Liest einen Wert aus der Gruppe/Feld-Struktur.
@@ -444,15 +412,6 @@ class PdvmCentralDatenbank:
                 result[feld] = feld_data
         
         return result
-    
-    # Alias für Abwärtskompatibilität
-    def get_gruppe(self, gruppe: str) -> Dict[str, Any]:
-        """
-        DEPRECATED: Verwende get_value_by_group() stattdessen.
-        
-        Alias für get_value_by_group() zur Abwärtskompatibilität.
-        """
-        return self.get_value_by_group(gruppe)
 
     def set_value(self, gruppe: str, feld: str, wert: Any, ab_zeit: Optional[float] = None):
         """
@@ -524,13 +483,23 @@ class PdvmCentralDatenbank:
         
         self._database.speichern(self.guid, data_to_save)
         
-        # Wenn _pending_name gesetzt ist → name-Spalte aktualisieren
-        if self._pending_name:
-            self._database.set_name(self.guid, self._pending_name)
-            self._pending_name = None  # Reset nach Speicherung
-            logger.info(f"  ✅ Name-Spalte gesetzt für {self.guid}")
-        
         logger.info(f"Alle Daten gespeichert für GUID {self.guid}")
+
+    def set_group(self, gruppe: str, gruppe_data: Dict[str, Any]):
+        """
+        Setzt oder ersetzt eine komplette Gruppe mit allen Feldern.
+        
+        Args:
+            gruppe: Name der Gruppe
+            gruppe_data: Dictionary mit allen Feldern der Gruppe
+        """
+        self._ensure_data_loaded()
+        
+        if not isinstance(gruppe_data, dict):
+            raise ValueError(f"gruppe_data muss ein Dictionary sein, nicht {type(gruppe_data)}")
+        
+        self.data[gruppe] = gruppe_data.copy()
+        logger.debug(f"Gruppe gesetzt: {gruppe} mit {len(gruppe_data)} Feldern")
 
     def delete_group(self, gruppe: str):
         """
@@ -594,12 +563,93 @@ class PdvmCentralDatenbank:
     def create_new_record(self) -> str:
         """
         Erstellt einen neuen Datensatz mit automatischer GUID.
+        Template-basierte Initialisierung mit ROOT_CONTROLS aus Template (55555...).
         
         Returns:
             str: Die neue GUID
+            
+        Raises:
+            ValueError: Wenn Template oder ROOT_CONTROLS fehlen
         """
+        # 1. Template-GUID (55555...)
+        template_guid = '55555555-5555-5555-5555-555555555555'
+        
+        # 2. Template laden und ROOT_CONTROLS prüfen
+        try:
+            template_db = PdvmCentralDatenbank(self.table_name, template_guid)
+            root_controls = template_db.get_value_by_group('ROOT_CONTROLS')
+            
+            if not root_controls:
+                raise ValueError(f"Template {template_guid} hat keine ROOT_CONTROLS Gruppe!")
+            
+            # 3. Prüfe ob TABLE und SELF_GUID in ROOT_CONTROLS vorhanden sind
+            has_table = any(ctrl.get('name') == 'TABLE' for ctrl in root_controls.values())
+            has_self_guid = any(ctrl.get('name') == 'SELF_GUID' for ctrl in root_controls.values())
+            
+            if not has_table or not has_self_guid:
+                raise ValueError(
+                    f"ROOT_CONTROLS müssen TABLE und SELF_GUID enthalten!\n"
+                    f"Gefunden: TABLE={has_table}, SELF_GUID={has_self_guid}"
+                )
+            
+            logger.info(f"✅ Template validiert: {len(root_controls)} ROOT_CONTROLS")
+            
+        except Exception as e:
+            logger.error(f"❌ Template-Validierung fehlgeschlagen: {e}")
+            raise ValueError(f"Kann keinen neuen Datensatz anlegen: {e}")
+        
+        # 4. Leeren Datensatz in DB anlegen → GUID wird automatisch generiert
         new_guid = self._database.anlegen({})
+        logger.info(f"📦 Leerer Datensatz angelegt mit GUID: {new_guid}")
+        
+        # 5. Instanz auf neue GUID setzen
         self.set_guid(new_guid)
+        
+        # 6. Stichtag aus GCS holen (für ab_zeit Parameter)
+        from pdvm_central_systemsteuerung import get_gcs
+        gcs = get_gcs()
+        stichtag = gcs.st_inst.PdvmDateTime if gcs else 1001.0
+        
+        # 7. ROOT-Gruppe dynamisch aus ROOT_CONTROLS aufbauen
+        # WICHTIG: ALLE Properties aus ROOT_CONTROLS werden angelegt!
+        for control_guid, control_def in root_controls.items():
+            prop_name = control_def.get('name')
+            if not prop_name:
+                logger.warning(f"⚠️ Control {control_guid} hat keinen 'name' - übersprungen")
+                continue
+            
+            # Default-Wert aus Control-Definition holen
+            ctrl_type = control_def.get('type', 'string')
+            default = control_def.get('default', '')
+            
+            # Type-basierte Defaults wenn kein expliziter Default vorhanden
+            if ctrl_type in ['bool', 'checkbutton']:
+                value = default if isinstance(default, bool) else False
+            elif ctrl_type == 'int':
+                value = default if isinstance(default, int) else 0
+            elif ctrl_type == 'float':
+                value = default if isinstance(default, float) else 0.0
+            else:
+                value = default if default else ''
+            
+            # Property in ROOT-Gruppe setzen (mit Stichtag)
+            self.set_value('ROOT', prop_name, value, stichtag)
+        
+        # 8. TABLE und SELF_GUID mit den RICHTIGEN Werten überschreiben
+        self.set_value('ROOT', 'TABLE', self.table_name, stichtag)
+        self.set_value('ROOT', 'SELF_GUID', new_guid, stichtag)
+        
+        logger.info(f"✅ ROOT-Gruppe aufgebaut aus ROOT_CONTROLS:")
+        logger.info(f"   TABLE={self.table_name}")
+        logger.info(f"   SELF_GUID={new_guid}")
+        logger.info(f"   Stichtag={'aus GCS' if stichtag else 'aktuell'}")
+        logger.info(f"   Alle Properties: {list(self.data.get('ROOT', {}).keys())}")
+        
+        # 9. Alles in DB speichern
+        self.save_all_values()
+        
+        logger.info(f"✅ Neuer Datensatz vollständig angelegt und gespeichert: {new_guid}")
+        
         return new_guid
 
     def delete_record(self):

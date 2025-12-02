@@ -23,7 +23,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
     
     Args:
         params: {
-            'dialog_guid': str,         # GUID des Dialogs (required)
+            'frame_guid': str,          # GUID des Frames (required)
             'dialog_mode': int,         # Modus (0=neu, 1=bearbeiten, etc.)
             'selected_id': str          # ID des zu bearbeitenden Datensatzes
         }
@@ -37,16 +37,17 @@ def execute(params: dict, context: dict, gcs) -> bool:
     """
     logger.info("🔵 Handler: show_dialog")
     
-    # Parameter
-    dialog_guid = params.get('dialog_guid')
-    if not dialog_guid:
-        logger.error("❌ Parameter 'dialog_guid' fehlt")
+    # Parameter: frame_guid (steuert gesamten Dialog + Editoren)
+    frame_guid = params.get('frame_guid')
+    
+    if not frame_guid:
+        logger.error("❌ Parameter 'frame_guid' fehlt")
         return False
     
     dialog_mode = params.get('dialog_mode', 0)
     selected_id = params.get('selected_id')
     
-    logger.info(f"   Dialog-GUID: {dialog_guid}")
+    logger.info(f"   Frame-GUID: {frame_guid}")
     logger.info(f"   Dialog-Mode: {dialog_mode}")
     logger.info(f"   Selected-ID: {selected_id}")
     
@@ -62,7 +63,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
         
         # Dialog erstellen
         dialog_widget = V2PdvmGenerellerDialog(
-            frame_guid=dialog_guid,
+            frame_guid=frame_guid,
             parent=main_app.workspace_container,
             main_app=main_app
         )
@@ -88,7 +89,7 @@ def execute(params: dict, context: dict, gcs) -> bool:
         # Referenz speichern
         main_app.current_dialog_widget = dialog_widget
         
-        logger.info(f"✅ Dialog geöffnet: {dialog_guid}")
+        logger.info(f"✅ Dialog geöffnet: Frame={frame_guid}")
         return True
             
     except Exception as e:

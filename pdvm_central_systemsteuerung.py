@@ -172,6 +172,11 @@ class PdvmCentralSystemsteuerung(QObject):
         self._temp_dt_inst = Pdvm_DateTime(country)
         logger.info(f"✅ Pdvm_DateTime Instanzen erstellt für Country: {country}")
 
+        # Layout-Manager initialisieren (für zentrale Style-Verwaltung)
+        from pdvm_layout_manager import PdvmLayoutManager
+        self.layout = PdvmLayoutManager(self)
+        logger.info(f"🎨 Layout-Manager initialisiert")
+
         # Stichtag aus Systemsteuerung laden
         stored_stichtag = self._db.get_static_value(self.user_guid, 'stichtag') if user_guid in self._db.data and 'stichtag' in self._db.data[user_guid] else None
         
@@ -499,7 +504,7 @@ class PdvmCentralSystemsteuerung(QObject):
         
         try:
             # 1. Gruppe aus GCS laden
-            gruppe_data = self._menu_system_db.get_gruppe(gruppe)
+            gruppe_data = self._menu_system_db.get_value_by_group(gruppe)
             if not gruppe_data or not isinstance(gruppe_data, dict):
                 logger.debug(f"  ℹ️ Gruppe {gruppe} leer oder ungültig")
                 return
@@ -647,7 +652,7 @@ class PdvmCentralSystemsteuerung(QObject):
         # SCHRITT 3: Zusatzmenü-GUIDs in Menü-Items eintragen (VERTIKAL + GRUND)
         for gruppe_name in ['VERTIKAL', 'GRUND']:
             try:
-                gruppe = self._menu_system_db.get_gruppe(gruppe_name)
+                gruppe = self._menu_system_db.get_value_by_group(gruppe_name)
                 if not isinstance(gruppe, dict):
                     continue
                 
@@ -710,7 +715,7 @@ class PdvmCentralSystemsteuerung(QObject):
         
         # ZUSATZ-Gruppe einmal laden für Performance
         try:
-            zusatz_gruppe = self._menu_system_db.get_gruppe('ZUSATZ')
+            zusatz_gruppe = self._menu_system_db.get_value_by_group('ZUSATZ')
             if not isinstance(zusatz_gruppe, dict):
                 zusatz_gruppe = {}
         except:
@@ -800,7 +805,7 @@ class PdvmCentralSystemsteuerung(QObject):
         
         try:
             # Gesamte ZUSATZ-Gruppe laden
-            zusatz_gruppe = self._menu_system_db.get_gruppe('ZUSATZ')
+            zusatz_gruppe = self._menu_system_db.get_value_by_group('ZUSATZ')
             
             if not zusatz_gruppe or not isinstance(zusatz_gruppe, dict):
                 logger.warning(f"⚠️ ZUSATZ-Gruppe leer oder ungültig")
@@ -1243,6 +1248,201 @@ class PdvmCentralSystemsteuerung(QObject):
         
         # Übersetzung suchen
         return options.get(str(raw_value), str(raw_value))
+    
+    # ==========================================
+    # V3.0 DROPDOWN/HELP CONFIG SYSTEM (NEU)
+    # ==========================================
+    
+    def get_dropdown_options_v3(self, config: dict) -> list:
+        """
+        ✅ V3.0 DROPDOWN-SYSTEM
+        
+        Holt Dropdown-Optionen aus config-gesteuerter Struktur.
+        Unterstützt mehrsprachige edit_list Strukturen.
+        
+        STRUKTUR:
+            config = {
+                "table": "sys_dropdowndaten",
+                "key": "2a60c785-...",  # UID des Dropdown-Datensatzes
+                "feld": "anrede",       # Welches Feld aus edit_list
+                "gruppe": ""            # Optional: Sprach-Override (sonst DEFAULT_LANGUAGE)
+            }
+        
+        RÜCKGABE:
+            [{"key": "w", "value": "Frau"}, {"key": "m", "value": "Herr"}, ...]
+        
+        Args:
+            config: Config-Dictionary mit table, key, feld, gruppe
+            
+        Returns:
+            list: Edit-List mit Key-Value-Paaren für Dropdown
+        """
+        self._ensure_initialized()
+        
+        if not config or not isinstance(config, dict):
+            logger.warning("⚠️ Ungültige Dropdown-Config")
+            return []
+        
+        table = config.get('table')
+        key = config.get('key')
+        feld = config.get('feld')
+        gruppe = config.get('gruppe')  # Optional
+        
+        if not table or not key or not feld:
+            logger.warning(f"⚠️ Incomplete dropdown config: {config}")
+            return []
+        
+        # Cache-Key für Performance
+        cache_key = f"{table}_{key}_{feld}_{gruppe or 'default'}"
+        
+        if not hasattr(self, '_dropdown_cache_v3'):
+            self._dropdown_cache_v3 = {}
+        
+        if cache_key in self._dropdown_cache_v3:
+            logger.debug(f"📋 Dropdown aus Cache: {feld}")
+            return self._dropdown_cache_v3[cache_key]
+        
+        try:
+            # Datensatz aus Tabelle laden
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            db = PdvmCentralDatenbank(table, key)
+            
+            # ROOT laden für DEFAULT_LANGUAGE
+            root_data = db.get_value_by_group('ROOT')
+            if not root_data:
+                logger.error(f"❌ Keine ROOT-Daten für {key} in {table}")
+                return []
+            
+            # Sprache bestimmen: gruppe-override ODER DEFAULT_LANGUAGE ODER GCS-Language
+            if gruppe:
+                language = gruppe
+            else:
+                language = root_data.get('DEFAULT_LANGUAGE', self.language)
+            
+            logger.debug(f"🌍 Verwende Sprache: {language}")
+            
+            # Sprach-Gruppe laden
+            language_data = db.get_value_by_group(language)
+            if not language_data:
+                logger.error(f"❌ Keine Daten für Sprache {language}")
+                return []
+            
+            # Feld suchen in Sprach-Gruppe
+            field_data = None
+            for guid, item_data in language_data.items():
+                if item_data.get('name') == feld:
+                    field_data = item_data
+                    break
+            
+            if not field_data:
+                logger.error(f"❌ Feld '{feld}' nicht gefunden in {language}")
+                return []
+            
+            # edit_list extrahieren
+            edit_list = field_data.get('edit_list', [])
+            
+            if not isinstance(edit_list, list):
+                logger.error(f"❌ edit_list ist keine Liste: {type(edit_list)}")
+                return []
+            
+            # Cache speichern
+            self._dropdown_cache_v3[cache_key] = edit_list
+            
+            logger.info(f"✅ Dropdown geladen: {feld} ({len(edit_list)} Optionen)")
+            return edit_list
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden von Dropdown '{feld}': {e}", exc_info=True)
+            return []
+    
+    def translate_dropdown_value_v3(self, config: dict, raw_value: str) -> str:
+        """
+        ✅ V3.0 DROPDOWN-ÜBERSETZUNG
+        
+        Übersetzt raw_value (key) zu display_text (value) basierend auf config.
+        
+        Args:
+            config: Config-Dictionary (siehe get_dropdown_options_v3)
+            raw_value: Der rohe Wert (z.B. 'm')
+            
+        Returns:
+            str: Übersetzter Display-Text oder Raw-Wert als Fallback
+        """
+        if not raw_value:
+            return ""
+        
+        # Optionen laden
+        options = self.get_dropdown_options_v3(config)
+        
+        # Übersetzung suchen
+        for option in options:
+            if option.get('key') == str(raw_value):
+                return option.get('value', str(raw_value))
+        
+        # Fallback: Raw-Wert
+        logger.debug(f"⚠️ Keine Übersetzung für '{raw_value}' gefunden")
+        return str(raw_value)
+    
+    def get_help_text(self, config: dict) -> str:
+        """
+        ✅ V3.0 HELP-SYSTEM
+        
+        Holt format_text (Rich-Text HTML) aus Help-Config.
+        Verwendet gleiche Struktur wie Dropdown-System.
+        
+        Args:
+            config: Config-Dictionary mit table, key, feld, gruppe
+            
+        Returns:
+            str: HTML-formatierter Hilfetext oder leerer String
+        """
+        self._ensure_initialized()
+        
+        if not config or not isinstance(config, dict):
+            logger.warning("⚠️ Ungültige Help-Config")
+            return ""
+        
+        table = config.get('table')
+        key = config.get('key')
+        feld = config.get('feld')
+        gruppe = config.get('gruppe')
+        
+        if not table or not key or not feld:
+            logger.warning(f"⚠️ Incomplete help config: {config}")
+            return ""
+        
+        try:
+            # Datensatz laden (analog zu Dropdown)
+            from pdvm_central_datenbank import PdvmCentralDatenbank
+            db = PdvmCentralDatenbank(table, key)
+            
+            # ROOT für DEFAULT_LANGUAGE
+            root_data = db.get_value_by_group('ROOT')
+            if not root_data:
+                return ""
+            
+            # Sprache bestimmen
+            language = gruppe if gruppe else root_data.get('DEFAULT_LANGUAGE', self.language)
+            
+            # Sprach-Gruppe laden
+            language_data = db.get_value_by_group(language)
+            if not language_data:
+                return ""
+            
+            # Feld suchen
+            for guid, item_data in language_data.items():
+                if item_data.get('name') == feld:
+                    # format_text extrahieren
+                    format_text = item_data.get('format_text', '')
+                    logger.info(f"✅ Hilfetext geladen für '{feld}'")
+                    return format_text
+            
+            logger.warning(f"⚠️ Feld '{feld}' nicht in Help-Daten gefunden")
+            return ""
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden von Help-Text '{feld}': {e}", exc_info=True)
+            return ""
     
     # ==========================================
     # EINFACHE PROJEKTIONS-ARCHITEKTUR

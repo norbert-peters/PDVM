@@ -13,7 +13,7 @@ DATUM: 06.11.2025
 VERSION: 0.9
 STATUS: Produktionsbereit (Beta)
 """
-
+ 
 import sys
 import os
 import logging

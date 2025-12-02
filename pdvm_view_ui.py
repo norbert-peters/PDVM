@@ -451,7 +451,7 @@ class PdvmViewUI(QWidget):
         header_tooltips = []
         for col_key in column_keys:
             control_config = all_controls.get(col_key, {})
-            label = control_config.get('name', col_key)
+            label = control_config.get('label', col_key)
             control_type = control_config.get('control_type', '')
             
             # FEATURE 3: Im Expert Mode Control-Key in zweiter Zeile anzeigen
@@ -824,7 +824,7 @@ class PdvmViewUI(QWidget):
             if control_config:
                 self.visible_columns.append({
                     'key': col_key,
-                    'label': control_config.get('name', col_key),
+                    'label': control_config.get('label', col_key),
                     'type': control_config.get('type', 'string'),
                     'display_order': control_config.get('display_order', 999),
                     'expert_mode': control_config.get('expert_mode', False)
@@ -1892,7 +1892,7 @@ class PdvmViewUI(QWidget):
                 header_row = []
                 for col in visible_columns:
                     control = self.current_controls.get(col, {})
-                    header_name = control.get('name', col)
+                    header_name = control.get('label', col)
                     header_row.append(header_name)
                 writer.writerow(header_row)
                 

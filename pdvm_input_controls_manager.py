@@ -56,7 +56,7 @@ class PdvmInputControlsManager(QObject):
     def __init__(self, framedaten_db, selected_guid: str, frame_guid: str = None, main_app=None, gcs=None):
         """
         Args:
-            framedaten_db: Framedaten-DB (für ROOT_TABLE, HEADER, METADATEN)
+            framedaten_db: Framedaten-DB (für TABLE, HEADER, METADATEN)
                           Die DB-Instanz IST bereits für die Frame-GUID - keine redundante Speicherung!
             selected_guid: GUID des ausgewählten Datensatzes
             frame_guid: DEPRECATED - wird ignoriert (framedaten_db ist die DB für diese Frame)
@@ -103,7 +103,7 @@ class PdvmInputControlsManager(QObject):
         Erstellt Widget mit allen Controls (ULTRA EINFACH!)
         
         ABLAUF:
-        1. Framedaten laden (ROOT_TABLE, HEADER, METADATEN)
+        1. Framedaten laden (TABLE, HEADER, METADATEN)
         2. ROOT-Instanz erstellen (NUR DIESE EINE!)
         3. Controls erstellen (AUTONOM!)
         4. UI zusammenbauen (Tabs, Buttons, etc.)
@@ -341,7 +341,7 @@ class PdvmInputControlsManager(QObject):
         Lädt Framedaten und Metadaten
         
         Returns:
-            (header_text, root_table, controls_meta_list)
+            (header_text, root_table (aus TABLE), controls_meta_list)
         """
         logger.info("📂 Lade Framedaten und Metadaten")
         
@@ -351,10 +351,10 @@ class PdvmInputControlsManager(QObject):
             if not header_text:
                 header_text = "Datenbearbeitung"
             
-            # [2] ROOT_TABLE
-            root_table, _ = self.framedaten_db.get_value('ROOT', 'ROOT_TABLE')
+            # [2] TABLE (nicht mehr ROOT_TABLE!)
+            root_table, _ = self.framedaten_db.get_value('ROOT', 'TABLE')
             if not root_table:
-                raise ValueError("ROOT_TABLE nicht gefunden!")
+                raise ValueError("TABLE nicht gefunden!")
             
             # [3] TAB-KONFIGURATION (wie V2)
             self._load_tab_config()
@@ -363,7 +363,7 @@ class PdvmInputControlsManager(QObject):
             controls_meta = self._load_controls_meta()
             
             logger.info(f"  ✅ Header: {header_text}")
-            logger.info(f"  ✅ ROOT_TABLE: {root_table}")
+            logger.info(f"  ✅ TABLE: {root_table}")
             logger.info(f"  ✅ Controls: {len(controls_meta)}")
             
             return header_text, root_table, controls_meta
@@ -401,11 +401,19 @@ class PdvmInputControlsManager(QObject):
     
     def _load_controls_meta(self) -> List[dict]:
         """
-        Lädt Metadaten aus framedaten.db (wie V2)
+        Lädt Metadaten aus framedaten.db (NEUE STRUKTUR V2)
         
-        GRUPPE: METADATEN
-        FELDER: <FIELD_KEY> (z.B. "PERSONDATEN_PERSDATEN_FAMILIENNAME")
-        WERTE: JSON-String mit Metadaten
+        NEUE STRUKTUR:
+        METADATEN[TABELLE][controls][GUID] = {
+            'table': 'PERSONDATEN',
+            'gruppe': 'PERSDATEN',
+            'feld': 'FAMILIENNAME',
+            'label': 'Familienname',
+            'display_order': 10,
+            'tab': 1,
+            'source_path': 'root',
+            ...weitere Properties
+        }
         
         Returns:
             Liste mit Metadaten-Dicts
@@ -415,56 +423,66 @@ class PdvmInputControlsManager(QObject):
         controls_meta = []
         
         try:
-            # Gruppe METADATEN holen (wie V2)
-            metadaten = self.framedaten_db.get_gruppe('METADATEN')
+            # ✅ NEUE LINEARE STRUKTUR: Alle Gruppen außer ROOT durchlaufen
+            # Framedaten haben jetzt: ROOT, PERSONDATEN, FINANZDATEN, etc.
+            all_groups = [k for k in self.framedaten_db.data.keys() if k != 'ROOT']
             
-            if not metadaten:
-                logger.warning("  ⚠️ Gruppe 'METADATEN' nicht gefunden!")
+            if not all_groups:
+                logger.warning("  ⚠️ Keine Gruppen außer ROOT gefunden!")
                 return []
             
-            # Über alle Fields iterieren
-            for field_key, field_config in metadaten.items():
-                # Field-Key Format: TABELLE_GRUPPE_FELD
-                parts = field_key.split('_')
-                if len(parts) < 3:
-                    logger.warning(f"  ⚠️ Ungültiger field_key: {field_key}")
+            logger.info(f"  📂 Lade Controls aus {len(all_groups)} Gruppen: {all_groups}")
+            
+            # Iteriere über alle Gruppen (PERSONDATEN, FINANZDATEN, etc.)
+            for gruppe_name in all_groups:
+                gruppe_data = self.framedaten_db.get_value_by_group(gruppe_name)
+                
+                if not isinstance(gruppe_data, dict):
+                    logger.warning(f"  ⚠️ Gruppe '{gruppe_name}' ist kein Dictionary - überspringe")
                     continue
                 
-                # Extrahiere Gruppe und Feld
-                gruppe = parts[1].upper()
-                feld = '_'.join(parts[2:]).upper()
-                
-                # Extrahiere Attribute
-                if isinstance(field_config, dict):
-                    label = field_config.get('label', feld.capitalize())
-                    source_path = field_config.get('source_path', 'root')
-                    tab = field_config.get('tab', 1)
-                    order = field_config.get('order', len(controls_meta))
-                else:
-                    label = feld.capitalize()
-                    source_path = 'root'
-                    tab = 1
-                    order = len(controls_meta)
-                
-                # Control-Metadaten hinzufügen
-                controls_meta.append({
-                    'field_key': field_key,
-                    'gruppe': gruppe,
-                    'feld': feld,
-                    'label': label,
-                    'order': order,
-                    'tab': tab,
-                    'source_path': source_path,
-                    'field_config': field_config
-                })
+                # Iteriere über Controls (GUID -> control_config)
+                for control_guid, control_config in gruppe_data.items():
+                    if not isinstance(control_config, dict):
+                        continue
+                    
+                    # Extrahiere Properties (lineare Struktur)
+                    table = control_config.get('table', '')  # Muss in control_config definiert sein!
+                    gruppe = control_config.get('gruppe', '')
+                    feld = control_config.get('feld', '')
+                    label = control_config.get('label', feld.capitalize())
+                    source_path = control_config.get('source_path', 'root')
+                    tab = control_config.get('tab', 1)
+                    display_order = control_config.get('display_order', len(controls_meta))
+                    
+                    # Validierung
+                    if not gruppe or not feld:
+                        logger.warning(f"  ⚠️ Control {control_guid} hat keine gruppe/feld - überspringe")
+                        continue
+                    
+                    # Control-Metadaten hinzufügen
+                    controls_meta.append({
+                        'control_guid': control_guid,
+                        'table': table,
+                        'gruppe': gruppe,
+                        'feld': feld,
+                        'field_key': f"{table}_{gruppe}_{feld}",  # Kompatibilität
+                        'label': label,
+                        'order': display_order,
+                        'tab': tab,
+                        'source_path': source_path,
+                        'field_config': control_config
+                    })
             
             # Nach Order sortieren
             controls_meta.sort(key=lambda x: x.get('order', 0))
             
-            logger.info(f"  ✅ {len(controls_meta)} Metadaten geladen")
+            logger.info(f"  ✅ {len(controls_meta)} Metadaten geladen (neue Struktur)")
             
         except Exception as e:
             logger.error(f"  ❌ Fehler beim Laden der Metadaten: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return controls_meta
     

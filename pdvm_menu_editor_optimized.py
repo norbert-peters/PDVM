@@ -413,7 +413,7 @@ agung nötig!
                 if reply == QMessageBox.Yes:
                     try:
                         # Alle Children finden und löschen
-                        items = self.db.get_gruppe("ZUSATZ")
+                        items = self.db.get_value_by_group("ZUSATZ")
                         to_delete = [self.current_guid]  # Root
                         
                         # Rekursiv alle Descendants finden
@@ -650,7 +650,7 @@ agung nötig!
         parent_guid = item_data.get('parent_guid')
         
         # Alle Items der Gruppe holen
-        items = self.db.get_gruppe(self.current_gruppe)
+        items = self.db.get_value_by_group(self.current_gruppe)
         
         # Kinder finden
         children = [
@@ -760,7 +760,7 @@ class MenuListWidget(QWidget):
         
         try:
             # Gruppe aus DB holen
-            items = self.db.get_gruppe(self.gruppe)
+            items = self.db.get_value_by_group(self.gruppe)
             
             # Prüfe ob items ein Dict ist (nicht Liste oder None)
             if not isinstance(items, dict):
@@ -948,7 +948,7 @@ class MenuListWidget(QWidget):
             new_guid = str(uuid.uuid4())
             
             # sort_order = Anzahl Top-Level Items (parent_guid = None)
-            items = self.db.get_gruppe(self.gruppe)
+            items = self.db.get_value_by_group(self.gruppe)
             
             # ZUSATZ-Modus: Parent ist Root-SUBMENU, nicht None!
             if self.root_filter_guid:
@@ -1002,7 +1002,7 @@ class MenuListWidget(QWidget):
             return
         
         item_guid = current_item.data(Qt.UserRole)
-        items = self.db.get_gruppe(self.gruppe)
+        items = self.db.get_value_by_group(self.gruppe)
         item_data = items.get(item_guid)
         
         if not item_data:
@@ -1056,7 +1056,7 @@ class MenuListWidget(QWidget):
                 self.db.delete_field(self.gruppe, item_guid)
                 
                 # Parent-Ebene neu sortieren (Lücken schließen)
-                items = self.db.get_gruppe(self.gruppe)  # Neu holen nach delete
+                items = self.db.get_value_by_group(self.gruppe)  # Neu holen nach delete
                 resort_parent_children(items, parent_guid, stichtag, self.db)
                 
                 # Liste neu laden
@@ -1093,7 +1093,7 @@ class MenuListWidget(QWidget):
                 return
             
             stichtag = gcs.st_inst.PdvmDateTime
-            items = self.db.get_gruppe(self.gruppe)
+            items = self.db.get_value_by_group(self.gruppe)
             
             # 1. VERSCHOBENES ITEM + ALTER PARENT
             moved_row = row if row < start else row - 1
@@ -1303,7 +1303,7 @@ class PdvmMenuEditorOptimized(QWidget):
             
             # Validierung: Leere Labels → "Unbekannt"
             for gruppe in ['VERTIKAL', 'GRUND']:
-                items = self.db.get_gruppe(gruppe)
+                items = self.db.get_value_by_group(gruppe)
                 for guid, item_data in items.items():
                     if not item_data.get('label', '').strip():
                         item_data['label'] = 'Unbekannt'

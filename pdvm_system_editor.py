@@ -1,6 +1,6 @@
 """
-PDVM System Editor V2 - Vereinfachte flache Struktur
-======================================================
+PDVM System Editor V2 - Vereinfachte flache Struktur mit Property Input Controls
+==================================================================================
 
 Komplett neu entwickelt für lineare GRUPPE→FELD Struktur ohne Verschachtelungen.
 
@@ -9,19 +9,30 @@ ARCHITEKTUR:
 2. TAB 2: 3-Spalten-Layout
    - Spalte 1: Gruppen-Liste (+ / -)
    - Spalte 2: Felder-Liste (+ / -) mit ↑↓ Sortierung
-   - Spalte 3: Properties-Editor + Configs-Sektion
+   - Spalte 3: Properties-Editor (PdvmPropertyInputControl) + Configs-Sektion
 
 FEATURES:
+- 🆕 Template-gesteuerte Property Input Controls (autonom, sortiert nach display_order)
+- 🆕 read_only Unterstützung aus Template (grauer Hintergrund + disabled)
+- 🆕 Type-basierte Widgets (string, int, float, bool, dropdown, etc.)
+- 🆕 Dropdown-Options aus configs.dropdown
 - Farbliche Markierung: Gelb=geändert, Grün=neu, Rot=gelöscht
 - Undo/Redo vor Save
 - Validierung vor Save
 - Property-Kopie für schnelles Anlegen
 - Tabellen-spezifische Templates
 
+PROPERTY INPUT CONTROLS:
+- Laden aus Template (55555...) ROOT_CONTROLS oder CONTROL_PROPERTIES
+- Automatische Sortierung nach display_order
+- read_only, Type, Label, Validierung aus Template
+- Signal value_changed → _on_property_changed()
+
 DATENFLUSS:
-PdvmCentralDatenbank → self.data (dict) → UI → self.changes_stack → Save
+PdvmCentralDatenbank → self.data (dict) → PdvmPropertyInputControl → self.data → Save
 
 Erstellt: 26.11.2025
+Aktualisiert: 26.11.2025 (Property Input Controls Integration)
 """
 
 import sys
@@ -42,6 +53,7 @@ from PyQt5.QtGui import QColor, QFont
 # Import PdvmCentralDatenbank
 from pdvm_central_datenbank import PdvmCentralDatenbank
 from pdvm_central_systemsteuerung import get_gcs
+from pdvm_property_input_control import PdvmPropertyInputControl
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +113,7 @@ class PdvmSystemEditor(QDialog):
         
         # UI-Komponenten
         self.root_widgets = {}   # Widgets für ROOT-Tab
+        self.property_widgets = {}  # {property_name: PdvmPropertyInputControl} für aktuelles Feld
         self.gruppe_list = None  # Gruppen-Liste
         self.feld_list = None    # Felder-Liste
         self.property_container = None  # Container für Properties
@@ -113,6 +126,29 @@ class PdvmSystemEditor(QDialog):
         self._connect_signals()
         
         logger.info(f"✅ System-Editor V2 initialisiert: {table_name} / {record_uid}")
+    
+    def _get_name_from_root(self) -> str:
+        """Ermittelt den Satznamen aus der Tabellenspalte 'name'
+        
+        Nutzt db.get_name() um den Namen direkt aus der Tabelle zu lesen
+        (z.B. sys_framedaten.name, sys_viewdaten.name etc.)
+        
+        Returns:
+            Name oder 'Unbenannt'
+        """
+        try:
+            # Satzname direkt aus Tabellenspalte 'name' holen
+            name_value = self.db.get_name(self.record_uid)
+            
+            if name_value:
+                return str(name_value)
+            
+            # Fallback: Erste paar Zeichen der GUID
+            return f"Unbenannt ({self.record_uid[:8]})"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Fehler beim Ermitteln des Satznamens: {e}")
+            return 'Unbenannt'
     
     def _load_data(self):
         """Lädt Daten aus Datenbank"""
@@ -163,6 +199,70 @@ class PdvmSystemEditor(QDialog):
             }
         }
     
+    def _load_template_controls(self, template_guid: str, gruppe_name: str) -> dict:
+        """Lädt Control-Definitionen aus Template
+        
+        Args:
+            template_guid: GUID des Templates (55555...)
+            gruppe_name: Name der Gruppe (ROOT → ROOT_CONTROLS, andere → CONTROL_PROPERTIES)
+        
+        Returns:
+            Dict mit Control-Definitionen oder None bei Fehler
+        """
+        try:
+            # Template-DB öffnen
+            template_db = PdvmCentralDatenbank(self.table_name, template_guid)
+            
+            # Richtige Gruppe je nach Kontext
+            if gruppe_name == 'ROOT':
+                control_gruppe = 'ROOT_CONTROLS'
+            else:
+                control_gruppe = 'CONTROL_PROPERTIES'
+            
+            # Controls laden
+            controls = template_db.get_value_by_group(control_gruppe)
+            
+            if not controls:
+                logger.warning(f"⚠️ Keine {control_gruppe} im Template gefunden")
+                return None
+            
+            logger.info(f"✅ Template-Controls geladen: {len(controls)} aus {control_gruppe}")
+            return controls
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden der Template-Controls: {e}")
+            return None
+    
+    def _get_default_for_control(self, control_def: dict) -> any:
+        """Ermittelt Default-Wert basierend auf Control-Definition
+        
+        Args:
+            control_def: Control-Definition mit type, default, etc.
+        
+        Returns:
+            Default-Wert passend zum Type
+        """
+        # Type aus Definition
+        ctrl_type = control_def.get('type', 'string')
+        
+        # Expliziter Default
+        if 'default' in control_def:
+            return control_def['default']
+        
+        # Type-basierte Defaults
+        type_defaults = {
+            'string': '',
+            'int': 0,
+            'float': 0.0,
+            'bool': False,
+            'checkbutton': False,
+            'date': None,
+            'list': [],
+            'dict': {}
+        }
+        
+        return type_defaults.get(ctrl_type, '')
+    
     def _setup_ui(self):
         """Baut UI auf"""
         self.setWindowTitle(f"System-Editor: {self.table_name}")
@@ -170,6 +270,39 @@ class PdvmSystemEditor(QDialog):
         
         # Haupt-Layout
         main_layout = QVBoxLayout(self)
+        
+        # === INFORMATIONSZEILE ===
+        info_widget = QWidget()
+        info_widget.setStyleSheet("background-color: #E8F4F8; padding: 8px; border: 1px solid #B0D4E3; border-radius: 4px;")
+        info_layout = QHBoxLayout(info_widget)
+        info_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Tabelle
+        table_label = QLabel(f"<b>Tabelle:</b> {self.table_name}")
+        table_label.setFont(QFont("Arial", 10))
+        info_layout.addWidget(table_label)
+        
+        # Separator
+        info_layout.addWidget(QLabel("|"))
+        
+        # GUID
+        guid_label = QLabel(f"<b>GUID:</b> {self.record_uid[:8]}...{self.record_uid[-8:]}")
+        guid_label.setFont(QFont("Arial", 10))
+        guid_label.setToolTip(f"Vollständige GUID: {self.record_uid}")
+        info_layout.addWidget(guid_label)
+        
+        # Separator
+        info_layout.addWidget(QLabel("|"))
+        
+        # Name (aus ROOT Gruppe holen - könnte in verschiedenen Feldern sein)
+        name_value = self._get_name_from_root()
+        self.name_label = QLabel(f"<b>Name:</b> {name_value}")
+        self.name_label.setFont(QFont("Arial", 10))
+        info_layout.addWidget(self.name_label)
+        
+        info_layout.addStretch()
+        
+        main_layout.addWidget(info_widget)
         
         # Tab-Widget
         self.tabs = QTabWidget()
@@ -217,27 +350,111 @@ class PdvmSystemEditor(QDialog):
         main_layout.addLayout(button_layout)
     
     def _create_root_tab(self) -> QWidget:
-        """Erstellt ROOT Properties Tab"""
+        """Erstellt ROOT Properties Tab mit Property Input Controls"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Scroll-Area für viele Properties
+        # Scroll-Area für viele Properties mit GroupBox
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        form_layout = QFormLayout(scroll_content)
+        
+        # GroupBox für ROOT Properties (wie bei Configs)
+        root_group = QGroupBox("ROOT Properties")
+        root_layout = QVBoxLayout(root_group)
+        root_layout.setSpacing(5)  # Enger Abstand zwischen Properties
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Template-Controls für ROOT laden
+        template_guid = '55555555-5555-5555-5555-555555555555'
+        template_controls = self._load_template_controls(template_guid, 'ROOT')
+        
+        logger.info(f"🔍 DEBUG ROOT: Template Controls geladen: {bool(template_controls)}")
+        if template_controls:
+            logger.info(f"🔍 DEBUG ROOT: Anzahl Controls: {len(template_controls)}")
         
         # ROOT-Properties durchgehen
         root_data = self.data.get('ROOT', {})
         
-        for key, value in sorted(root_data.items()):
-            # Widget basierend auf Typ erstellen
-            editor_widget = self._create_editor_widget(value, f"ROOT.{key}")
-            self.root_widgets[key] = editor_widget
+        if template_controls:
+            # === TEMPLATE-BASIERT: Property Input Controls ===
             
-            label = QLabel(f"{key}:")
-            label.setFont(QFont("Arial", 10, QFont.Bold))
-            form_layout.addRow(label, editor_widget)
+            # Build property_name → control_def map
+            prop_controls = {}
+            for ctrl_guid, ctrl_def in template_controls.items():
+                prop_name = ctrl_def.get('name')
+                if prop_name:
+                    prop_controls[prop_name] = ctrl_def
+            
+            # Sortiere nach display_order
+            properties_sorted = []
+            for prop_name, prop_value in root_data.items():
+                control_def = prop_controls.get(prop_name, {})
+                display_order = self._safe_display_order(control_def)
+                properties_sorted.append((display_order, prop_name, prop_value, control_def))
+            
+            properties_sorted.sort(key=lambda x: x[0])
+            
+            # Property Input Controls erstellen
+            for display_order, prop_name, prop_value, control_def in properties_sorted:
+                if not control_def:
+                    control_def = {
+                        'name': prop_name,
+                        'label': prop_name,
+                        'type': 'string',
+                        'display_order': 999
+                    }
+                
+                try:
+                    property_ic = PdvmPropertyInputControl(control_def, prop_value)
+                    property_ic.value_changed.connect(
+                        lambda name, value, path=f"ROOT.{prop_name}": 
+                            self._on_root_property_changed(path, value)
+                    )
+                    
+                    root_layout.addWidget(property_ic)
+                    self.root_widgets[prop_name] = property_ic
+                    
+                    logger.debug(f"  ROOT Property Input Control: {prop_name} (order={display_order})")
+                    
+                except Exception as e:
+                    logger.error(f"  ❌ Fehler: {e}")
+                    # Fallback
+                    fallback = QWidget()
+                    fallback_layout = QHBoxLayout(fallback)
+                    fallback_layout.addWidget(QLabel(f"{prop_name}:"))
+                    fallback_layout.addWidget(QLabel(str(prop_value)))
+                    root_layout.addWidget(fallback)
+            
+            logger.info(f"✅ {len(self.root_widgets)} ROOT Property Input Controls erstellt")
+            
+        else:
+            # === FALLBACK: Legacy-Widgets ===
+            logger.warning("⚠️ Keine ROOT_CONTROLS im Template → Legacy-Mode")
+            
+            for key, value in sorted(root_data.items()):
+                # Wrapper-Widget für horizontales Layout
+                row_widget = QWidget()
+                row_layout = QHBoxLayout(row_widget)
+                
+                label = QLabel(f"{key}:")
+                label.setMinimumWidth(150)
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                label.setFont(QFont("Arial", 10, QFont.Bold))
+                
+                editor_widget = self._create_editor_widget(value, f"ROOT.{key}")
+                self.root_widgets[key] = editor_widget
+                
+                row_layout.addWidget(label)
+                row_layout.addWidget(editor_widget)
+                row_layout.addStretch()
+                
+                root_layout.addWidget(row_widget)
+        
+        # Container für ScrollArea mit GroupBox + Stretch
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.addWidget(root_group)
+        scroll_layout.addStretch()  # Rest flexibel
         
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
@@ -282,6 +499,8 @@ class PdvmSystemEditor(QDialog):
         
         self.feld_list = QListWidget()
         self.feld_list.currentItemChanged.connect(self._on_feld_selected)
+        self.feld_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.feld_list.customContextMenuRequested.connect(self._show_feld_context_menu)
         felder_layout.addWidget(self.feld_list)
         
         # Feld-Buttons
@@ -325,12 +544,23 @@ class PdvmSystemEditor(QDialog):
         
         properties_layout.addWidget(QLabel("<b>PROPERTIES</b>"))
         
-        # Scroll-Area für Properties
+        # Scroll-Area für Properties mit GroupBox
         prop_scroll = QScrollArea()
         prop_scroll.setWidgetResizable(True)
-        self.property_container = QWidget()
-        self.property_layout = QFormLayout(self.property_container)
-        prop_scroll.setWidget(self.property_container)
+        
+        # GroupBox für Properties (wie bei Configs)
+        self.property_group = QGroupBox("Properties")
+        self.property_layout = QVBoxLayout(self.property_group)
+        self.property_layout.setSpacing(5)  # Enger Abstand zwischen Properties
+        self.property_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Container für ScrollArea
+        scroll_container = QWidget()
+        scroll_layout = QVBoxLayout(scroll_container)
+        scroll_layout.addWidget(self.property_group)
+        scroll_layout.addStretch()  # Rest flexibel
+        
+        prop_scroll.setWidget(scroll_container)
         properties_layout.addWidget(prop_scroll)
         
         # Property-Management Buttons
@@ -381,15 +611,20 @@ class PdvmSystemEditor(QDialog):
         # Gruppen-Liste initial befüllen
         self._refresh_gruppen_list()
         
+        # Erste Gruppe automatisch auswählen
+        if self.gruppe_list.count() > 0:
+            self.gruppe_list.setCurrentRow(0)  # Löst _on_gruppe_selected aus
+        
         return widget
     
-    def _create_editor_widget(self, value: Any, path: str) -> QWidget:
+    def _create_editor_widget(self, value: Any, path: str, read_only: bool = False) -> QWidget:
         """
         Erstellt passendes Editor-Widget für Wert
         
         Args:
             value: Aktueller Wert
             path: Pfad zum Wert (z.B. 'ROOT.TABLE' oder 'PERSONDATEN.guid.name')
+            read_only: Ob Widget schreibgeschützt sein soll (aus Template-Control)
             
         Returns:
             Editor-Widget
@@ -400,9 +635,10 @@ class PdvmSystemEditor(QDialog):
         if isinstance(value, bool):
             widget = QCheckBox()
             widget.setChecked(value)
-            if is_feld_editor:
+            widget.setEnabled(not read_only)  # read_only Support
+            if is_feld_editor and not read_only:
                 widget.stateChanged.connect(lambda state, p=path: self._on_feld_editor_changed(p, state == Qt.Checked))
-            else:
+            elif not read_only:
                 widget.stateChanged.connect(lambda: self._track_change(path, value, widget.isChecked()))
             return widget
         
@@ -410,9 +646,10 @@ class PdvmSystemEditor(QDialog):
             widget = QSpinBox()
             widget.setRange(-999999, 999999)
             widget.setValue(value)
-            if is_feld_editor:
+            widget.setReadOnly(read_only)  # read_only Support
+            if is_feld_editor and not read_only:
                 widget.valueChanged.connect(lambda val, p=path: self._on_feld_editor_changed(p, val))
-            else:
+            elif not read_only:
                 widget.valueChanged.connect(lambda: self._track_change(path, value, widget.value()))
             return widget
         
@@ -420,18 +657,20 @@ class PdvmSystemEditor(QDialog):
             widget = QDoubleSpinBox()
             widget.setRange(-999999.99, 999999.99)
             widget.setValue(value)
-            if is_feld_editor:
+            widget.setReadOnly(read_only)  # read_only Support
+            if is_feld_editor and not read_only:
                 widget.valueChanged.connect(lambda val, p=path: self._on_feld_editor_changed(p, val))
-            else:
+            elif not read_only:
                 widget.valueChanged.connect(lambda: self._track_change(path, value, widget.value()))
             return widget
         
         else:  # String oder andere
             widget = QLineEdit()
             widget.setText(str(value))
-            if is_feld_editor:
+            widget.setReadOnly(read_only)  # read_only Support
+            if is_feld_editor and not read_only:
                 widget.textChanged.connect(lambda text, p=path: self._on_feld_editor_changed(p, text))
-            else:
+            elif not read_only:
                 widget.textChanged.connect(lambda: self._track_change(path, value, widget.text()))
             return widget
     
@@ -439,8 +678,9 @@ class PdvmSystemEditor(QDialog):
         """Aktualisiert Gruppen-Liste"""
         self.gruppe_list.clear()
         
-        # Alle Gruppen außer ROOT und TEMPLATES
-        gruppen = [k for k in self.data.keys() if k not in ['ROOT', 'TEMPLATES']]
+        # Alle Gruppen außer ROOT (Tab 1)
+        # Tab 2 zeigt alle anderen Gruppen ohne Einschränkungen
+        gruppen = [k for k in self.data.keys() if k != 'ROOT']
         
         for gruppe_name in sorted(gruppen):
             item = QListWidgetItem(gruppe_name)
@@ -463,9 +703,20 @@ class PdvmSystemEditor(QDialog):
         felder_dict = self.data[gruppe_name]
         
         # Nach display_order sortieren
+        # WICHTIG: display_order aus Template kann String/leer sein → robuste Conversion
+        def safe_display_order(feld_data):
+            """Sichere Konvertierung von display_order zu int"""
+            order = feld_data.get('display_order', 999)
+            if order == '' or order is None:
+                return 999
+            try:
+                return int(order)
+            except (ValueError, TypeError):
+                return 999
+        
         felder_sorted = sorted(
             felder_dict.items(),
-            key=lambda x: x[1].get('display_order', 999)
+            key=lambda x: safe_display_order(x[1])
         )
         
         for feld_guid, feld_data in felder_sorted:
@@ -486,9 +737,21 @@ class PdvmSystemEditor(QDialog):
                 item.setBackground(QColor(200, 255, 200))  # Grün
             
             self.feld_list.addItem(item)
+        
+        # Erstes Feld automatisch auswählen (löst _on_feld_selected aus)
+        if self.feld_list.count() > 0:
+            self.feld_list.setCurrentRow(0)
     
     def _refresh_properties_editor(self, gruppe_name: str, feld_guid: str):
-        """Aktualisiert Properties-Editor für Feld"""
+        """
+        Aktualisiert Properties-Editor für Feld mit Property Input Controls.
+        
+        NEUE LOGIK (V2):
+        - Lädt Template-Controls aus ROOT_CONTROLS (oder CONTROL_PROPERTIES)
+        - Sortiert nach display_order
+        - Erstellt PdvmPropertyInputControl für jedes Property (autonom!)
+        - read_only, Type, Validierung aus Template
+        """
         # Properties-Container leeren
         while self.property_layout.count():
             child = self.property_layout.takeAt(0)
@@ -501,38 +764,250 @@ class PdvmSystemEditor(QDialog):
             if child.widget():
                 child.widget().deleteLater()
         
+        # Property Widgets Dictionary leeren
+        self.property_widgets.clear()
+        
         if gruppe_name not in self.data or feld_guid not in self.data[gruppe_name]:
             return
         
         feld_data = self.data[gruppe_name][feld_guid]
         
-        # === PROPERTIES ===
-        for prop_name, prop_value in sorted(feld_data.items()):
+        # Template-Controls laden
+        template_guid = '55555555-5555-5555-5555-555555555555'
+        template_controls = self._load_template_controls(template_guid, gruppe_name)
+        
+        logger.info(f"🔍 DEBUG: Gruppe='{gruppe_name}', Template Controls geladen: {bool(template_controls)}")
+        if template_controls:
+            logger.info(f"🔍 DEBUG: Anzahl Controls: {len(template_controls)}")
+            logger.info(f"🔍 DEBUG: Control Keys: {list(template_controls.keys())[:5]}")  # Erste 5
+        
+        if not template_controls:
+            logger.warning(f"⚠️ Keine Template-Controls für Gruppe '{gruppe_name}' gefunden → Fallback auf manuell")
+            self._refresh_properties_editor_legacy(gruppe_name, feld_guid, feld_data)
+            return
+        
+        # Lookup-Map erstellen: property_name → control_def
+        prop_controls = {}
+        for ctrl_guid, ctrl_def in template_controls.items():
+            prop_name = ctrl_def.get('name')
+            if prop_name:
+                prop_controls[prop_name] = ctrl_def
+        
+        # Properties nach display_order sortieren
+        properties_sorted = []
+        for prop_name, prop_value in feld_data.items():
             if prop_name == 'configs':  # Configs separat behandeln
                 continue
             
-            path = f"{gruppe_name}.{feld_guid}.{prop_name}"
-            editor = self._create_editor_widget(prop_value, path)
+            control_def = prop_controls.get(prop_name, {})
+            display_order = self._safe_display_order(control_def)
             
-            label = QLabel(f"{prop_name}:")
-            self.property_layout.addRow(label, editor)
+            properties_sorted.append((display_order, prop_name, prop_value, control_def))
         
-        # === CONFIGS ===
+        properties_sorted.sort(key=lambda x: x[0])  # Nach display_order sortieren
+        
+        # === PROPERTY INPUT CONTROLS ERSTELLEN ===
+        for display_order, prop_name, prop_value, control_def in properties_sorted:
+            # Wenn kein control_def vorhanden, minimale Definition erstellen
+            if not control_def:
+                control_def = {
+                    'name': prop_name,
+                    'label': prop_name,
+                    'type': 'string',
+                    'display_order': 999
+                }
+            
+            # Property Input Control erstellen (konfiguriert sich selbst!)
+            try:
+                property_ic = PdvmPropertyInputControl(control_def, prop_value)
+                property_ic.value_changed.connect(
+                    lambda name, value, g=gruppe_name, f=feld_guid: self._on_property_changed(g, f, name, value)
+                )
+                
+                # Zu Layout hinzufügen (QVBoxLayout → addWidget!)
+                self.property_layout.addWidget(property_ic)
+                
+                # In Dictionary speichern
+                self.property_widgets[prop_name] = property_ic
+                
+                logger.debug(f"  Property Input Control: {prop_name} (order={display_order})")
+                
+            except Exception as e:
+                logger.error(f"  ❌ Fehler beim Erstellen von Property Input Control für '{prop_name}': {e}")
+                # Fallback auf einfaches Label (horizontal layout)
+                fallback = QWidget()
+                fallback_layout = QHBoxLayout(fallback)
+                fallback_layout.addWidget(QLabel(f"{prop_name}:"))
+                fallback_layout.addWidget(QLabel(str(prop_value)))
+                self.property_layout.addWidget(fallback)
+        
+        logger.info(f"✅ {len(self.property_widgets)} Property Input Controls erstellt (sortiert)")
+        
+        # === CONFIGS mit V3 Config-Editor-Widget ===
         if 'configs' in feld_data:
             configs = feld_data['configs']
             
-            for config_name, config_value in sorted(configs.items()):
-                # Config ist dict mit table, key, feld, gruppe
-                config_group = QGroupBox(config_name.upper())
-                config_form = QFormLayout()
-                
-                for config_key, config_val in sorted(config_value.items()):
-                    path = f"{gruppe_name}.{feld_guid}.configs.{config_name}.{config_key}"
-                    editor = self._create_editor_widget(config_val, path)
-                    config_form.addRow(QLabel(f"{config_key}:"), editor)
-                
-                config_group.setLayout(config_form)
-                self.config_layout.addRow(config_group)
+            # Prüfe ob configs ein Dictionary ist
+            if not isinstance(configs, dict):
+                logger.warning(f"⚠️ 'configs' ist kein Dictionary (Type: {type(configs).__name__}) - übersprungen")
+            else:
+                for config_name, config_value in sorted(configs.items()):
+                    # Config ist dict mit table, key, feld, gruppe → ConfigEditorWidget verwenden!
+                    config_group = QGroupBox(config_name.upper())
+                    config_layout = QVBoxLayout()
+                    
+                    # Prüfe ob config_value ein Dictionary ist
+                    if not isinstance(config_value, dict):
+                        logger.warning(f"⚠️ Config '{config_name}' ist kein Dictionary - übersprungen")
+                        continue
+                    
+                    # ✅ V3.0: ConfigEditorWidget für dropdown/help Configs
+                    if config_name in ['dropdown', 'help']:
+                        try:
+                            from pdvm_config_editor_widget import PdvmConfigEditorWidget
+                            
+                            config_widget = PdvmConfigEditorWidget(
+                                config_type=config_name,
+                                initial_config=config_value,
+                                parent=self
+                            )
+                            
+                            # Signal verbinden → Config-Änderungen tracken
+                            def on_config_changed(new_config, g=gruppe_name, f=feld_guid, cn=config_name):
+                                old_config = self.data[g][f]['configs'][cn].copy()
+                                self.data[g][f]['configs'][cn] = new_config
+                                self._track_change(
+                                    f"{g}.{f}.configs.{cn}",
+                                    old_config,
+                                    new_config
+                                )
+                                logger.info(f"📋 Config '{cn}' geändert")
+                            
+                            config_widget.config_changed.connect(on_config_changed)
+                            config_layout.addWidget(config_widget)
+                            
+                            logger.debug(f"  ✅ ConfigEditorWidget für '{config_name}' erstellt")
+                            
+                        except Exception as e:
+                            logger.error(f"❌ Fehler beim Erstellen von ConfigEditorWidget: {e}")
+                            # Fallback: Alte Methode mit QLineEdit
+                            self._add_legacy_config_fields(config_layout, gruppe_name, feld_guid, config_name, config_value)
+                    else:
+                        # Andere Configs (viewtable, etc.) → Legacy-Methode
+                        self._add_legacy_config_fields(config_layout, gruppe_name, feld_guid, config_name, config_value)
+                    
+                    config_group.setLayout(config_layout)
+                    self.config_layout.addRow(config_group)
+    
+    def _add_legacy_config_fields(self, layout, gruppe_name, feld_guid, config_name, config_value):
+        """
+        Fügt Config-Felder im Legacy-Format hinzu (einfache QLineEdit)
+        Für Configs die KEIN ConfigEditorWidget brauchen.
+        """
+        config_form = QFormLayout()
+        
+        for config_key, config_val in sorted(config_value.items()):
+            path = f"{gruppe_name}.{feld_guid}.configs.{config_name}.{config_key}"
+            editor = self._create_editor_widget(config_val, path)
+            config_form.addRow(QLabel(f"{config_key}:"), editor)
+        
+        layout.addLayout(config_form)
+        logger.debug(f"  Legacy Config-Felder für '{config_name}' erstellt")
+    
+    def _refresh_properties_editor_legacy(self, gruppe_name: str, feld_guid: str, feld_data: dict):
+        """
+        Legacy-Fallback wenn keine Template-Controls vorhanden.
+        Erstellt Properties manuell (alte Logik).
+        """
+        for prop_name, prop_value in sorted(feld_data.items()):
+            if prop_name == 'configs':
+                continue
+            
+            path = f"{gruppe_name}.{feld_guid}.{prop_name}"
+            editor = self._create_editor_widget(prop_value, path, read_only=False)
+            
+            # Horizontales Layout für Label + Editor
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            label = QLabel(f"{prop_name}:")
+            label.setMinimumWidth(150)
+            label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row_layout.addWidget(label)
+            row_layout.addWidget(editor)
+            row_layout.addStretch()
+            
+            self.property_layout.addWidget(row_widget)
+        
+        logger.warning(f"⚠️ Legacy-Mode für Gruppe '{gruppe_name}' verwendet")
+    
+    def _safe_display_order(self, control_def: dict) -> int:
+        """Sichere Konvertierung von display_order zu int."""
+        order = control_def.get('display_order', 999)
+        if order == '' or order is None:
+            return 999
+        try:
+            return int(order)
+        except (ValueError, TypeError):
+            return 999
+    
+    def _on_property_changed(self, gruppe_name: str, feld_guid: str, property_name: str, new_value):
+        """
+        Handler wenn Property-Wert in Property Input Control geändert wurde.
+        
+        Args:
+            gruppe_name: Name der Gruppe
+            feld_guid: GUID des Feldes
+            property_name: Name des Properties
+            new_value: Neuer Wert
+        """
+        logger.debug(f"Property geändert: {gruppe_name}.{feld_guid}.{property_name} = {new_value}")
+        
+        # Dirty-Flag setzen BEVOR wir Backup machen
+        if not self.feld_dirty:
+            # Backup beim ersten Dirty machen (VORHER!)
+            if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+                self.current_feld_backup = json.loads(json.dumps(self.data[gruppe_name][feld_guid]))
+        
+        self.feld_dirty = True
+        
+        # Wert in Daten-Dictionary aktualisieren (temporär bis "Übernehmen")
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            self.data[gruppe_name][feld_guid][property_name] = new_value
+        
+        # Buttons aktivieren
+        self.feld_uebernehmen_btn.setEnabled(True)
+        self.feld_abbrechen_btn.setEnabled(True)
+    
+    def _on_root_property_changed(self, path: str, new_value):
+        """
+        Handler wenn ROOT Property-Wert in Property Input Control geändert wurde.
+        
+        Args:
+            path: Pfad zum Property (z.B. "ROOT.TABLE")
+            new_value: Neuer Wert
+        """
+        # Path parsen: ROOT.property_name
+        parts = path.split('.')
+        if len(parts) != 2 or parts[0] != 'ROOT':
+            logger.error(f"❌ Ungültiger ROOT-Pfad: {path}")
+            return
+        
+        property_name = parts[1]
+        
+        logger.debug(f"ROOT Property geändert: {property_name} = {new_value}")
+        
+        # Wert in ROOT-Daten aktualisieren
+        if 'ROOT' in self.data:
+            self.data['ROOT'][property_name] = new_value
+            
+            # Informationszeile aktualisieren wenn NAME geändert wurde
+            if property_name == 'NAME' and hasattr(self, 'name_label'):
+                self.name_label.setText(f"<b>Name:</b> {new_value}")
+            
+            # Change-Tracking
+            self._track_change('modify', path, self.original_data.get('ROOT', {}).get(property_name), new_value)
+            
+            logger.info(f"✅ ROOT Property aktualisiert: {property_name}")
     
     def _connect_signals(self):
         """Verbindet Signale"""
@@ -641,8 +1116,8 @@ class PdvmSystemEditor(QDialog):
         self.feld_uebernehmen_btn.setEnabled(False)
         self.feld_abbrechen_btn.setEnabled(False)
         
-        # Properties-Editor neu laden
-        self._refresh_properties_editor()
+        # Properties-Editor neu laden (mit Parametern!)
+        self._refresh_properties_editor(gruppe_name, feld_guid)
         
         logger.info(f"❌ Feld-Änderungen abgebrochen: {feld_guid}")
     
@@ -701,9 +1176,19 @@ class PdvmSystemEditor(QDialog):
             QMessageBox.warning(self, "Fehler", f"Gruppe '{name}' existiert bereits!")
             return
         
-        if name in ['ROOT', 'TEMPLATES']:
-            QMessageBox.warning(self, "Fehler", "Reservierter Name!")
-            return
+        # Geschützte Namen: Bestätigung erforderlich
+        if name in ['ROOT', 'TEMPLATES', 'ROOT_CONTROLS', 'CONTROL_PROPERTIES']:
+            reply = QMessageBox.question(
+                self,
+                "Geschützter Name",
+                f"'{name}' ist ein geschützter Gruppen-Name und wird vom System verwendet.\n\n"
+                f"Möchten Sie diese Gruppe trotzdem anlegen?\n"
+                f"(z.B. für Template-Kopien)",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
         
         # Gruppe hinzufügen
         self.data[name] = {}
@@ -739,13 +1224,19 @@ class PdvmSystemEditor(QDialog):
         
         if reply == QMessageBox.Yes:
             old_data = self.data[gruppe_name].copy()
+            
+            # Aus Memory-Dict löschen
             del self.data[gruppe_name]
+            
+            # Aus Datenbank löschen
+            self.db.delete_group(gruppe_name)
+            
             self._track_change(f"GRUPPE.{gruppe_name}", old_data, None, ChangeType.DELETED)
             
             self._refresh_gruppen_list()
             self.feld_list.clear()
             
-            logger.info(f"❌ Gruppe '{gruppe_name}' gelöscht")
+            logger.info(f"❌ Gruppe '{gruppe_name}' gelöscht (Memory + DB)")
     
     # ========================================
     # FELDER-MANAGEMENT
@@ -753,6 +1244,17 @@ class PdvmSystemEditor(QDialog):
     
     def _on_feld_selected(self, current, previous):
         """Feld wurde ausgewählt"""
+        # WICHTIG: GUID VORHER extrahieren (Item kann nach Speichern gelöscht sein!)
+        if not current:
+            return
+        
+        gruppe_item = self.gruppe_list.currentItem()
+        if not gruppe_item:
+            return
+        
+        gruppe_name = gruppe_item.text()
+        feld_guid = current.data(Qt.UserRole)  # ← VOR dem Dirty-Check holen!
+        
         # Prüfe auf ungespeicherte Änderungen
         if self.feld_dirty:
             reply = QMessageBox.question(
@@ -771,24 +1273,63 @@ class PdvmSystemEditor(QDialog):
                 return
             elif reply == QMessageBox.Yes:
                 self._feld_uebernehmen()
+                # Nach Speichern: Liste wurde aktualisiert, Items sind neu!
+                # feld_guid ist aber noch gültig (String-Wert)
             else:
                 self._feld_abbrechen()
         
-        if not current:
-            return
-        
-        gruppe_item = self.gruppe_list.currentItem()
-        if not gruppe_item:
-            return
-        
-        gruppe_name = gruppe_item.text()
-        feld_guid = current.data(Qt.UserRole)
-        
+        # Properties-Editor mit (noch gültiger) GUID aktualisieren
         self._refresh_properties_editor(gruppe_name, feld_guid)
     
+    def _show_feld_context_menu(self, position):
+        """Zeigt Kontext-Menü für Felder-Liste (GUID kopieren)"""
+        item = self.feld_list.itemAt(position)
+        if not item:
+            return
+        
+        feld_guid = item.data(Qt.UserRole)
+        if not feld_guid:
+            return
+        
+        from PyQt5.QtWidgets import QMenu, QAction
+        
+        menu = QMenu(self)
+        
+        # Stylesheet aus Layout-System laden (zentrale Verwaltung!)
+        menu_style = self.gcs.layout.get_stylesheet('QMenu')
+        if menu_style:
+            menu.setStyleSheet(menu_style)
+        
+        # GUID kopieren
+        copy_action = QAction("📋 GUID kopieren", self)
+        copy_action.triggered.connect(lambda: self._copy_feld_guid(feld_guid))
+        menu.addAction(copy_action)
+        
+        # Menü anzeigen
+        menu.exec_(self.feld_list.viewport().mapToGlobal(position))
+    
+    def _copy_feld_guid(self, feld_guid: str):
+        """Kopiert Feld-GUID in Zwischenablage"""
+        from PyQt5.QtWidgets import QApplication
+        
+        clipboard = QApplication.clipboard()
+        clipboard.setText(feld_guid)
+        
+        logger.info(f"📋 GUID kopiert: {feld_guid}")
+        
+        # Optional: Kurze Bestätigung anzeigen
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self,
+            "GUID kopiert",
+            f"GUID in Zwischenablage kopiert:\n\n{feld_guid}",
+            QMessageBox.Ok
+        )
+    
     def _add_feld(self):
-        """Fügt neues Feld zur ausgewählten Gruppe hinzu"""
+        """Fügt neues Feld zur ausgewählten Gruppe hinzu (Template-basiert mit Auswahl)"""
         import uuid
+        from PyQt5.QtWidgets import QInputDialog
         
         gruppe_item = self.gruppe_list.currentItem()
         if not gruppe_item:
@@ -797,25 +1338,78 @@ class PdvmSystemEditor(QDialog):
         
         gruppe_name = gruppe_item.text()
         
+        # Template-GUID (55555...)
+        template_guid = '55555555-5555-5555-5555-555555555555'
+        
+        # Templates aus 55555... TEMPLATES-Gruppe laden
+        template_db = PdvmCentralDatenbank(self.table_name, template_guid)
+        templates_gruppe = template_db.get_value_by_group('TEMPLATES')
+        
+        # Template-Auswahl aufbauen
+        template_options = []
+        template_map = {}  # Name → Template-Daten
+        
+        if templates_gruppe:
+            for template_guid_key, template_data in templates_gruppe.items():
+                # Template-Name aus Daten holen (label, name, oder GUID)
+                template_name = template_data.get('label', template_data.get('name', template_guid_key[:8]))
+                template_options.append(template_name)
+                template_map[template_name] = template_data
+                logger.debug(f"  Template gefunden: {template_name}")
+        
+        # "Kein Template" immer als Option
+        template_options.append("Kein Template (Minimal-Feld)")
+        
+        if not template_options:
+            QMessageBox.warning(
+                self,
+                "Keine Templates",
+                f"Keine Templates in 55555...TEMPLATES für '{self.table_name}' gefunden!\n\n"
+                f"Es wird ein Minimal-Feld erstellt."
+            )
+            template_choice = "Kein Template (Minimal-Feld)"
+        else:
+            # Template-Auswahl-Dialog
+            template_choice, ok = QInputDialog.getItem(
+                self,
+                "Template auswählen",
+                f"Welches Template soll für das neue Feld in '{gruppe_name}' verwendet werden?",
+                template_options,
+                0,
+                False
+            )
+            
+            if not ok:
+                return
+        
         # Neue GUID generieren
         neue_guid = str(uuid.uuid4())
         
-        # Template holen (mit kopierten Properties falls vorhanden)
-        if self.property_clipboard:
-            # Mit kopierten Properties
-            neues_feld = {prop: self._get_default_value_for_property(prop) for prop in self.property_clipboard}
-            neues_feld['name'] = f'NEUES_FELD_{neue_guid[:8].upper()}'
-            neues_feld['label'] = 'Neues Feld'
-            logger.info(f"  📋 Verwende kopierte Properties: {self.property_clipboard}")
-        else:
-            # Default-Template
+        # Neues Feld basierend auf Template-Wahl erstellen
+        if template_choice == "Kein Template (Minimal-Feld)":
+            # Minimales Feld (notwendige Properties)
             neues_feld = {
-                'name': f'NEUES_FELD_{neue_guid[:8].upper()}',
+                'name': f'neues_feld_{neue_guid[:8]}',
                 'label': 'Neues Feld',
-                'type': 'string',
-                'show': True,
                 'display_order': 999
             }
+            logger.info(f"✅ Minimal-Feld erstellt (ohne Template)")
+        else:
+            # Template-basiert
+            template_data = template_map.get(template_choice)
+            if not template_data:
+                logger.error(f"❌ Template '{template_choice}' nicht in Map gefunden!")
+                return
+            
+            # Neues Feld aus Template-Daten erstellen (Kopie!)
+            neues_feld = json.loads(json.dumps(template_data))
+            
+            # Spezielle Felder überschreiben (neue GUID-spezifische Werte)
+            neues_feld['name'] = f'neues_feld_{neue_guid[:8]}'
+            if 'label' not in neues_feld:
+                neues_feld['label'] = 'Neues Feld'
+            
+            logger.info(f"✅ Feld aus Template '{template_choice}' erstellt")
         
         # Feld hinzufügen
         self.data[gruppe_name][neue_guid] = neues_feld
@@ -954,7 +1548,7 @@ class PdvmSystemEditor(QDialog):
         logger.info(f"📋 {len(self.property_clipboard)} Properties kopiert")
     
     def _add_property(self):
-        """Fügt Property zum aktuellen Feld hinzu"""
+        """Fügt Property zum aktuellen Feld hinzu (Template-basiert)"""
         gruppe_item = self.gruppe_list.currentItem()
         feld_item = self.feld_list.currentItem()
         
@@ -962,17 +1556,48 @@ class PdvmSystemEditor(QDialog):
             QMessageBox.warning(self, "Fehler", "Bitte Feld auswählen!")
             return
         
+        gruppe_name = gruppe_item.text()
+        
         # Property-Auswahl-Dialog
         from PyQt5.QtWidgets import QInputDialog
         
-        # Verfügbare Properties aus Template
-        available_props = list(self.templates.get('field_properties', {}).keys())
+        # Template-GUID laden (55555...)
+        template_guid = '55555555-5555-5555-5555-555555555555'
         
+        # Template-Controls laden (dynamisch aus DB!)
+        template_controls = self._load_template_controls(template_guid, gruppe_name)
+        
+        if not template_controls:
+            QMessageBox.critical(
+                self,
+                "Template-Fehler",
+                f"Keine CONTROL_PROPERTIES im Template {template_guid[:8]}... gefunden!\n\n"
+                f"Bitte zuerst Template-Struktur in der Datenbank anlegen."
+            )
+            logger.error(f"❌ Template-Controls fehlen für Property-Auswahl")
+            return
+        
+        # Verfügbare Property-Namen aus Template extrahieren
+        available_props = []
+        for control_guid, control_def in template_controls.items():
+            prop_name = control_def.get('name')
+            if prop_name:
+                available_props.append(prop_name)
+        
+        if not available_props:
+            QMessageBox.warning(
+                self, 
+                "Keine Properties", 
+                "Template enthält keine Properties mit 'name' Feld!"
+            )
+            return
+        
+        # Property aus Template-Liste auswählen
         prop_name, ok = QInputDialog.getItem(
             self,
             "Property hinzufügen",
-            "Property auswählen:",
-            available_props,
+            "Property auswählen (aus Template):",
+            sorted(available_props),  # Alphabetisch sortiert
             0,
             False
         )
@@ -980,7 +1605,7 @@ class PdvmSystemEditor(QDialog):
         if not ok:
             return
         
-        gruppe_name = gruppe_item.text()
+        # gruppe_name bereits oben definiert
         feld_guid = feld_item.data(Qt.UserRole)
         
         # Prüfen ob bereits vorhanden
@@ -988,8 +1613,19 @@ class PdvmSystemEditor(QDialog):
             QMessageBox.warning(self, "Fehler", f"Property '{prop_name}' existiert bereits!")
             return
         
-        # Default-Wert setzen
-        default_value = self._get_default_value_for_property(prop_name)
+        # Default-Wert aus Template holen
+        control_def = None
+        for ctrl_guid, ctrl_data in template_controls.items():
+            if ctrl_data.get('name') == prop_name:
+                control_def = ctrl_data
+                break
+        
+        if control_def:
+            default_value = self._get_default_for_control(control_def)
+        else:
+            # Fallback falls Template keine Definition hat
+            default_value = ''
+        
         self.data[gruppe_name][feld_guid][prop_name] = default_value
         
         self._track_change(
@@ -1089,7 +1725,7 @@ class PdvmSystemEditor(QDialog):
     # ========================================
     
     def _add_config(self):
-        """Fügt Config zum aktuellen Feld hinzu"""
+        """Fügt Config zum aktuellen Feld hinzu (aus CONFIG_TEMPLATES in 55555...)"""
         gruppe_item = self.gruppe_list.currentItem()
         feld_item = self.feld_list.currentItem()
         
@@ -1097,25 +1733,52 @@ class PdvmSystemEditor(QDialog):
             QMessageBox.warning(self, "Fehler", "Bitte Feld auswählen!")
             return
         
-        # Config-Typ auswählen
         from PyQt5.QtWidgets import QInputDialog
         
-        config_types = list(self.templates.get('config_types', {}).keys())
+        gruppe_name = gruppe_item.text()
+        feld_guid = feld_item.data(Qt.UserRole)
         
+        # Config-Templates aus 55555... laden
+        template_guid = '55555555-5555-5555-5555-555555555555'
+        template_db = PdvmCentralDatenbank(self.table_name, template_guid)
+        config_templates = template_db.get_value_by_group('CONFIG_TEMPLATES')
+        
+        if not config_templates:
+            QMessageBox.warning(
+                self,
+                "Keine Config-Templates",
+                f"Keine CONFIG_TEMPLATES in 55555... für '{self.table_name}' gefunden!\n\n"
+                f"Bitte Config-Templates in der Datenbank anlegen (z.B. dropdown, help, viewtable)."
+            )
+            logger.warning(f"⚠️ Keine CONFIG_TEMPLATES in 55555... gefunden")
+            return
+        
+        # Config-Typen aus Templates extrahieren
+        config_options = []
+        config_map = {}  # Name → Template-Daten
+        
+        for config_guid, config_data in config_templates.items():
+            # Config-Name aus Daten holen
+            config_name = config_data.get('name', config_data.get('label', config_guid[:8]))
+            config_options.append(config_name)
+            config_map[config_name] = config_data
+        
+        if not config_options:
+            QMessageBox.warning(self, "Fehler", "Keine Config-Templates gefunden!")
+            return
+        
+        # Config-Typ auswählen
         config_type, ok = QInputDialog.getItem(
             self,
             "Config hinzufügen",
             "Config-Typ auswählen:",
-            config_types,
+            config_options,
             0,
             False
         )
         
         if not ok:
             return
-        
-        gruppe_name = gruppe_item.text()
-        feld_guid = feld_item.data(Qt.UserRole)
         
         # Configs-Dict initialisieren falls nicht vorhanden
         if 'configs' not in self.data[gruppe_name][feld_guid]:
@@ -1126,9 +1789,14 @@ class PdvmSystemEditor(QDialog):
             QMessageBox.warning(self, "Fehler", f"Config '{config_type}' existiert bereits!")
             return
         
-        # Config-Template holen
-        config_template = self.templates['config_types'][config_type]
-        new_config = {k: '' for k in config_template.keys()}
+        # Config aus Template erstellen (Kopie)
+        config_template = config_map.get(config_type, {})
+        new_config = json.loads(json.dumps(config_template))
+        
+        # Leere Werte für alle Felder setzen (überschreibt Template-Defaults)
+        for key in new_config.keys():
+            if key not in ['name', 'label']:  # name/label aus Template behalten
+                new_config[key] = ''
         
         self.data[gruppe_name][feld_guid]['configs'][config_type] = new_config
         
@@ -1142,7 +1810,7 @@ class PdvmSystemEditor(QDialog):
         # UI aktualisieren
         self._refresh_properties_editor(gruppe_name, feld_guid)
         
-        logger.info(f"✅ Config '{config_type}' hinzugefügt")
+        logger.info(f"✅ Config '{config_type}' hinzugefügt (aus Template)")
     
     def _remove_config(self):
         """Entfernt Config vom aktuellen Feld"""
@@ -1368,9 +2036,18 @@ class PdvmSystemEditor(QDialog):
             return
         
         try:
-            # Daten in Datenbank schreiben
+            # Gelöschte Gruppen aus DB entfernen (die nicht mehr in self.data sind)
+            db_gruppen = set(self.db.get_groups())
+            memory_gruppen = set(self.data.keys())
+            deleted_gruppen = db_gruppen - memory_gruppen
+            
+            for gruppe_name in deleted_gruppen:
+                logger.info(f"🗑️ Entferne verwaiste Gruppe aus DB: {gruppe_name}")
+                self.db.delete_group(gruppe_name)
+            
+            # Daten in Datenbank schreiben (via set_group Methode)
             for gruppe_name, gruppe_data in self.data.items():
-                self.db.data[gruppe_name] = gruppe_data
+                self.db.set_group(gruppe_name, gruppe_data)
             
             # Speichern
             self.db.save_all_values()

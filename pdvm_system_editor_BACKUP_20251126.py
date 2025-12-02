@@ -1,15 +1,33 @@
 """
-PDVM View-Editor - Editor für sys_viewdaten
+PDVM System-Editor - UNIVERSELLER Editor für beliebige Tabellen
 
-ARCHITEKTUR:
-- Tab 1: ROOT-Felder (VIEW_TABLE, NO_DATA)
-- Tab 2: Felder & Controls (Split-View mit Feldliste + Control-Editor)
+ARCHITEKTUR V3 (EINFACH & LINEAR):
+- Tab 1: ROOT-Felder (TABLE, NO_DATA, etc.)
+- Tab 2: Gruppen & Felder (Split-View mit Gruppenliste + Feld-Editor)
 
-VERWENDUNG:
-    editor = PdvmViewEditor(
-        view_guid="abc-123",
-        frame_guid="3be5d463-c0ea-4b71-b486-f2d9f647d527"
+DATENFLUSS (LINEAR):
+    1. Dialog startet mit frame_guid
+    2. Dialog liest framedaten.ROOT.TABLE (z.B. "sys_viewdaten")
+    3. Dialog startet Editor mit table_name=TABLE
+    4. Editor lädt Datensatz aus dieser Tabelle
+    5. Struktur ist flach: ROOT + Gruppen direkt (keine METADATEN-Verschachtelung)
+
+NEUE STRUKTUR:
+    {
+        "ROOT": {"TABLE": "sys_viewdaten", ...},
+        "PERSONDATEN": {"guid-1": {...}, "guid-2": {...}},  # Gruppe → Felder
+        "TEMPLATES": {"text": {...}, "dropdown": {...}}
+    }
+    
+    editor = PdvmSystemEditor(
+        frame_guid='44d2e239-d429-41ab-b080-e7fcd4b6e8a8',
+        table_name='persondaten'  # ROOT_TABLE aus framedaten
     )
+    
+    # Editor arbeitet in EINER Tabelle mit EINEM Datensatz:
+    # - edit_db = PdvmCentralDatenbank('sys_viewdaten', '794cbfc3...')
+    # - template_db = PdvmCentralDatenbank('sys_viewdaten', '55555...')
+    # - Lineare Struktur: ROOT + direkte Gruppen (PERSONDATEN, TEMPLATES, etc.)
 """
 
 import logging
@@ -90,96 +108,286 @@ class FieldTreeWidget(QTreeWidget):
             self.reorder_callback()
 
 
-class PdvmViewEditor(QWidget):
+class PdvmSystemEditor(QWidget):
     """
-    View-Editor für sys_viewdaten
+    Universeller System-Editor für alle System-Tabellen
     
     Signals:
         save_completed: Emittiert nach erfolgreichem Speichern
-        refresh_requested: Emittiert wenn View neu geladen werden soll
+        refresh_requested: Emittiert wenn Ansicht neu geladen werden soll
     """
     
     save_completed = pyqtSignal()
     refresh_requested = pyqtSignal()
     
-    def __init__(self, framedaten_db, selected_guid, main_app=None, gcs=None, parent=None):
+    def __init__(self, frame_guid, table_name, parent=None):
         """
-        Initialisierung View-Editor
+        Initialisierung System-Editor - EINFACH & LINEAR
         
         Args:
-            framedaten_db: PdvmCentralDatenbank Instanz für sys_framedaten
-            selected_guid: GUID des zu bearbeitenden View-Datensatzes
-            main_app: Referenz zur Hauptanwendung (optional)
-            gcs: Global Control System (optional, wird sonst geholt)
-            parent: Parent-Widget
+            frame_guid: Frame-GUID aus Dialog-Aufruf (für LAST_SELECTION)
+            table_name: ROOT_TABLE aus framedaten (z.B. 'persondaten', 'sys_viewdaten')
+            parent: Parent-Widget (optional)
+            
+        EINFACH:
+            1. Dialog gibt ROOT_TABLE an Editor (z.B. "persondaten")
+            2. Editor lädt Datensatz aus dieser Tabelle
+            3. Datensatz hat eigene ROOT.ROOT_TABLE für METADATEN-Struktur
         """
         super().__init__(parent)
         
-        logger.info(f"🔧 PdvmViewEditor initialisiert")
-        logger.info(f"  📋 View-GUID: {selected_guid}")
+        # ✅ Basis-Parameter
+        self.frame_guid = frame_guid
+        self.table_name = table_name  # ✅ ROOT_TABLE aus Dialog (z.B. "persondaten")
         
-        self.view_guid = selected_guid
-        self.main_app = main_app
-        self.gcs = gcs if gcs else get_gcs()
+        # GCS holen
+        self.gcs = get_gcs()
+        if not self.gcs:
+            raise RuntimeError("❌ GCS nicht initialisiert!")
         
-        # Modus automatisch erkennen (Template vs. normale View)
-        self.edit_mode = 'template' if selected_guid == '55555555-5555-5555-5555-555555555555' else 'view'
-        logger.info(f"  🎯 Edit-Modus: {self.edit_mode.upper()}")
+        # ✅ SCHRITT 1: LAST_SELECTION holen
+        last_guid, _ = self.gcs._db.get_value(frame_guid, 'LAST_SELECTION')
         
-        # Framedaten-Instanz übernehmen
-        self.framedaten_db = framedaten_db
+        # ✅ SCHRITT 2: Datensatz laden
+        if last_guid:
+            self.edit_db = PdvmCentralDatenbank(table_name, last_guid)
+            self.edit_mode = 'template' if last_guid == '55555555-5555-5555-5555-555555555555' else 'data'
+            logger.info(f"📄 Lade Datensatz: {last_guid}")
+        else:
+            self.edit_db = PdvmCentralDatenbank(table_name, None)
+            self.edit_mode = 'data'
+            logger.info(f"📄 Kein Datensatz - Editor leer")
         
-        # Frame-GUID aus framedaten_db extrahieren
-        self.frame_guid = self.framedaten_db.guid
-        logger.info(f"  🖼️ Frame-GUID: {self.frame_guid}")
+        # ✅ SCHRITT 3: Template laden (aus gleicher Tabelle)
+        self.template_db = PdvmCentralDatenbank(table_name, '55555555-5555-5555-5555-555555555555')
         
-        # Datenbank-Instanzen mit GUID initialisieren
-        self.view_db = PdvmCentralDatenbank('sys_viewdaten', self.view_guid)
-        self.template_db = PdvmCentralDatenbank('sys_viewdaten', '55555555-5555-5555-5555-555555555555')
+        logger.info(f"🔧 Editor initialisiert")
+        logger.info(f"  📂 Tabelle: {table_name}")
+        logger.info(f"  🖼️ Frame: {frame_guid}")
+        logger.info(f"  🎯 Modus: {self.edit_mode.upper()}")
+        logger.info(f"  📋 GUID: {self.edit_db.guid or 'KEINE'}")
         
-        # View-Daten laden (passiert automatisch im Constructor)
-        self._load_view_data()
-        
-        # Templates laden (passiert automatisch im Constructor)
+        # Daten laden
+        self._load_data()
         self._load_templates()
         
         # UI aufbauen
         self._setup_ui()
         
-    def _load_view_data(self):
-        """Holt View-Daten aus bereits geladener Instanz"""
-        logger.info(f"📂 Hole View-Daten: {self.view_guid}")
+    def _load_data(self):
+        """
+        Lädt Daten aus edit_db + initialisiert METADATEN-Struktur via Pfade
         
-        # Daten sind bereits geladen (Constructor)
-        self.view_data = self.view_db.data
+        KRITISCH: Arbeitet NUR mit edit_db - keine Daten aus anderen Quellen!
+        """
+        # ✅ ALLES aus edit_db - eine Tabelle, ein Datensatz!
+        self.data = self.edit_db.data
         
         # Struktur validieren
-        if 'ROOT' not in self.view_data:
-            self.view_data['ROOT'] = {}
-        if 'METADATEN' not in self.view_data:
-            self.view_data['METADATEN'] = {}
+        if 'ROOT' not in self.data:
+            self.data['ROOT'] = {}
+        
+        # ✅ LINEARE STRUKTUR: Keine METADATEN-Verschachtelung mehr
+        # Gruppen sind direkt im data-Dict: ROOT, PERSONDATEN, TEMPLATES, etc.
+        logger.info(f"  ✅ Daten geladen: {len(self.data)} Gruppen")
+        logger.info(f"  📂 Verfügbare Gruppen: {list(self.data.keys())}")
+    
+    def _get_table_name(self):
+        """Gibt TABLE aus ROOT zurück (einheitlich für alle Systemtabellen)"""
+        return self.data.get('ROOT', {}).get('TABLE', '')
+    
+    def _get_all_gruppen(self):
+        """Gibt alle Gruppen außer ROOT zurück"""
+        return [key for key in self.data.keys() if key != 'ROOT']
+    
+    def _get_gruppe_felder(self, gruppe_name):
+        """Gibt alle Felder einer Gruppe zurück"""
+        return self.data.get(gruppe_name, {})
+    
+    def _set_gruppe_felder(self, gruppe_name, felder):
+        """Setzt alle Felder einer Gruppe"""
+        self.data[gruppe_name] = felder
+    
+    def _ensure_gruppe_exists(self, gruppe_name):
+        """Stellt sicher dass Gruppe existiert"""
+        if gruppe_name not in self.data:
+            self.data[gruppe_name] = {}
+            logger.info(f"  ✅ Gruppe erstellt: {gruppe_name}")
+    
+    def _add_feld_to_gruppe(self, gruppe_name, feld_guid, feld_data):
+        """Fügt ein Feld zu einer Gruppe hinzu"""
+        self._ensure_gruppe_exists(gruppe_name)
+        self.data[gruppe_name][feld_guid] = feld_data
+        logger.info(f"  ✅ Feld hinzugefügt: {gruppe_name}.{feld_guid}")
+    
+    def _remove_feld_from_gruppe(self, gruppe_name, feld_guid):
+        """Entfernt ein Feld aus einer Gruppe"""
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            del self.data[gruppe_name][feld_guid]
+            logger.info(f"  ✅ Feld entfernt: {gruppe_name}.{feld_guid}")
+    
+    def _LEGACY_navigate_path(self, pfad):
+        """
+        LEGACY-Funktion für alte METADATEN-Struktur
+        Wird durch direkte Gruppen-Zugriffe ersetzt
+        """
+        if not pfad:
+            return {}
+        
+        # Pfad in Teile zerlegen
+        parts = pfad.split('.')
+        
+        # Navigation durch METADATEN
+        current = self.data.get('METADATEN', {})
+        
+        for part in parts:
+            if not isinstance(current, dict):
+                logger.warning(f"  ⚠️ Pfad ungültig bei '{part}': Erwartet Dict")
+                return {}
             
-        logger.info(f"  ✅ View-Daten geladen: {self.view_data.get('ROOT', {}).get('VIEW_TABLE', 'N/A')}")
+            if part not in current:
+                logger.warning(f"  ⚠️ Pfad-Teil '{part}' nicht gefunden")
+                return {}
+            
+            current = current[part]
+        
+        # Ergebnis sollte Dict sein (mit Controls)
+        if not isinstance(current, dict):
+            logger.warning(f"  ⚠️ Pfad-Ziel ist kein Dict: {type(current)}")
+            return {}
+        
+        return current
+    
+    def _set_feld_property(self, gruppe_name, feld_guid, property_key, value):
+        """
+        Setzt Feld-Property in Gruppe (lineare Struktur)
+        
+        Args:
+            gruppe_name: Name der Gruppe (z.B. "PERSONDATEN", "TEMPLATES")
+            feld_guid: GUID des Feldes
+            property_key: Property-Name (z.B. 'label', 'tooltip')
+            value: Neuer Wert
+        """
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            self.data[gruppe_name][feld_guid][property_key] = value
+            logger.info(f"  ✅ Gespeichert: {gruppe_name}.{feld_guid}.{property_key} = {value}")
+    
+    def set_guid(self, new_guid):
+        """
+        Setzt neue GUID und lädt Daten neu (bei Doppelklick in View)
+        
+        Args:
+            new_guid: Neue GUID des zu bearbeitenden Datensatzes
+        """
+        logger.info(f"🔄 Lade neuen Datensatz: {new_guid}")
+        
+        # GUID in edit_db setzen
+        self.edit_db.set_guid(new_guid)
+        
+        # Modus aktualisieren
+        self.edit_mode = 'template' if new_guid == '55555555-5555-5555-5555-555555555555' else 'data'
+        
+        # Daten neu laden
+        self._load_data()
+        
+        # UI aktualisieren
+        self._refresh_field_list()
+        self._update_mode_info_label()
+        
+        # LAST_SELECTION speichern
+        self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', new_guid)
+        self.gcs._db.save_all_values()
+        
+        logger.info(f"  ✅ Datensatz gewechselt: {new_guid}")
         
     def _load_templates(self):
-        """Lädt Control-Templates UND Control-Properties aus Template-DB"""
-        logger.info(f"📂 Hole Control-Templates")
+        """Lädt Control-Templates UND Control-Properties aus Template-DB (lineare Struktur)"""
+        logger.info(f"📂 Hole Templates (lineare Struktur)")
         
+        # ✅ NEUE LINEARE STRUKTUR: Direkte Gruppen statt METADATEN
         # Daten sind bereits geladen (Constructor mit template_guid)
-        template_metadaten = self.template_db.data.get('METADATEN', {})
         
-        # ROOT_CONTROLS aus Template laden
-        self.root_controls = template_metadaten.get('ROOT_CONTROLS', {})
+        # ROOT_CONTROLS aus Template laden (direkte Gruppe)
+        self.root_controls = self.template_db.data.get('ROOT_CONTROLS', {})
         
-        # Templates für neue Controls
-        self.templates = template_metadaten.get('TEMPLATES', {})
+        # Templates für neue Controls (direkte Gruppe)
+        self.templates = self.template_db.data.get('TEMPLATES', {})
         
-        # Control-Properties für Editor
-        self.control_properties = template_metadaten.get('CONTROL_PROPERTIES', {})
+        # Control-Properties für Editor (direkte Gruppe)
+        self.control_properties = self.template_db.data.get('CONTROL_PROPERTIES', {})
         
         logger.info(f"  ✅ {len(self.root_controls)} ROOT-Controls aus Template geladen")
         logger.info(f"  ✅ {len(self.templates)} Templates geladen: {list(self.templates.keys())}")
         logger.info(f"  ✅ {len(self.control_properties)} Control-Properties geladen")
+    
+    def _get_template_for_gruppe(self, gruppe_name: str) -> dict:
+        """
+        Holt Template für eine Gruppe (aus TEMPLATES oder Default)
+        
+        Args:
+            gruppe_name: Name der Gruppe (z.B. 'PERSONDATEN', 'FINANZDATEN')
+            
+        Returns:
+            Template-Dictionary mit Feldern für neues Feld
+        """
+        # Versuche Template aus TEMPLATES Gruppe zu holen
+        if 'TEMPLATES' in self.data:
+            templates_gruppe = self.data['TEMPLATES']
+            
+            # Tabellen-spezifisches Template (z.B. 'persondaten', 'sys_menudaten')
+            table_key = self.table_name.lower()
+            if table_key in templates_gruppe:
+                logger.info(f"  📋 Verwende Template '{table_key}' aus TEMPLATES")
+                return templates_gruppe[table_key].copy()
+            
+            # Fallback: Erstes Template aus TEMPLATES
+            if templates_gruppe:
+                first_template_key = list(templates_gruppe.keys())[0]
+                logger.info(f"  📋 Verwende Fallback-Template '{first_template_key}' aus TEMPLATES")
+                return templates_gruppe[first_template_key].copy()
+        
+        # Default-Template wenn kein Template gefunden
+        logger.warning(f"  ⚠️ Kein Template gefunden - verwende Default-Template")
+        return {
+            'label': 'Neues Feld',
+            'feld': 'NEUES_FELD',
+            'type': 'string',
+            'gruppe': 'SYSTEM',
+            'default': '',
+            'show': True,
+            'display_order': 999,
+            'expert_mode': False,
+            'searchable': True,
+            'sortable': True
+        }
+    
+    def _select_field_in_tree(self, gruppe_name: str, feld_guid: str):
+        """
+        Wählt ein Feld im Tree aus
+        
+        Args:
+            gruppe_name: Name der Gruppe
+            feld_guid: GUID des Feldes
+        """
+        # Tree durchsuchen
+        for i in range(self.field_tree.topLevelItemCount()):
+            gruppe_item = self.field_tree.topLevelItem(i)
+            item_data = gruppe_item.data(0, Qt.UserRole)
+            
+            if item_data and item_data.get('gruppe_name') == gruppe_name:
+                # Richtige Gruppe gefunden, nun Feld suchen
+                for j in range(gruppe_item.childCount()):
+                    feld_item = gruppe_item.child(j)
+                    feld_data = feld_item.data(0, Qt.UserRole)
+                    
+                    if feld_data and feld_data.get('feld_guid') == feld_guid:
+                        # Feld gefunden → auswählen
+                        self.field_tree.setCurrentItem(feld_item)
+                        gruppe_item.setExpanded(True)
+                        logger.info(f"  ✅ Feld {feld_guid[:8]} ausgewählt")
+                        return
+        
+        logger.warning(f"  ⚠️ Feld {feld_guid} nicht im Tree gefunden")
         
     def _setup_ui(self):
         """Baut die UI auf"""
@@ -263,10 +471,15 @@ class PdvmViewEditor(QWidget):
     def _update_mode_info_label(self):
         """Aktualisiert das Modus-Info-Label"""
         if self.edit_mode == 'template':
-            self.mode_info_label.setText("✨ Template-Bearbeitungsmodus (GUID: 55555...)")
+            self.mode_info_label.setText(f"✨ Template-Modus ({self.table_name})")
         else:
-            view_name = self.view_data.get('ROOT', {}).get('VIEW_NAME', 'Unbenannt')
-            self.mode_info_label.setText(f"📄 View: {view_name}")
+            # ✅ Views haben VIEW_NAME, Frames haben HEADER_TEXT oder ROOT_TABLE
+            root_data = self.data.get('ROOT', {})
+            name = (root_data.get('VIEW_NAME') or 
+                   root_data.get('HEADER_TEXT') or 
+                   root_data.get('ROOT_TABLE') or 
+                   'Unbenannt')
+            self.mode_info_label.setText(f"📄 {self.table_name}: {name}")
         
     def get_widget(self):
         """
@@ -343,7 +556,7 @@ class PdvmViewEditor(QWidget):
         self.root_widgets = {}
         
         # Alle Keys sammeln: Template + zusätzliche aus view_data['ROOT']
-        all_keys = set(self.root_controls.keys()) | set(self.view_data.get('ROOT', {}).keys())
+        all_keys = set(self.root_controls.keys()) | set(self.data.get('ROOT', {}).keys())
         
         # Nach display_order sortieren (Template-Keys zuerst, dann alphabetisch)
         def sort_key(key):
@@ -371,12 +584,12 @@ class PdvmViewEditor(QWidget):
                 widget_input = QCheckBox()
                 # Default-Wert aus Template verwenden, falls Feld nicht existiert
                 default_value = control.get('default_value', False)
-                value = self.view_data['ROOT'].get(control_key, default_value)
+                value = self.data['ROOT'].get(control_key, default_value)
                 widget_input.setChecked(bool(value))
                 
                 # Signal: Änderungen direkt in view_data schreiben
                 widget_input.stateChanged.connect(
-                    lambda state, key=control_key: self.view_data['ROOT'].__setitem__(key, bool(state))
+                    lambda state, key=control_key: self.data['ROOT'].__setitem__(key, bool(state))
                 )
                 
                 # Spezial-Signal für NO_DATA: Struktur generieren
@@ -389,27 +602,27 @@ class PdvmViewEditor(QWidget):
                 widget_input.addItems(options)
                 # Default-Wert aus Template verwenden
                 default_value = control.get('default_value', '')
-                value = self.view_data['ROOT'].get(control_key, default_value)
+                value = self.data['ROOT'].get(control_key, default_value)
                 index = widget_input.findText(str(value))
                 if index >= 0:
                     widget_input.setCurrentIndex(index)
                 
                 # Signal: Änderungen direkt in view_data schreiben
                 widget_input.currentTextChanged.connect(
-                    lambda text, key=control_key: self.view_data['ROOT'].__setitem__(key, text)
+                    lambda text, key=control_key: self.data['ROOT'].__setitem__(key, text)
                 )
             else:
                 widget_input = QLineEdit()
                 # Default-Wert aus Template verwenden
                 default_value = control.get('default_value', '')
-                value = self.view_data['ROOT'].get(control_key, default_value)
+                value = self.data['ROOT'].get(control_key, default_value)
                 widget_input.setText(str(value))
                 widget_input.setReadOnly(readonly)
                 
                 # Signal: Änderungen direkt in view_data schreiben
                 if not readonly:
                     widget_input.textChanged.connect(
-                        lambda text, key=control_key: self.view_data['ROOT'].__setitem__(key, text)
+                        lambda text, key=control_key: self.data['ROOT'].__setitem__(key, text)
                     )
             
             self.root_widgets[control_key] = widget_input
@@ -431,7 +644,7 @@ class PdvmViewEditor(QWidget):
         
         key = key.strip().upper()
         
-        if key in self.view_data['ROOT']:
+        if key in self.data['ROOT']:
             QMessageBox.warning(self, "Warnung", f"Eigenschaft '{key}' existiert bereits!")
             return
         
@@ -446,7 +659,7 @@ class PdvmViewEditor(QWidget):
             value = ''
         
         # In view_data eintragen
-        self.view_data['ROOT'][key] = value
+        self.data['ROOT'][key] = value
         
         # Formular neu aufbauen (zeigt neue Eigenschaft an)
         self._rebuild_root_form()
@@ -457,12 +670,12 @@ class PdvmViewEditor(QWidget):
         """Entfernt ROOT-Eigenschaft"""
         from PyQt5.QtWidgets import QInputDialog, QMessageBox
         
-        if not self.view_data['ROOT']:
+        if not self.data['ROOT']:
             QMessageBox.warning(self, "Warnung", "Keine Eigenschaften vorhanden!")
             return
         
         # Liste aller Keys
-        keys = list(self.view_data['ROOT'].keys())
+        keys = list(self.data['ROOT'].keys())
         
         key, ok = QInputDialog.getItem(
             self,
@@ -488,7 +701,7 @@ class PdvmViewEditor(QWidget):
             return
         
         # Löschen
-        del self.view_data['ROOT'][key]
+        del self.data['ROOT'][key]
         
         # Formular neu aufbauen
         self._rebuild_root_form()
@@ -567,114 +780,77 @@ class PdvmViewEditor(QWidget):
         return widget
         
     def _refresh_field_list(self):
-        """Aktualisiert TreeView mit hierarchischer Struktur"""
+        """Aktualisiert TreeView mit hierarchischer Struktur via Pfad-System"""
         self.field_tree.clear()
         
-        # TEMPLATE-MODUS: METADATEN-Ebenen zeigen
-        if self.edit_mode == 'template':
-            self._refresh_template_list()
-            return
+        # ✅ NEUE LINEARE STRUKTUR: Alle Gruppen außer ROOT zeigen
+        gruppen = self._get_all_gruppen()
         
-        # VIEW-MODUS: Normale Tabellen-Struktur
-        # View-Table holen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
-        if not view_table:
-            return
-            
-        # Tabellen-Key (GROSSBUCHSTABEN)
-        table_key = view_table.upper()
-        
-        # Felder aus METADATEN
-        metadaten = self.view_data['METADATEN'].get(table_key, {})
-        
-        if not metadaten:
-            # Noch keine Felder - Hinweis anzeigen
-            item = QTreeWidgetItem(["Keine Felder definiert"])
-            item.setFlags(Qt.NoItemFlags)
-            self.field_tree.addTopLevelItem(item)
-            return
-            
-        # Hierarchische Struktur aufbauen
-        for field_type in ['controls', 'standard_controls']:
-            if field_type not in metadaten:
-                continue
-                
-            # Parent-Item für controls/standard_controls
-            parent_item = QTreeWidgetItem([f"📁 {field_type}"])
-            parent_item.setData(0, Qt.UserRole, {'type': 'folder', 'field_type': field_type})
-            parent_item.setExpanded(True)  # Automatisch aufgeklappt
-            self.field_tree.addTopLevelItem(parent_item)
-            
-            # Controls als Child-Items (sortiert nach display_order)
-            controls_dict = metadaten[field_type]
-            sorted_controls = sorted(
-                controls_dict.items(),
-                key=lambda x: x[1].get('display_order', 999)
-            )
-            
-            for control_key, control_data in sorted_controls:
-                # Label als Name + erste 8 Zeichen der GUID
-                control_label = control_data.get('label', 'Unbenannt')
-                guid_short = control_key[:8] if len(control_key) > 8 else control_key
-                display_text = f"📄 {control_label} ({guid_short})"
-                
-                child_item = QTreeWidgetItem([display_text])
-                child_item.setData(0, Qt.UserRole, {
-                    'type': 'control',
-                    'field_type': field_type,
-                    'control_key': control_key
-                })
-                parent_item.addChild(child_item)
-                
-    def _refresh_template_list(self):
-        """Zeigt Template-Struktur: METADATEN-Ebenen (TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES)"""
-        logger.info("🔧 Lade Template-Struktur...")
-        
-        metadaten = self.view_data.get('METADATEN', {})
-        
-        if not metadaten:
-            item = QTreeWidgetItem(["Keine METADATEN vorhanden"])
+        if not gruppen:
+            item = QTreeWidgetItem(["Keine Gruppen vorhanden (nur ROOT)"])
             item.setFlags(Qt.NoItemFlags)
             self.field_tree.addTopLevelItem(item)
             return
         
-        # Zeige METADATEN-Ebenen: TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES
-        for meta_key in ['TEMPLATES', 'ROOT_CONTROLS', 'CONTROL_PROPERTIES']:
-            if meta_key not in metadaten:
-                continue
+        logger.info(f"📂 Lade {len(gruppen)} Gruppen: {gruppen}")
+        
+        # Durchlaufe alle Gruppen (außer ROOT)
+        for gruppe_name in sorted(gruppen):
+            # Felder dieser Gruppe holen
+            felder_dict = self._get_gruppe_felder(gruppe_name)
             
-            # Parent-Item für METADATEN-Ebene
-            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📁')
-            parent_item = QTreeWidgetItem([f"{icon} {meta_key}"])
-            parent_item.setData(0, Qt.UserRole, {'type': 'template_folder', 'meta_key': meta_key})
+            logger.info(f"📂 Gruppe '{gruppe_name}': {len(felder_dict)} Felder")
+            
+            # Icon basierend auf Gruppenname
+            icon = {
+                'TEMPLATES': '🔧',
+                'ROOT_CONTROLS': '⚙️', 
+                'CONTROL_PROPERTIES': '🎨',
+                'PERSONDATEN': '👤',
+                'FINANZDATEN': '💰',
+                'SYS_MENUDATEN': '📋',
+                'DE-DE': '🇩🇪',
+                'US-EN': '🇺🇸',
+                'FR-FR': '🇫🇷'
+            }.get(gruppe_name, '📁')
+            
+            # Parent-Item für diese Gruppe
+            parent_item = QTreeWidgetItem([f"{icon} {gruppe_name} ({len(felder_dict)} Felder)"])
+            parent_item.setData(0, Qt.UserRole, {
+                'type': 'gruppe', 
+                'gruppe_name': gruppe_name
+            })
             parent_item.setExpanded(True)
             self.field_tree.addTopLevelItem(parent_item)
             
-            # Controls/Items darunter
-            items_dict = metadaten[meta_key]
-            sorted_items = sorted(items_dict.items())
+            # Felder als Child-Items (sortiert nach display_order wenn vorhanden)
+            sorted_felder = sorted(
+                felder_dict.items(),
+                key=lambda x: x[1].get('display_order', 999) if isinstance(x[1], dict) else 999
+            )
             
-            for item_key, item_data in sorted_items:
-                # Label als Name
-                if isinstance(item_data, dict):
-                    item_label = item_data.get('label', item_key)
+            for feld_guid, feld_data in sorted_felder:
+                # Label als Name + erste 8 Zeichen der GUID
+                if isinstance(feld_data, dict):
+                    feld_label = feld_data.get('label', feld_data.get('name', 'Unbenannt'))
                 else:
-                    item_label = item_key
+                    feld_label = str(feld_data)[:50]  # Primitive Werte (Strings, Numbers)
                 
-                display_text = f"📄 {item_label}"
+                guid_short = feld_guid[:8] if len(str(feld_guid)) > 8 else str(feld_guid)
+                display_text = f"📄 {feld_label} ({guid_short})"
                 
                 child_item = QTreeWidgetItem([display_text])
                 child_item.setData(0, Qt.UserRole, {
-                    'type': 'template_control',
-                    'meta_key': meta_key,
-                    'item_key': item_key
+                    'type': 'feld',
+                    'gruppe_name': gruppe_name,
+                    'feld_guid': feld_guid
                 })
                 parent_item.addChild(child_item)
                 
-        logger.info(f"  ✅ Template-Struktur geladen: {len(metadaten)} Ebenen")
+        logger.info(f"  ✅ {len(gruppen)} Gruppen mit Feldern geladen")
                 
     def _on_tree_item_clicked(self, item, column):
-        """Handler: Tree-Item angeklickt"""
+        """Handler: Tree-Item angeklickt (lineare Struktur)"""
         if not item:
             return
             
@@ -684,62 +860,47 @@ class PdvmViewEditor(QWidget):
             
         item_type = item_data.get('type')
         
-        # TEMPLATE-MODUS: Template-Folders und Template-Controls
-        if item_type == 'template_folder':
-            # Template-Folder angeklickt → Info anzeigen
-            meta_key = item_data['meta_key']
-            logger.info(f"📁 Template-Folder ausgewählt: {meta_key}")
-            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📁')
-            self.right_header.setText(f"{icon} {meta_key}")
+        # ✅ NEUE LINEARE STRUKTUR
+        if item_type == 'gruppe':
+            # Gruppe angeklickt → Info anzeigen
+            gruppe_name = item_data['gruppe_name']
+            logger.info(f"📁 Gruppe ausgewählt: {gruppe_name}")
+            
+            icon = {
+                'TEMPLATES': '🔧',
+                'ROOT_CONTROLS': '⚙️',
+                'CONTROL_PROPERTIES': '🎨',
+                'PERSONDATEN': '👤',
+                'SYS_MENUDATEN': '📋',
+                'DE-DE': '🇩🇪'
+            }.get(gruppe_name, '📁')
+            
+            self.right_header.setText(f"{icon} {gruppe_name}")
             self._clear_control_editor()
             return
             
-        elif item_type == 'template_control':
-            # Template-Control angeklickt → Editor anzeigen
-            meta_key = item_data['meta_key']
-            item_key = item_data['item_key']
-            logger.info(f"📄 Template-Control ausgewählt: {meta_key}.{item_key}")
+        elif item_type == 'feld':
+            # Einzelnes Feld angeklickt → Zeige Feld-Editor
+            gruppe_name = item_data['gruppe_name']
+            feld_guid = item_data['feld_guid']
+            logger.info(f"📄 Feld ausgewählt: {gruppe_name}.{feld_guid}")
+            
+            # Feld-Daten aus Gruppe holen
+            felder = self._get_gruppe_felder(gruppe_name)
+            feld_data = felder.get(feld_guid, {})
             
             # Header aktualisieren
-            metadaten = self.view_data['METADATEN'].get(meta_key, {})
-            item_data_dict = metadaten.get(item_key, {})
-            item_label = item_data_dict.get('label', item_key) if isinstance(item_data_dict, dict) else item_key
+            if isinstance(feld_data, dict):
+                feld_label = feld_data.get('label', feld_data.get('name', 'Unbenannt'))
+            else:
+                feld_label = str(feld_data)[:50]
             
-            icon = {'TEMPLATES': '🔧', 'ROOT_CONTROLS': '⚙️', 'CONTROL_PROPERTIES': '🎨'}.get(meta_key, '📄')
-            self.right_header.setText(f"{icon} {item_label}")
+            guid_short = str(feld_guid)[:8] if len(str(feld_guid)) > 8 else str(feld_guid)
             
-            # Template-Control Editor anzeigen
-            self._build_template_control_editor(meta_key, item_key, item_data_dict)
-            return
-        
-        # VIEW-MODUS: Normale Folders und Controls
-        if item_type == 'folder':
-            # Folder angeklickt → NICHTS anzeigen rechts (keine Editor-Felder)
-            field_type = item_data['field_type']
-            logger.info(f"📁 Folder ausgewählt: {field_type}")
-            self.right_header.setText(f"📁 {field_type}")
+            self.right_header.setText(f"📄 {feld_label} ({guid_short})")
             
-            # Rechte Seite leeren
-            self._clear_control_editor()
-            
-        elif item_type == 'control':
-            # Einzelnes Control angeklickt → Zeige nur dieses Control
-            field_type = item_data['field_type']
-            control_key = item_data['control_key']
-            logger.info(f"📄 Control ausgewählt: {field_type}.{control_key}")
-            
-            # Header aktualisieren
-            view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
-            table_key = view_table.upper()
-            metadaten = self.view_data['METADATEN'].get(table_key, {})
-            control_data = metadaten.get(field_type, {}).get(control_key, {})
-            control_label = control_data.get('label', 'Unbenannt')
-            guid_short = control_key[:8] if len(control_key) > 8 else control_key
-            
-            self.right_header.setText(f"📄 {control_label} ({guid_short})")
-            
-            # Nur dieses eine Control anzeigen
-            self._build_single_control_editor(field_type, control_key, control_data)
+            # Feld-Editor anzeigen
+            self._build_single_field_editor(gruppe_name, feld_guid, feld_data)
     
     def _build_template_control_editor(self, meta_key, item_key, item_data):
         """Baut Editor für Template-Control (TEMPLATES, ROOT_CONTROLS, CONTROL_PROPERTIES)"""
@@ -841,9 +1002,9 @@ class PdvmViewEditor(QWidget):
             self.control_widgets[field_type] = {}
                 
         # View-Table und Daten holen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         table_key = view_table.upper()
-        metadaten = self.view_data['METADATEN'].get(table_key, {})
+        metadaten = self.data['METADATEN'].get(table_key, {})
         controls_dict = metadaten.get(field_type, {})
         
         # Controls anzeigen
@@ -864,16 +1025,23 @@ class PdvmViewEditor(QWidget):
         # Stretch am Ende
         self.control_editor_layout.addStretch()
         
-    def _build_single_control_editor(self, field_type, control_key, control_data):
-        """Baut Control-Editor für EINZELNES Control"""
+    def _build_single_field_editor(self, gruppe_name, feld_guid, feld_data):
+        """
+        Baut Feld-Editor für EINZELNES Feld (lineare Struktur)
+        
+        Args:
+            gruppe_name: Name der Gruppe (z.B. "PERSONDATEN", "TEMPLATES")
+            feld_guid: GUID des Feldes
+            feld_data: Feld-Daten (dict oder primitiver Wert)
+        """
         # Alte Widgets entfernen
         while self.control_editor_layout.count():
             child = self.control_editor_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
                 
-        # GroupBox für Control erstellen
-        group = self._create_control_group(field_type, control_key, control_data)
+        # GroupBox für Feld erstellen
+        group = self._create_field_group(gruppe_name, feld_guid, feld_data)
         self.control_editor_layout.addWidget(group)
         
         # Stretch am Ende
@@ -884,7 +1052,7 @@ class PdvmViewEditor(QWidget):
         logger.info("🔄 Controls neu sortiert per Drag & Drop")
         
         # View-Table holen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         if not view_table:
             return
             
@@ -911,10 +1079,10 @@ class PdvmViewEditor(QWidget):
                 control_key = child_data['control_key']
                 
                 # display_order in Daten aktualisieren
-                if table_key in self.view_data['METADATEN']:
-                    if field_type in self.view_data['METADATEN'][table_key]:
-                        if control_key in self.view_data['METADATEN'][table_key][field_type]:
-                            self.view_data['METADATEN'][table_key][field_type][control_key]['display_order'] = j
+                if table_key in self.data['METADATEN']:
+                    if field_type in self.data['METADATEN'][table_key]:
+                        if control_key in self.data['METADATEN'][table_key][field_type]:
+                            self.data['METADATEN'][table_key][field_type][control_key]['display_order'] = j
                             logger.info(f"  ✅ {control_key}.display_order = {j}")
                             
         logger.info("✅ display_order für alle Controls aktualisiert")
@@ -924,7 +1092,7 @@ class PdvmViewEditor(QWidget):
         logger.info("🔄 Aktualisiere display_order aus TreeView...")
         
         # View-Table holen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         if not view_table:
             return
             
@@ -951,16 +1119,39 @@ class PdvmViewEditor(QWidget):
                 control_key = child_data['control_key']
                 
                 # display_order in Daten aktualisieren
-                if table_key in self.view_data['METADATEN']:
-                    if field_type in self.view_data['METADATEN'][table_key]:
-                        if control_key in self.view_data['METADATEN'][table_key][field_type]:
-                            self.view_data['METADATEN'][table_key][field_type][control_key]['display_order'] = j
+                if table_key in self.data['METADATEN']:
+                    if field_type in self.data['METADATEN'][table_key]:
+                        if control_key in self.data['METADATEN'][table_key][field_type]:
+                            self.data['METADATEN'][table_key][field_type][control_key]['display_order'] = j
                             
         logger.info("  ✅ display_order aus Tree übernommen")
         
-    def _create_control_group(self, field_type, control_key, control_data):
-        """Erstellt GroupBox für einzelnes Control"""
-        group = QGroupBox(f"Control: {control_key}")
+    def _create_field_group(self, gruppe_name, feld_guid, feld_data):
+        """
+        Erstellt GroupBox für einzelnes Feld (lineare Struktur)
+        
+        Args:
+            gruppe_name: Name der Gruppe
+            feld_guid: GUID des Feldes
+            feld_data: Feld-Daten (dict oder primitiver Wert)
+        """
+        # Wenn Feld kein Dict ist, zeige nur Wert
+        if not isinstance(feld_data, dict):
+            group = QGroupBox(f"Feld: {feld_guid}")
+            layout = QFormLayout(group)
+            
+            # Einfacher Editor für primitiven Wert
+            value_edit = QLineEdit(str(feld_data))
+            value_edit.textChanged.connect(
+                lambda text: self._on_primitive_field_changed(gruppe_name, feld_guid, text)
+            )
+            layout.addRow("Wert:", value_edit)
+            
+            return group
+        
+        # Dict-Feld: Alle Properties anzeigen
+        feld_label = feld_data.get('label', feld_data.get('name', feld_guid))
+        group = QGroupBox(f"Feld: {feld_label}")
         group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -978,65 +1169,91 @@ class PdvmViewEditor(QWidget):
         
         layout = QFormLayout(group)
         
-        # Control-Properties anzeigen (jetzt Dictionary mit property_key als Key)
-        # Sortieren nach display_order
+        # Alle Properties des Feldes anzeigen (sortiert nach display_order wenn vorhanden)
         sorted_props = sorted(
-            self.control_properties.items(),
-            key=lambda item: item[1].get('display_order', 999)
+            feld_data.items(),
+            key=lambda item: item[1].get('display_order', 999) if isinstance(item[1], dict) and 'display_order' in item[1] else 999
         )
         
-        for property_key, prop in sorted_props:
-            label = prop['label']
-            prop_control_type = prop.get('control_type', 'text')
+        for property_key, property_value in sorted_props:
+            # Label für Property
+            label_text = property_key.replace('_', ' ').title()
             
-            # SPEZIAL: configs als nested Editor
-            if property_key == 'configs':
-                configs_widget = self._create_configs_editor(field_type, control_key, control_data)
-                layout.addRow(f"{label}:", configs_widget)
-                continue
-            
-            # Widget erstellen
-            if prop_control_type == 'checkbox':
+            # Widget basierend auf Typ erstellen
+            if isinstance(property_value, bool):
                 widget_input = QCheckBox()
-                value = control_data.get(property_key, False)
-                widget_input.setChecked(bool(value))
-                # Signal: Änderung → sofort in view_data schreiben
+                widget_input.setChecked(property_value)
                 widget_input.stateChanged.connect(
-                    lambda state, ft=field_type, ck=control_key, pk=property_key: 
-                    self._on_control_property_changed(ft, ck, pk, state == Qt.Checked)
+                    lambda state, gn=gruppe_name, fg=feld_guid, pk=property_key: 
+                    self._on_field_property_changed(gn, fg, pk, state == Qt.Checked)
                 )
-            elif prop_control_type == 'number':
+            elif isinstance(property_value, int):
                 widget_input = QSpinBox()
-                widget_input.setRange(0, 9999)
-                value = control_data.get(property_key, 0)
-                widget_input.setValue(int(value))
-                # Signal: Wert geändert → sofort in view_data schreiben
+                widget_input.setRange(-999999, 999999)
+                widget_input.setValue(property_value)
                 widget_input.valueChanged.connect(
-                    lambda val, ft=field_type, ck=control_key, pk=property_key: 
-                    self._on_control_property_changed(ft, ck, pk, val)
+                    lambda val, gn=gruppe_name, fg=feld_guid, pk=property_key: 
+                    self._on_field_property_changed(gn, fg, pk, val)
                 )
-            elif prop_control_type == 'dropdown':
-                widget_input = QComboBox()
-                options = prop.get('options', [])
-                widget_input.addItems(options)
-                value = control_data.get(property_key, '')
-                index = widget_input.findText(str(value))
-                if index >= 0:
-                    widget_input.setCurrentIndex(index)
-                # Signal: Text geändert → sofort in view_data schreiben
-                widget_input.currentTextChanged.connect(
-                    lambda text, ft=field_type, ck=control_key, pk=property_key: 
-                    self._on_control_property_changed(ft, ck, pk, text)
+            elif isinstance(property_value, dict):
+                # Nested Dict - zeige als JSON
+                widget_input = QLineEdit()
+                widget_input.setText(json.dumps(property_value, ensure_ascii=False))
+                widget_input.textChanged.connect(
+                    lambda text, gn=gruppe_name, fg=feld_guid, pk=property_key: 
+                    self._on_field_property_changed(gn, fg, pk, self._parse_json_safe(text))
                 )
             else:
+                # String oder anderer Typ
                 widget_input = QLineEdit()
-                value = control_data.get(property_key, '')
-                widget_input.setText(str(value) if value is not None else '')
-                # Signal: Text editiert → sofort in view_data schreiben
+                widget_input.setText(str(property_value) if property_value is not None else '')
                 widget_input.textChanged.connect(
-                    lambda text, ft=field_type, ck=control_key, pk=property_key: 
-                    self._on_control_property_changed(ft, ck, pk, text)
+                    lambda text, gn=gruppe_name, fg=feld_guid, pk=property_key: 
+                    self._on_field_property_changed(gn, fg, pk, text)
                 )
+            
+            layout.addRow(f"{label_text}:", widget_input)
+        
+        return group
+    
+    def _parse_json_safe(self, text):
+        """Parst JSON sicher, gibt bei Fehler den Text zurück"""
+        try:
+            return json.loads(text)
+        except:
+            return text
+    
+    def _on_primitive_field_changed(self, gruppe_name, feld_guid, value):
+        """Handler: Primitives Feld wurde geändert"""
+        if gruppe_name in self.data:
+            self.data[gruppe_name][feld_guid] = value
+            logger.info(f"  ✏️ {gruppe_name}.{feld_guid} = {value}")
+    
+    def _on_field_property_changed(self, gruppe_name, feld_guid, property_key, value):
+        """Handler: Feld-Property wurde geändert (lineare Struktur)"""
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            if isinstance(self.data[gruppe_name][feld_guid], dict):
+                self.data[gruppe_name][feld_guid][property_key] = value
+                logger.info(f"  ✏️ {gruppe_name}.{feld_guid}.{property_key} = {value}")
+    
+    def _parse_json_safe(self, text):
+        """Parst JSON sicher, gibt Original bei Fehler zurück"""
+        try:
+            return json.loads(text)
+        except:
+            return text
+    
+    def _on_field_property_changed(self, gruppe_name, feld_guid, property_key, value):
+        """Handler: Feld-Property wurde geändert → sofort in data schreiben"""
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            self.data[gruppe_name][feld_guid][property_key] = value
+            logger.info(f"  ✏️ {gruppe_name}.{feld_guid}.{property_key} = {value}")
+    
+    def _on_primitive_field_changed(self, gruppe_name, feld_guid, value):
+        """Handler: Primitives Feld wurde geändert"""
+        if gruppe_name in self.data:
+            self.data[gruppe_name][feld_guid] = value
+            logger.info(f"  ✏️ {gruppe_name}.{feld_guid} = {value}")
                 
             layout.addRow(f"{label}:", widget_input)
             
@@ -1054,7 +1271,7 @@ class PdvmViewEditor(QWidget):
     def _on_control_property_changed(self, field_type, control_key, property_key, value):
         """Handler: Control-Property wurde geändert → sofort in view_data schreiben"""
         # View-Table holen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         if not view_table:
             logger.warning("⚠️ VIEW_TABLE nicht gesetzt - Änderung nicht gespeichert")
             return
@@ -1062,15 +1279,15 @@ class PdvmViewEditor(QWidget):
         table_key = view_table.upper()
         
         # Pfad zu Property sicherstellen
-        if table_key not in self.view_data['METADATEN']:
-            self.view_data['METADATEN'][table_key] = {}
-        if field_type not in self.view_data['METADATEN'][table_key]:
-            self.view_data['METADATEN'][table_key][field_type] = {}
-        if control_key not in self.view_data['METADATEN'][table_key][field_type]:
-            self.view_data['METADATEN'][table_key][field_type][control_key] = {}
+        if table_key not in self.data['METADATEN']:
+            self.data['METADATEN'][table_key] = {}
+        if field_type not in self.data['METADATEN'][table_key]:
+            self.data['METADATEN'][table_key][field_type] = {}
+        if control_key not in self.data['METADATEN'][table_key][field_type]:
+            self.data['METADATEN'][table_key][field_type][control_key] = {}
             
         # Wert schreiben
-        self.view_data['METADATEN'][table_key][field_type][control_key][property_key] = value
+        self.data['METADATEN'][table_key][field_type][control_key][property_key] = value
         
         logger.info(f"  ✏️ {control_key}.{property_key} = {value}")
     
@@ -1171,7 +1388,7 @@ class PdvmViewEditor(QWidget):
         viewtable_data = configs.get('viewtable', {})
         
         vt_table = QLineEdit(viewtable_data.get('table', ''))
-        vt_table.setPlaceholderText('z.B. sys_viewdaten')
+        vt_table.setPlaceholderText('Tabelle (sys_viewdaten/sys_framedaten)')
         vt_table.textChanged.connect(
             lambda text: self._on_config_changed(field_type, control_key, 'viewtable', 'table', text)
         )
@@ -1197,7 +1414,7 @@ class PdvmViewEditor(QWidget):
     
     def _on_config_changed(self, field_type, control_key, config_type, config_field, value):
         """Handler: Config-Wert wurde geändert → sofort in view_data schreiben"""
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         if not view_table:
             logger.warning("⚠️ VIEW_TABLE nicht gesetzt - Änderung nicht gespeichert")
             return
@@ -1205,29 +1422,30 @@ class PdvmViewEditor(QWidget):
         table_key = view_table.upper()
         
         # Pfad sicherstellen
-        if table_key not in self.view_data['METADATEN']:
-            self.view_data['METADATEN'][table_key] = {}
-        if field_type not in self.view_data['METADATEN'][table_key]:
-            self.view_data['METADATEN'][table_key][field_type] = {}
-        if control_key not in self.view_data['METADATEN'][table_key][field_type]:
-            self.view_data['METADATEN'][table_key][field_type][control_key] = {}
-        if 'configs' not in self.view_data['METADATEN'][table_key][field_type][control_key]:
-            self.view_data['METADATEN'][table_key][field_type][control_key]['configs'] = {}
-        if config_type not in self.view_data['METADATEN'][table_key][field_type][control_key]['configs']:
-            self.view_data['METADATEN'][table_key][field_type][control_key]['configs'][config_type] = {}
+        if table_key not in self.data['METADATEN']:
+            self.data['METADATEN'][table_key] = {}
+        if field_type not in self.data['METADATEN'][table_key]:
+            self.data['METADATEN'][table_key][field_type] = {}
+        if control_key not in self.data['METADATEN'][table_key][field_type]:
+            self.data['METADATEN'][table_key][field_type][control_key] = {}
+        if 'configs' not in self.data['METADATEN'][table_key][field_type][control_key]:
+            self.data['METADATEN'][table_key][field_type][control_key]['configs'] = {}
+        if config_type not in self.data['METADATEN'][table_key][field_type][control_key]['configs']:
+            self.data['METADATEN'][table_key][field_type][control_key]['configs'][config_type] = {}
         
         # Wert schreiben
-        self.view_data['METADATEN'][table_key][field_type][control_key]['configs'][config_type][config_field] = value
+        self.data['METADATEN'][table_key][field_type][control_key]['configs'][config_type][config_field] = value
         
         logger.info(f"  ✏️ {control_key}.configs.{config_type}.{config_field} = {value}")
         
     def _add_field(self):
-        """Fügt neues Control/Item zum ausgewählten Folder hinzu"""
+        """✅ LINEARE STRUKTUR: Fügt neues Feld zur ausgewählten Gruppe hinzu"""
+        import uuid
+        
         # Ausgewähltes Item holen
         current_item = self.field_tree.currentItem()
         if not current_item:
-            msg = "Bitte wähle zuerst einen Folder aus!" if self.edit_mode == 'template' else "Bitte wähle zuerst einen Folder (controls/standard_controls) aus!"
-            QMessageBox.warning(self, "Warnung", msg)
+            QMessageBox.warning(self, "Warnung", "Bitte wähle zuerst eine Gruppe aus!")
             return
             
         # Item-Daten holen
@@ -1237,56 +1455,51 @@ class PdvmViewEditor(QWidget):
         
         item_type = item_data.get('type')
         
-        # TEMPLATE-MODUS
-        if self.edit_mode == 'template':
-            # Wenn Template-Control ausgewählt, zum Parent wechseln
-            if item_type == 'template_control':
-                current_item = current_item.parent()
-                item_data = current_item.data(0, Qt.UserRole)
-                item_type = item_data.get('type')
-                
-            if item_type != 'template_folder':
-                QMessageBox.warning(
-                    self,
-                    "Warnung",
-                    "Bitte wähle einen Template-Folder aus (TEMPLATES, ROOT_CONTROLS, etc.)!"
-                )
-                return
-                
-            meta_key = item_data['meta_key']
-            self._add_template_item(meta_key)
-            return
-        
-        # VIEW-MODUS
-        # Wenn Control ausgewählt, zum Parent wechseln
-        if item_type == 'control':
+        # Wenn Feld ausgewählt, zur Gruppe (Parent) wechseln
+        if item_type == 'feld':
             current_item = current_item.parent()
             item_data = current_item.data(0, Qt.UserRole)
             item_type = item_data.get('type')
-            
-        if item_type != 'folder':
-            QMessageBox.warning(
-                self,
-                "Warnung",
-                "Bitte wähle einen Folder (controls/standard_controls) aus!"
-            )
-            return
-            
-        field_type = item_data['field_type']
         
-        # Jetzt Control hinzufügen
-        self._add_control(field_type)
+        # Muss eine Gruppe sein
+        if item_type != 'gruppe':
+            QMessageBox.warning(self, "Warnung", "Bitte wähle eine Gruppe aus!")
+            return
+        
+        gruppe_name = item_data['gruppe_name']
+        logger.info(f"➕ Füge neues Feld zu Gruppe '{gruppe_name}' hinzu")
+        
+        # Neue GUID für das Feld generieren
+        neue_guid = str(uuid.uuid4())
+        
+        # Template für diese Gruppe holen (aus TEMPLATES Gruppe, falls vorhanden)
+        template = self._get_template_for_gruppe(gruppe_name)
+        
+        # Neues Feld mit Template-Werten erstellen
+        neues_feld = template.copy()
+        neues_feld['label'] = f'Neues Feld {neue_guid[:8]}'
+        
+        # Feld in data hinzufügen
+        if gruppe_name not in self.data:
+            self.data[gruppe_name] = {}
+        
+        self.data[gruppe_name][neue_guid] = neues_feld
+        
+        logger.info(f"  ✅ Feld {neue_guid} zu Gruppe '{gruppe_name}' hinzugefügt")
+        logger.info(f"  📋 Template verwendet: {list(template.keys())[:5]}...")
+        
+        # Tree-View aktualisieren
+        self._refresh_field_list()
+        
+        # Neues Feld im Tree auswählen
+        self._select_field_in_tree(gruppe_name, neue_guid)
         
     def _remove_field(self):
-        """Entfernt ausgewähltes Control/Item"""
+        """✅ LINEARE STRUKTUR: Entfernt ausgewähltes Feld"""
         # Ausgewähltes Item holen
         current_item = self.field_tree.currentItem()
         if not current_item:
-            QMessageBox.warning(
-                self,
-                "Warnung",
-                "Bitte wähle zuerst ein Control/Item aus!"
-            )
+            QMessageBox.warning(self, "Warnung", "Bitte wähle zuerst ein Feld aus!")
             return
             
         # Item-Daten holen
@@ -1296,38 +1509,35 @@ class PdvmViewEditor(QWidget):
         
         item_type = item_data.get('type')
         
-        # TEMPLATE-MODUS
-        if self.edit_mode == 'template':
-            # Nur Template-Controls können gelöscht werden, keine Folder
-            if item_type != 'template_control':
-                QMessageBox.warning(
-                    self,
-                    "Warnung",
-                    "Bitte wähle ein Template-Item zum Löschen aus (nicht den Folder)!"
-                )
-                return
-                
-            meta_key = item_data['meta_key']
-            item_key = item_data['item_key']
-            
-            # Löschen bestätigen
-            reply = QMessageBox.question(
-                self,
-                "Template-Item löschen",
-                f"Template-Item '{item_key}' wirklich löschen?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            
-            if reply != QMessageBox.Yes:
-                return
-                
-            # Aus METADATEN entfernen
-            if meta_key in self.view_data['METADATEN']:
-                if item_key in self.view_data['METADATEN'][meta_key]:
-                    del self.view_data['METADATEN'][meta_key][item_key]
-                    logger.info(f"🗑️ Template-Item '{item_key}' aus {meta_key} gelöscht")
-                    
-            # TreeView aktualisieren
+        # Muss ein Feld sein (keine Gruppe)
+        if item_type != 'feld':
+            QMessageBox.warning(self, "Warnung", "Bitte wähle ein Feld zum Löschen aus (keine Gruppe)!")
+            return
+        
+        gruppe_name = item_data['gruppe_name']
+        feld_guid = item_data['feld_guid']
+        
+        # Feld-Label für Anzeige holen
+        feld_data = self.data.get(gruppe_name, {}).get(feld_guid, {})
+        feld_label = feld_data.get('label', feld_guid[:8]) if isinstance(feld_data, dict) else str(feld_guid)[:8]
+        
+        # Löschen bestätigen
+        reply = QMessageBox.question(
+            self,
+            "Feld löschen",
+            f"Feld '{feld_label}' aus Gruppe '{gruppe_name}' wirklich löschen?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Aus data entfernen
+        if gruppe_name in self.data and feld_guid in self.data[gruppe_name]:
+            del self.data[gruppe_name][feld_guid]
+            logger.info(f"🗑️ Feld '{feld_label}' ({feld_guid}) aus Gruppe '{gruppe_name}' gelöscht")
+        
+        # TreeView aktualisieren
             self._refresh_field_list()
             
             # Editor leeren
@@ -1364,13 +1574,13 @@ class PdvmViewEditor(QWidget):
             return
             
         # Aus View-Daten entfernen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         table_key = view_table.upper()
         
-        if table_key in self.view_data['METADATEN']:
-            if field_type in self.view_data['METADATEN'][table_key]:
-                if control_key in self.view_data['METADATEN'][table_key][field_type]:
-                    del self.view_data['METADATEN'][table_key][field_type][control_key]
+        if table_key in self.data['METADATEN']:
+            if field_type in self.data['METADATEN'][table_key]:
+                if control_key in self.data['METADATEN'][table_key][field_type]:
+                    del self.data['METADATEN'][table_key][field_type][control_key]
                     logger.info(f"🗑️ Control '{control_key}' gelöscht")
                     
         # TreeView aktualisieren
@@ -1403,8 +1613,8 @@ class PdvmViewEditor(QWidget):
         item_key = item_key.strip()
         
         # Prüfen ob Key bereits existiert
-        if meta_key in self.view_data['METADATEN']:
-            if item_key in self.view_data['METADATEN'][meta_key]:
+        if meta_key in self.data['METADATEN']:
+            if item_key in self.data['METADATEN'][meta_key]:
                 QMessageBox.warning(
                     self,
                     "Warnung",
@@ -1415,8 +1625,8 @@ class PdvmViewEditor(QWidget):
         # Standard-Struktur basierend auf meta_key
         if meta_key == 'TEMPLATES':
             # Template für neue Templates: Kopiere view_text als Basis
-            if 'view_text' in self.view_data['METADATEN'][meta_key]:
-                new_item_data = self.view_data['METADATEN'][meta_key]['view_text'].copy()
+            if 'view_text' in self.data['METADATEN'][meta_key]:
+                new_item_data = self.data['METADATEN'][meta_key]['view_text'].copy()
             else:
                 new_item_data = {
                     'table': '',
@@ -1457,10 +1667,10 @@ class PdvmViewEditor(QWidget):
             new_item_data = {}
         
         # Item hinzufügen
-        if meta_key not in self.view_data['METADATEN']:
-            self.view_data['METADATEN'][meta_key] = {}
+        if meta_key not in self.data['METADATEN']:
+            self.data['METADATEN'][meta_key] = {}
             
-        self.view_data['METADATEN'][meta_key][item_key] = new_item_data
+        self.data['METADATEN'][meta_key][item_key] = new_item_data
         logger.info(f"✅ Template-Item '{item_key}' zu {meta_key} hinzugefügt")
         
         # TreeView aktualisieren
@@ -1505,16 +1715,16 @@ class PdvmViewEditor(QWidget):
         control_guid = str(uuid.uuid4())
         
         # In View-Daten einfügen
-        view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+        view_table = self._get_table_name()
         table_key = view_table.upper()
         
-        if table_key not in self.view_data['METADATEN']:
-            self.view_data['METADATEN'][table_key] = {}
-        if field_type not in self.view_data['METADATEN'][table_key]:
-            self.view_data['METADATEN'][table_key][field_type] = {}
+        if table_key not in self.data['METADATEN']:
+            self.data['METADATEN'][table_key] = {}
+        if field_type not in self.data['METADATEN'][table_key]:
+            self.data['METADATEN'][table_key][field_type] = {}
             
         # Template-Daten mit GUID als Key speichern
-        self.view_data['METADATEN'][table_key][field_type][control_guid] = template_data
+        self.data['METADATEN'][table_key][field_type][control_guid] = template_data
         
         logger.info(f"✅ Control '{control_guid}' ({template_name}) zu {field_type} hinzugefügt")
         
@@ -1542,7 +1752,7 @@ class PdvmViewEditor(QWidget):
             logger.info("  📦 Generiere Datenstruktur...")
             
             # VIEW_TABLE holen
-            view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+            view_table = self._get_table_name()
             if not view_table:
                 QMessageBox.warning(
                     self,
@@ -1558,18 +1768,18 @@ class PdvmViewEditor(QWidget):
             logger.info(f"  📋 Tabellen-Key: {table_key}")
             
             # METADATEN[TABLE_KEY] erstellen wenn nicht vorhanden
-            if table_key not in self.view_data['METADATEN']:
-                self.view_data['METADATEN'][table_key] = {}
+            if table_key not in self.data['METADATEN']:
+                self.data['METADATEN'][table_key] = {}
                 logger.info(f"  ✅ METADATEN[{table_key}] erstellt")
                 
             # controls erstellen wenn nicht vorhanden
-            if 'controls' not in self.view_data['METADATEN'][table_key]:
-                self.view_data['METADATEN'][table_key]['controls'] = {}
+            if 'controls' not in self.data['METADATEN'][table_key]:
+                self.data['METADATEN'][table_key]['controls'] = {}
                 logger.info(f"  ✅ controls erstellt")
                 
             # standard_controls erstellen wenn nicht vorhanden
-            if 'standard_controls' not in self.view_data['METADATEN'][table_key]:
-                self.view_data['METADATEN'][table_key]['standard_controls'] = {}
+            if 'standard_controls' not in self.data['METADATEN'][table_key]:
+                self.data['METADATEN'][table_key]['standard_controls'] = {}
                 logger.info(f"  ✅ standard_controls erstellt")
                 
                 # DUMMY-Control hinzufügen
@@ -1591,7 +1801,7 @@ class PdvmViewEditor(QWidget):
                     "sortByOriginal": False,
                     "filterType": "contains"
                 }
-                self.view_data['METADATEN'][table_key]['standard_controls']['dummy'] = dummy_control
+                self.data['METADATEN'][table_key]['standard_controls']['dummy'] = dummy_control
                 logger.info(f"  ✅ DUMMY-Control zu standard_controls hinzugefügt")
                 
             # Feldliste aktualisieren
@@ -1619,26 +1829,26 @@ class PdvmViewEditor(QWidget):
             # ROOT-Felder aus Widgets übernehmen
             for control_key, widget in self.root_widgets.items():
                 if isinstance(widget, QCheckBox):
-                    self.view_data['ROOT'][control_key] = widget.isChecked()
+                    self.data['ROOT'][control_key] = widget.isChecked()
                 elif isinstance(widget, QComboBox):
-                    self.view_data['ROOT'][control_key] = widget.currentText()
+                    self.data['ROOT'][control_key] = widget.currentText()
                 else:
-                    self.view_data['ROOT'][control_key] = widget.text()
+                    self.data['ROOT'][control_key] = widget.text()
             
             # SCHRITT 0.5: Prüfe ob METADATEN leer ist und erstelle Struktur mit Dummies
-            view_table = self.view_data['ROOT'].get('VIEW_TABLE', '')
+            view_table = self._get_table_name()
             if view_table:
                 table_key = view_table.upper()
                 
                 # Wenn METADATEN leer oder Tabelle nicht vorhanden
-                if not self.view_data.get('METADATEN') or table_key not in self.view_data['METADATEN']:
+                if not self.data.get('METADATEN') or table_key not in self.data['METADATEN']:
                     logger.info(f"  📦 Erstelle Basis-Struktur für Tabelle '{table_key}'...")
                     
-                    if 'METADATEN' not in self.view_data:
-                        self.view_data['METADATEN'] = {}
+                    if 'METADATEN' not in self.data:
+                        self.data['METADATEN'] = {}
                     
                     # Struktur mit controls und standard_controls erstellen
-                    self.view_data['METADATEN'][table_key] = {
+                    self.data['METADATEN'][table_key] = {
                         'controls': {
                             'dummy': {
                                 'gruppe': 'SYSTEM',
@@ -1673,8 +1883,8 @@ class PdvmViewEditor(QWidget):
             self._update_display_order_from_tree()
             
             # In Datenbank speichern
-            self.view_db.data = self.view_data
-            self.view_db.save_all_values()
+            self.edit_db.data = self.data
+            self.edit_db.save_all_values()
             
             logger.info("✅ View-Daten gespeichert")
             

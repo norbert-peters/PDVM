@@ -102,17 +102,23 @@ class PdvmInputControlV4(QWidget):
             self.show_abdatum = True
             self.field_config = {}
         
-        # FIELD_KEY parsen
-        field_parts = self.field_key.split('_')
-        if len(field_parts) >= 3:
-            self.tabelle = field_parts[0].upper()
-            self.gruppe = field_parts[1].upper()
-            self.feld = '_'.join(field_parts[2:]).upper()
-        else:
-            logger.error(f"❌ Ungültiger field_key: {self.field_key}")
-            self.tabelle = ""
-            self.gruppe = ""
-            self.feld = ""
+        # TABELLE/GRUPPE/FELD aus neuer Struktur oder field_key parsen
+        self.tabelle = meta.get('table', '').upper()
+        self.gruppe = meta.get('gruppe', '').upper()
+        self.feld = meta.get('feld', '').upper()
+        
+        # Fallback: Wenn nicht in meta, aus field_key parsen (Kompatibilität)
+        if not self.tabelle or not self.gruppe or not self.feld:
+            field_parts = self.field_key.split('_')
+            if len(field_parts) >= 3:
+                self.tabelle = field_parts[0].upper()
+                self.gruppe = field_parts[1].upper()
+                self.feld = '_'.join(field_parts[2:]).upper()
+            else:
+                logger.error(f"❌ Ungültiger field_key: {self.field_key}")
+                self.tabelle = ""
+                self.gruppe = ""
+                self.feld = ""
         
         # INSTANZ & READ-ONLY
         self.zugeordnete_instanz = None

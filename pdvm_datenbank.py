@@ -34,6 +34,7 @@ class PdvmDatenbank:
         'sys_dialogdaten',
         'sys_dropdowndaten',
         'sys_framedaten',
+        'sys_layout',
         'sys_menudaten',
         'sys_viewdaten'
     }
@@ -527,6 +528,49 @@ class PdvmDatenbank:
             logger.debug(f"Datensatz nicht gefunden: {guid}")
             return None
 
+    def execute_query(self, query, params=None):
+        """
+        Führt eine SQL-Query aus und gibt die Ergebnisse zurück.
+        
+        VERWENDUNG:
+        - SELECT Queries für benutzerdefinierte Abfragen
+        - Unterstützt Platzhalter (?) für sichere Parameter-Binding
+        
+        Args:
+            query (str): SQL-Query (z.B. "SELECT uid, name FROM sys_dropdowndaten WHERE ...")
+            params (tuple): Optionale Parameter für Platzhalter (Standard: None)
+        
+        Returns:
+            list: Liste von Tupeln mit Ergebnissen oder leere Liste
+        
+        Beispiel:
+            db = PdvmDatenbank('sys_dropdowndaten')
+            results = db.execute_query(
+                "SELECT uid, json_extract(daten, '$.ROOT.BESCHREIBUNG_NAME') as name FROM sys_dropdowndaten"
+            )
+        """
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            results = cursor.fetchall()
+            
+            logger.debug(f"Query ausgeführt: {len(results)} Zeilen zurückgegeben")
+            return results
+            
+        except sqlite3.Error as e:
+            logger.error(f"❌ SQL-Fehler bei Query-Ausführung: {e}")
+            logger.error(f"   Query: {query}")
+            return []
+            
+        finally:
+            conn.close()
+    
     def set_name(self, guid, name_value):
         """
         Setzt den 'name' Wert für eine GUID.

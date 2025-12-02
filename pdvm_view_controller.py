@@ -199,9 +199,9 @@ class V2PdvmViewController(QObject):
             )
             
             # ROOT-Daten
-            root_data = view_db.get_static_value(gruppe='ROOT', feld='VIEW_TABLE')
+            root_data = view_db.get_static_value(gruppe='ROOT', feld='TABLE')
             if not root_data:
-                raise ValueError(f"ROOT.VIEW_TABLE nicht gefunden für {self.view_guid}")
+                raise ValueError(f"ROOT.TABLE nicht gefunden für {self.view_guid}")
             
             self.table_name = root_data
             
@@ -210,7 +210,7 @@ class V2PdvmViewController(QObject):
             self.no_data_mode = bool(no_data_flag)  # False wenn nicht gesetzt
             
             if self.no_data_mode:
-                logger.info("🎯 NO_DATA Modus aktiviert - überspringe METADATEN-Ladung")
+                logger.info("🎯 NO_DATA Modus aktiviert - überspringe Gruppen-Ladung")
                 # Nur automatische Spalten (uid, name, dummy)
                 self.view_config = {
                     'ROOT': {'view_table': root_data},
@@ -228,37 +228,37 @@ class V2PdvmViewController(QObject):
                     }
                 }
                 logger.info("✅ ViewDaten geladen im NO_DATA Modus (nur automatische Spalten)")
-                return  # Überspringe METADATEN-Ladung
+                return  # Überspringe Gruppen-Ladung
             
-            # METADATEN (nur wenn NOT no_data_mode)
-            metadaten = view_db.get_static_value(gruppe='METADATEN', feld=root_data.upper())
-            if not metadaten:
-                raise ValueError(f"METADATEN.{root_data.upper()} nicht gefunden")
+            # ✅ NEUE LINEARE STRUKTUR: Direkte Gruppen statt METADATEN
+            # Lade Gruppe mit Tabellennamen (z.B. PERSONDATEN)
+            table_key = root_data.upper()
             
-            if 'controls' not in metadaten:
-                raise ValueError("controls nicht in METADATEN gefunden")
+            # ✅ Verwende get_value_by_group() - saubere API statt direktem dict-Zugriff
+            controls_gruppe = view_db.get_value_by_group(table_key)
             
-            # Standard-Control mit Dummy erstellen falls nicht vorhanden
-            if 'standard_control' not in metadaten or 'dummy' not in metadaten.get('standard_control', {}):
-                logger.warning("⚠️ standard_control.dummy nicht in ViewDaten gefunden - erstelle Standard-Dummy")
-                standard_control = {
-                    'dummy': {
-                        'feld': 'dummy',
-                        'name': 'Dummy',
-                        'type': 'text',
-                        'show': False,
-                        'expert_mode': False,
-                        'display_order': 999,
-                        'expert_order': 999
-                    }
-                }
+            if controls_gruppe:
+                logger.info(f"✅ Controls-Gruppe '{table_key}' geladen: {len(controls_gruppe)} Controls")
             else:
-                standard_control = metadaten['standard_control']
+                logger.warning(f"⚠️ Keine Controls in Gruppe '{table_key}' gefunden - erstelle leere View-Config")
             
-            # View-Config zusammenstellen
+            # Standard-Control mit Dummy erstellen
+            standard_control = {
+                'dummy': {
+                    'feld': 'dummy',
+                    'label': 'Dummy',
+                    'type': 'text',
+                    'show': False,
+                    'expert_mode': False,
+                    'display_order': 999,
+                    'expert_order': 999
+                }
+            }
+            
+            # View-Config zusammenstellen (OHNE controls/standard_control Verschachtelung)
             self.view_config = {
                 'ROOT': {'view_table': root_data},
-                'controls': metadaten['controls'],
+                'controls': controls_gruppe,  # Direkt aus Gruppe
                 'standard_control': standard_control
             }
             
@@ -278,7 +278,7 @@ class V2PdvmViewController(QObject):
         # uid_original
         all_controls['uid_original'] = {
             'feld': 'UID',
-            'name': 'UID',
+            'label': 'UID',
             'type': 'string',
             'gruppe': 'SYSTEM',
             'control_type': 'original',
@@ -291,7 +291,7 @@ class V2PdvmViewController(QObject):
         # name_original
         all_controls['name_original'] = {
             'feld': 'NAME',
-            'name': 'Satzname',
+            'label': 'Satzname',
             'type': 'string',
             'gruppe': 'SYSTEM',
             'control_type': 'original',
@@ -303,7 +303,7 @@ class V2PdvmViewController(QObject):
         
         logger.info("  ✅ 2 System Controls (uid_original, name_original)")
         
-        # SCHRITT 1: _original Controls aus ViewDaten
+        # SCHRITT 1: _original Controls aus ViewDaten (GUID als Key + _original Suffix)
         for control_key, control_data in self.view_config['controls'].items():
             original_key = f"{control_key}_original"
             all_controls[original_key] = control_data.copy()
@@ -316,7 +316,7 @@ class V2PdvmViewController(QObject):
                     expanded_key = f"{control_key}{suffix}_original"
                     all_controls[expanded_key] = control_data.copy()
                     all_controls[expanded_key]['feld'] = f"{control_key}{suffix}"
-                    all_controls[expanded_key]['name'] = f"{control_data.get('name', control_key)} ({suffix[1:].title()})"
+                    all_controls[expanded_key]['label'] = f"{control_data.get('label', control_key)} ({suffix[1:].title()})"
                     all_controls[expanded_key]['control_type'] = 'original'
                     all_controls[expanded_key]['type'] = f"date{suffix}"
                     all_controls[expanded_key]['show'] = False
@@ -421,7 +421,7 @@ class V2PdvmViewController(QObject):
                         'expertOrder': control_config.get('expert_order', 999),
                         'displayOrder': control_config.get('display_order', 999),
                         'show': control_config.get('show', False),
-                        'spaltenueberschrift': control_config.get('name', control_key)
+                        'spaltenueberschrift': control_config.get('label', control_key)
                     }
                     basis_columns.append(basis_col)
             
@@ -648,7 +648,7 @@ class V2PdvmViewController(QObject):
             if control_config.get('control_type') in ['original', 'show']:
                 col = {
                     'name': control_key,
-                    'label': control_config.get('name', control_key),
+                    'label': control_config.get('label', control_key),
                     'type': control_config.get('type', 'string'),
                     'show': control_config.get('show', False),
                     'expert_mode': control_config.get('expert_mode', False),

@@ -1,0 +1,229 @@
+{
+  "LIST_TEMPLATES": {
+    "list_default": {
+      "name": "list_default",
+      "description": "Standard-Template für einfache Key-Value Listen",
+      "fields": [
+        {
+          "name": "key",
+          "label": "Schlüssel",
+          "type": "string",
+          "required": true,
+          "width": 150
+        },
+        {
+          "name": "value",
+          "label": "Wert",
+          "type": "string",
+          "required": true,
+          "width": 300
+        }
+      ]
+    },
+    "list_anrede": {
+      "name": "list_anrede",
+      "description": "Template für Anrede-Dropdown mit Titel-Feld",
+      "fields": [
+        {
+          "name": "key",
+          "label": "Schlüssel",
+          "type": "string",
+          "required": true,
+          "width": 80
+        },
+        {
+          "name": "value",
+          "label": "Anzeige-Text",
+          "type": "string",
+          "required": true,
+          "width": 150
+        },
+        {
+          "name": "titel",
+          "label": "Titel",
+          "type": "string",
+          "required": false,
+          "width": 150
+        }
+      ]
+    },
+    "list_land": {
+      "name": "list_land",
+      "description": "Template für Länder-Dropdown mit ISO-Code",
+      "fields": [
+        {
+          "name": "key",
+          "label": "ISO-Code",
+          "type": "string",
+          "required": true,
+          "width": 80
+        },
+        {
+          "name": "value",
+          "label": "Land-Name",
+          "type": "string",
+          "required": true,
+          "width": 200
+        },
+        {
+          "name": "iso3",
+          "label": "ISO3-Code",
+          "type": "string",
+          "required": false,
+          "width": 80
+        },
+        {
+          "name": "vorwahl",
+          "label": "Vorwahl",
+          "type": "string",
+          "required": false,
+          "width": 100
+        }
+      ]
+    },
+    "list_status": {
+      "name": "list_status",
+      "description": "Template für Status-Dropdown mit Farbe und Icon",
+      "fields": [
+        {
+          "name": "key",
+          "label": "Schlüssel",
+          "type": "string",
+          "required": true,
+          "width": 100
+        },
+        {
+          "name": "value",
+          "label": "Anzeige-Text",
+          "type": "string",
+          "required": true,
+          "width": 150
+        },
+        {
+          "name": "farbe",
+          "label": "Farbe (Hex)",
+          "type": "string",
+          "required": false,
+          "width": 100
+        },
+        {
+          "name": "icon",
+          "label": "Icon",
+          "type": "string",
+          "required": false,
+          "width": 80
+        }
+      ]
+    },
+    "list_waehrung": {
+      "name": "list_waehrung",
+      "description": "Template für Währungs-Dropdown",
+      "fields": [
+        {
+          "name": "key",
+          "label": "ISO-Code",
+          "type": "string",
+          "required": true,
+          "width": 80
+        },
+        {
+          "name": "value",
+          "label": "Währung",
+          "type": "string",
+          "required": true,
+          "width": 150
+        },
+        {
+          "name": "symbol",
+          "label": "Symbol",
+          "type": "string",
+          "required": false,
+          "width": 80
+        },
+        {
+          "name": "decimals",
+          "label": "Nachkommastellen",
+          "type": "int",
+          "required": false,
+          "width": 120
+        }
+      ]
+    }
+  },
+  "USAGE_EXAMPLE": {
+    "description": "Wie man diese Templates in der Datenbank verwendet",
+    "steps": [
+      "1. Templates in GUID 55555555-5555-5555-5555-555555555555 speichern",
+      "2. Gruppe 'LIST_TEMPLATES' erstellen",
+      "3. Für jedes Template ein Feld anlegen (z.B. 'list_anrede', 'list_land')",
+      "4. Als Wert das JSON-Template speichern",
+      "5. In Control-Definition: type='edit_list' und list_name='anrede' setzen",
+      "6. System sucht automatisch: list_anrede → list_default → fallback"
+    ],
+    "control_definition_example": {
+      "name": "dropdown_anrede",
+      "label": "Anrede-Optionen",
+      "type": "edit_list",
+      "list_name": "anrede",
+      "description": "Verwaltet die Anrede-Optionen für verschiedene Sprachen"
+    },
+    "data_structure_example": {
+      "description": "Wie Dropdown-Daten in der Datenbank gespeichert werden",
+      "table": "sys_dropdowns (oder beliebige Tabelle)",
+      "guid": "12345678-1234-1234-1234-123456789abc",
+      "gruppe": "DEU",
+      "feld": "anrede",
+      "wert": [
+        {"key": "herr", "value": "Herr", "titel": "Hr."},
+        {"key": "frau", "value": "Frau", "titel": "Fr."},
+        {"key": "divers", "value": "Divers", "titel": "Mx."}
+      ]
+    },
+    "multi_language_structure": {
+      "description": "Für mehrsprachige Dropdowns mehrere Gruppen verwenden",
+      "examples": [
+        {
+          "gruppe": "DEU",
+          "feld": "anrede",
+          "wert": [
+            {"key": "herr", "value": "Herr", "titel": "Hr."},
+            {"key": "frau", "value": "Frau", "titel": "Fr."}
+          ]
+        },
+        {
+          "gruppe": "ENG",
+          "feld": "anrede",
+          "wert": [
+            {"key": "herr", "value": "Mr.", "titel": "Mr."},
+            {"key": "frau", "value": "Mrs.", "titel": "Mrs."}
+          ]
+        },
+        {
+          "gruppe": "USA",
+          "feld": "anrede",
+          "wert": [
+            {"key": "herr", "value": "Mr.", "titel": "Mr."},
+            {"key": "frau", "value": "Ms.", "titel": "Ms."}
+          ]
+        }
+      ],
+      "usage": "System holt Dropdown aus ROOT.DEFAULT_LANGUAGE wenn nicht explizit angegeben"
+    }
+  },
+  "FIELD_TYPES": {
+    "description": "Unterstützte Feld-Typen in Templates",
+    "types": {
+      "string": "Text-Eingabe (Standard)",
+      "int": "Ganzzahl-Eingabe",
+      "float": "Fließkomma-Eingabe",
+      "bool": "Checkbox (Ja/Nein)"
+    },
+    "properties": {
+      "name": "Eindeutiger Feld-Name (wird als Spalten-Key verwendet)",
+      "label": "Anzeige-Name in Tabellen-Header",
+      "type": "Daten-Typ (string/int/float/bool)",
+      "required": "Pflichtfeld (true/false)",
+      "width": "Spalten-Breite in Pixel (optional)"
+    }
+  }
+}

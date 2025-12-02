@@ -48,7 +48,7 @@ def render_menu(gruppe, container, gcs, menu_handler=None):
     logger.info(f"🎯 render_menu({gruppe})...")
     
     # Daten aus GCS laden
-    gruppe_data = gcs._menu_system_db.get_gruppe(gruppe)
+    gruppe_data = gcs._menu_system_db.get_value_by_group(gruppe)
     if not gruppe_data:
         logger.warning(f"⚠️ Keine Daten für {gruppe}")
         return 0
@@ -94,7 +94,7 @@ def render_grund_with_zusatz(container, gcs, clicked_item_guid, menu_handler=Non
     logger.info(f"🎯 render_grund_with_zusatz(clicked_item: {clicked_item_guid})...")
     
     # SCHRITT 1: GRUND laden
-    grund_data = gcs._menu_system_db.get_gruppe('GRUND')
+    grund_data = gcs._menu_system_db.get_value_by_group('GRUND')
     grund_matrix = _convert_to_matrix(grund_data) if grund_data else []
     logger.info(f"  📊 GRUND: {len(grund_matrix)} Items")
     
@@ -172,7 +172,7 @@ def _get_zusatz_guid_from_item(gcs, item_guid):
         str oder None: zusatz_guid des Items
     """
     # Erst in VERTIKAL suchen
-    vertikal_data = gcs._menu_system_db.get_gruppe('VERTIKAL')
+    vertikal_data = gcs._menu_system_db.get_value_by_group('VERTIKAL')
     if vertikal_data and item_guid in vertikal_data:
         item = vertikal_data[item_guid]
         if isinstance(item, str):
@@ -182,7 +182,7 @@ def _get_zusatz_guid_from_item(gcs, item_guid):
             return zusatz_guid
     
     # Dann in GRUND suchen
-    grund_data = gcs._menu_system_db.get_gruppe('GRUND')
+    grund_data = gcs._menu_system_db.get_value_by_group('GRUND')
     if grund_data and item_guid in grund_data:
         item = grund_data[item_guid]
         if isinstance(item, str):
