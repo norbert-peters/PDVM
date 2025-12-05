@@ -474,8 +474,8 @@ class PdvmInputControlsManager(QObject):
                         'field_config': control_config
                     })
             
-            # Nach Order sortieren
-            controls_meta.sort(key=lambda x: x.get('order', 0))
+            # Nach Order sortieren (int-Konvertierung für String/Int-Mix)
+            controls_meta.sort(key=lambda x: int(x.get('order', 0)) if str(x.get('order', 0)).isdigit() else 0)
             
             logger.info(f"  ✅ {len(controls_meta)} Metadaten geladen (neue Struktur)")
             
@@ -577,8 +577,8 @@ class PdvmInputControlsManager(QObject):
             tab_widget = QWidget()
             tab_layout = QVBoxLayout()
             
-            # Controls hinzufügen (nach Order sortiert)
-            for control in sorted(tab_controls, key=lambda c: c.order):
+            # Controls hinzufügen (nach Order sortiert, int-Konvertierung)
+            for control in sorted(tab_controls, key=lambda c: int(c.order) if str(c.order).isdigit() else 0):
                 tab_layout.addWidget(control)
             
             tab_layout.addStretch()

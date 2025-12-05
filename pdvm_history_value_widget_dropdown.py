@@ -25,11 +25,8 @@ class PdvmHistoryValueWidgetDropdown(PdvmHistoryValueWidgetBase):
     def __init__(self, table, field_config, db_instance=None):
         super().__init__(table, field_config, db_instance)
         
-        # Dropdown-Config extrahieren
-        dropdown_config = field_config.get('dropdown_config', {})
-        self.dropdown_table = dropdown_config.get('table', '')
-        self.dropdown_key = dropdown_config.get('key', '')
-        self.dropdown_value = dropdown_config.get('value', '')
+        # Dropdown-Config extrahieren (V3: {table, key, feld, gruppe})
+        self.dropdown_config = field_config.get('dropdown_config', {})
         
         # Key-to-Display Mapping laden (EINMALIG bei Init!)
         self.key_to_display = {}
@@ -40,40 +37,42 @@ class PdvmHistoryValueWidgetDropdown(PdvmHistoryValueWidgetBase):
     
     def _load_dropdown_options(self):
         """
-        Lädt Dropdown-Optionen aus DB (EINMALIG!).
+        Lädt Dropdown-Optionen aus DB (EINMALIG!) via V3.
         
-        Dropdown-Config Format:
+        Dropdown-Config Format (V3):
         {
-            'table': 'benutzerstamm',
-            'key': 'gender',
-            'value': 'gender'
+            'table': 'sys_dropdowndaten',
+            'key': 'gender_guid',
+            'feld': 'ANREDE',
+            'gruppe': 'PERSONDATEN'
         }
-        
-        Lädt JSON-Feld mit {key: display_text} Mapping.
         """
-        if not (self.dropdown_table and self.dropdown_key and self.dropdown_value):
-            logger.warning("    ⚠️ Unvollständige Dropdown-Config")
+        if not self.dropdown_config:
+            logger.warning("    ⚠️ Keine Dropdown-Config vorhanden")
             return
         
         try:
-            from pdvm_central_datenbank import PdvmCentralDatenbank
             from pdvm_central_systemsteuerung import get_gcs
-            import json
             
             gcs = get_gcs()
             if not gcs:
                 logger.error("    ❌ GCS nicht verfügbar!")
                 return
             
-            # Dropdown-Daten direkt aus GCS holen
-            dropdown_options = gcs.get_dropdown_options(self.dropdown_key, self.dropdown_value)
+            # ✅ V3: get_dropdown_options_v3() verwenden
+            dropdown_options = gcs.get_dropdown_options_v3(self.dropdown_config)
             
             if dropdown_options:
-                # Mapping speichern: {key: display_text}
-                self.key_to_display = dropdown_options.copy()
-                logger.info(f"    ✅ {len(self.key_to_display)} Dropdown-Optionen geladen: {list(self.key_to_display.keys())}")
+                # Mapping speichern: key → value (aus edit_list)
+                for item in dropdown_options:
+                    key = item.get('key', '')
+                    value = item.get('value', '')
+                    if key:
+                        self.key_to_display[key] = value
+                
+                logger.info(f"    ✅ {len(self.key_to_display)} Dropdown-Optionen geladen (V3): {list(self.key_to_display.keys())}")
             else:
-                logger.warning(f"    ⚠️ Keine Dropdown-Daten für {self.dropdown_table}.{self.dropdown_value}")
+                logger.warning(f"    ⚠️ Keine Dropdown-Daten für Config: {self.dropdown_config}")
                 
         except Exception as e:
             logger.error(f"    ❌ Fehler beim Laden der Dropdown-Optionen: {e}")

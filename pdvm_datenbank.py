@@ -423,33 +423,45 @@ class PdvmDatenbank:
         Liest alle Datensätze aus der Tabelle.
         
         Returns:
-            list[dict]: Liste aller Datensätze mit uid, daten, modified_at (falls vorhanden)
+            list[dict]: Liste aller Datensätze mit uid, name (aus DB-Spalte), daten, modified_at
         """
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         
-        # Prüfe ob modified_at Spalte existiert
+        # Prüfe welche Spalten existieren
         cursor.execute(f"PRAGMA table_info({self.table_name})")
         columns = [col[1] for col in cursor.fetchall()]
+        has_name = 'name' in columns
         has_modified_at = 'modified_at' in columns
         
-        # Query anpassen je nach Spalten-Verfügbarkeit
+        # Query mit allen verfügbaren Spalten
+        select_cols = ['uid', 'daten']
+        if has_name:
+            select_cols.insert(1, 'name')  # name zwischen uid und daten
         if has_modified_at:
-            cursor.execute(f'SELECT uid, daten, modified_at FROM {self.table_name}')
-        else:
-            cursor.execute(f'SELECT uid, daten FROM {self.table_name}')
-            logger.debug(f"⚠️ Tabelle {self.table_name} hat keine 'modified_at' Spalte")
+            select_cols.append('modified_at')
+        
+        query = f"SELECT {', '.join(select_cols)} FROM {self.table_name}"
+        cursor.execute(query)
         
         results = cursor.fetchall()
         conn.close()
         
         datensaetze = []
         for row in results:
-            if has_modified_at:
-                uid, raw_json, modified_at = row
-            else:
-                uid, raw_json = row
-                modified_at = None
+            # Spalten dynamisch zuordnen
+            col_idx = 0
+            uid = row[col_idx]
+            col_idx += 1
+            
+            name = row[col_idx] if has_name else ""
+            if has_name:
+                col_idx += 1
+            
+            raw_json = row[col_idx]
+            col_idx += 1
+            
+            modified_at = row[col_idx] if has_modified_at else None
             
             try:
                 # JSON → Dict konvertieren
@@ -461,6 +473,7 @@ class PdvmDatenbank:
                 
                 datensaetze.append({
                     'uid': uid,
+                    'name': name or "",  # ✅ Name aus DB-Spalte!
                     'daten': data,
                     'modified_at': modified_at
                 })
@@ -528,48 +541,8 @@ class PdvmDatenbank:
             logger.debug(f"Datensatz nicht gefunden: {guid}")
             return None
 
-    def execute_query(self, query, params=None):
-        """
-        Führt eine SQL-Query aus und gibt die Ergebnisse zurück.
-        
-        VERWENDUNG:
-        - SELECT Queries für benutzerdefinierte Abfragen
-        - Unterstützt Platzhalter (?) für sichere Parameter-Binding
-        
-        Args:
-            query (str): SQL-Query (z.B. "SELECT uid, name FROM sys_dropdowndaten WHERE ...")
-            params (tuple): Optionale Parameter für Platzhalter (Standard: None)
-        
-        Returns:
-            list: Liste von Tupeln mit Ergebnissen oder leere Liste
-        
-        Beispiel:
-            db = PdvmDatenbank('sys_dropdowndaten')
-            results = db.execute_query(
-                "SELECT uid, json_extract(daten, '$.ROOT.BESCHREIBUNG_NAME') as name FROM sys_dropdowndaten"
-            )
-        """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        try:
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            
-            results = cursor.fetchall()
-            
-            logger.debug(f"Query ausgeführt: {len(results)} Zeilen zurückgegeben")
-            return results
-            
-        except sqlite3.Error as e:
-            logger.error(f"❌ SQL-Fehler bei Query-Ausführung: {e}")
-            logger.error(f"   Query: {query}")
-            return []
-            
-        finally:
-            conn.close()
+    # execute_query() ENTFERNT - SQLs nur intern in PdvmDatenbank!
+    # Verwendung: alle_lesen() für alle Datensätze mit uid + name
     
     def set_name(self, guid, name_value):
         """

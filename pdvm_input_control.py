@@ -425,25 +425,41 @@ class PdvmInputControlV4(QWidget):
         # [4] HILFE-BUTTON (kommt ZUERST - ist immer da)
         self.help_button = QPushButton("?")
         self.help_button.setFixedSize(30, 30)
-        self.help_button.setToolTip("Hilfe anzeigen (noch nicht implementiert)")
-        self.help_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                font-weight: bold;
-                font-size: 12pt;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        # Aktivieren wenn help_config vorhanden
-        if self.help_config:
+        
+        # Prüfe ob V3 help config vorhanden
+        configs = self.field_config.get('configs', {})
+        has_help = bool(configs.get('help', {}))
+        
+        if has_help:
+            self.help_button.setToolTip("Hilfe anzeigen")
+            self.help_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 12pt;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+            """)
             self.help_button.clicked.connect(self._open_help_dialog)
         else:
+            self.help_button.setToolTip("Keine Hilfe verfügbar")
+            self.help_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #95a5a6;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 12pt;
+                }
+            """)
             self.help_button.setEnabled(False)
+        
         layout.addWidget(self.help_button)
         
         # [5] HISTORIE-BUTTON (kommt DANACH - nur bei Bedarf)
@@ -524,23 +540,41 @@ class PdvmInputControlV4(QWidget):
             
             result = dialog.exec_()
             
-            # Refresh nach Dialog-Schließen (wenn geändert wurde)
+            # Übernahme-Button (Accepted) → Löschungen durchführen
             if result == QDialog.Accepted:
-                logger.info("  ✅ Historie-Dialog geschlossen mit Änderungen")
+                logger.info("  ✅ Historie-Dialog: Übernahme bestätigt")
                 
-                # EINFACH: Dialog-Refresh aufrufen (wenn in Dialog-Kontext)
-                # Das ist der gleiche Mechanismus wie beim Speichern im Dialog!
+                # Löschungen aus Dialog übernehmen
+                if dialog.deleted_abdatums:
+                    logger.info(f"  🗑️ {len(dialog.deleted_abdatums)} Löschung(en) werden übernommen")
+                    for abdatum in dialog.deleted_abdatums:
+                        try:
+                            self.zugeordnete_instanz.delete_field_at_abdatum(
+                                self.gruppe, 
+                                self.feld, 
+                                abdatum
+                            )
+                            logger.info(f"    ✅ Gelöscht: {abdatum}")
+                        except Exception as e:
+                            logger.error(f"    ❌ Fehler beim Löschen {abdatum}: {e}")
+                    
+                    # Als Änderung markieren (für Speichern-Warnung im Hauptdialog)
+                    # NICHT über Wert-Änderung sondern direkt Dirty-Flag setzen!
+                    if self.input_type:
+                        self.input_type._is_dirty = True
+                        logger.info("  ⚠️ Feld als geändert markiert (is_dirty=True)")
+                
+                # Parent-Dialog Refresh (aktualisiert Anzeige)
                 if hasattr(self, 'parent') and self.parent():
                     parent = self.parent()
-                    # Prüfe ob Parent ein Dialog mit refresh() ist
                     while parent:
                         if hasattr(parent, 'refresh') and callable(parent.refresh):
-                            logger.info("  🔄 Trigger Dialog-Refresh (wie nach Speichern)")
+                            logger.info("  🔄 Trigger Dialog-Refresh")
                             parent.refresh()
                             break
                         parent = parent.parent() if hasattr(parent, 'parent') else None
-                else:
-                    logger.info("  ℹ️ Kein Parent-Dialog gefunden - kein Refresh")
+            else:
+                logger.info("  ❌ Historie-Dialog: Abgebrochen - keine Übernahme")
             
         except Exception as e:
             logger.error(f"  ❌ Historie-Dialog-Fehler: {e}")
@@ -548,93 +582,54 @@ class PdvmInputControlV4(QWidget):
             logger.error(traceback.format_exc())
     
     def _open_help_dialog(self):
-        """Öffnet Hilfe-Dialog mit Instanz-basierten Hilfedaten"""
-        if not self.help_config:
+        """Öffnet Hilfe-Dialog mit formatiertem Text (V3)"""
+        # Prüfe ob V3 help config existiert
+        configs = self.field_config.get('configs', {})
+        help_config = configs.get('help', {})
+        
+        if not help_config:
             logger.warning(f"  ⚠️ Keine Hilfe-Konfiguration für: {self.label_text}")
             return
         
-        logger.info(f"  ❓ Öffne Hilfe: {self.label_text}")
+        logger.info(f"  ❓ Öffne Hilfe V3: {self.label_text}")
         
         try:
-            # [1] Hilfe-Instanz lazy erstellen
-            if not self.help_instance:
-                table = self.help_config.get('table')
-                guid = self.help_config.get('key')
-                
-                if not table or not guid:
-                    logger.error(f"  ❌ Ungültige help_config: {self.help_config}")
-                    from PyQt5.QtWidgets import QMessageBox
-                    QMessageBox.warning(
-                        self, 
-                        "Fehler", 
-                        "Hilfe-Konfiguration ungültig."
-                    )
-                    return
-                
-                # Instance-Key für Cache
-                cache_key = (table.upper(), guid)
-                
-                # Aus Cache holen oder neu erstellen
-                if cache_key in self._instance_cache:
-                    self.help_instance = self._instance_cache[cache_key]
-                    logger.info(f"  📂 Hilfe-Instanz aus Cache: {table}.{guid[:8]}...")
-                else:
-                    logger.info(f"  🔧 Erstelle Hilfe-Instanz: {table}.{guid[:8]}...")
-                    self.help_instance = PdvmCentralDatenbank(table, guid)
-                    self._instance_cache[cache_key] = self.help_instance
+            # Formatierte Hilfe via GCS V3 holen
+            help_html = self.gcs.get_help_text(help_config)
             
-            # [2] Hilfe-Daten laden
-            field_name = self.help_config.get('value')
-            if not field_name:
-                logger.error(f"  ❌ Kein Feldname in help_config: {self.help_config}")
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    self, 
-                    "Fehler", 
-                    "Hilfe-Feldname fehlt in Konfiguration."
-                )
-                return
-            
-            # Hilfe-Daten aus ROOT-Gruppe laden (value = kompletter Feldname)
-            logger.info(f"  📖 Lade Hilfedaten: ROOT.{field_name}")
-            help_data = self.help_instance.get_static_value('ROOT', field_name)
-            
-            if not help_data:
+            if not help_html:
                 from PyQt5.QtWidgets import QMessageBox
                 QMessageBox.information(
-                    self, 
-                    "Keine Hilfe", 
-                    f"Keine Hilfedaten für '{self.label_text}' verfügbar."
+                    self,
+                    "Hilfe",
+                    f"Keine Hilfe verfügbar für:\n{self.label_text}"
                 )
-                logger.warning(f"  ⚠️ Keine Hilfedaten gefunden")
                 return
             
-            # [3] Header und Text extrahieren
-            header = help_data.get('header', 'Hilfe')
-            text = help_data.get('text', 'Keine Hilfeinformationen verfügbar.')
+            # Hilfe-Dialog mit formatiertem HTML anzeigen
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
             
-            logger.info(f"  ✅ Hilfedaten geladen: {header}")
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Hilfe: {self.label_text}")
+            dialog.setMinimumSize(600, 400)
             
-            # [4] Hilfe-Dialog anzeigen
-            from PyQt5.QtWidgets import QMessageBox
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(header)
-            msg_box.setText(text)
-            msg_box.setIcon(QMessageBox.Information)
-            msg_box.setStandardButtons(QMessageBox.Ok)
+            layout = QVBoxLayout()
             
-            # Styling für bessere Lesbarkeit
-            msg_box.setStyleSheet("""
-                QMessageBox {
-                    min-width: 400px;
-                }
-                QMessageBox QLabel {
-                    min-height: 100px;
-                    font-size: 11pt;
-                }
-            """)
+            # Text-Browser für HTML
+            browser = QTextBrowser()
+            browser.setHtml(help_html)
+            browser.setOpenExternalLinks(True)  # Links öffnen
+            layout.addWidget(browser)
             
-            msg_box.exec_()
+            # Schließen-Button
+            close_btn = QPushButton("Schließen")
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn)
+            
+            dialog.setLayout(layout)
+            dialog.exec_()
+            
+            logger.info(f"  ✅ Hilfetext angezeigt für '{self.label_text}'")
             
         except Exception as e:
             logger.error(f"  ❌ Fehler beim Öffnen des Hilfe-Dialogs: {e}")

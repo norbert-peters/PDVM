@@ -92,7 +92,8 @@ class PdvmSystemEditor(QDialog):
         self.record_uid = record_uid
         self.gcs = get_gcs()
         
-        # Datenbank-Verbindung - WICHTIG: Mit record_uid, nicht user_guid!
+        # Datenbank-Verbindung - PdvmCentralDatenbank für strukturierten Zugriff
+        # WICHTIG: Mit record_uid initialisieren!
         self.db = PdvmCentralDatenbank(table_name, record_uid)
         
         # Daten laden
@@ -151,15 +152,18 @@ class PdvmSystemEditor(QDialog):
             return 'Unbenannt'
     
     def _load_data(self):
-        """Lädt Daten aus Datenbank"""
-        logger.info(f"📂 Lade Daten aus {self.table_name}...")
+        """Lädt Daten aus PdvmCentralDatenbank"""
+        logger.info(f"📂 Lade Daten aus {self.table_name}.{self.record_uid}...")
         
-        # Daten via get_value_by_group laden
-        all_groups = [k for k in self.db.data.keys()]
+        # Daten via PdvmCentralDatenbank laden (hat bereits self.data)
+        # Die Daten wurden bereits beim __init__ der DB geladen
+        self.data = {}
         
-        for gruppe_name in all_groups:
+        # Alle Gruppen laden
+        for gruppe_name in self.db.get_groups():
             gruppe_data = self.db.get_value_by_group(gruppe_name)
-            self.data[gruppe_name] = gruppe_data.copy() if gruppe_data else {}
+            if gruppe_data:
+                self.data[gruppe_name] = gruppe_data.copy()
         
         # Original-Kopie für Diff
         self.original_data = json.loads(json.dumps(self.data))
@@ -1052,7 +1056,7 @@ class PdvmSystemEditor(QDialog):
             self.data[gruppe_name][feld_guid]['configs'][config_name][config_key] = value
     
     def _feld_uebernehmen(self):
-        """Übernimmt Feld-Änderungen"""
+        """Übernimmt Feld-Änderungen mit Validierung"""
         if not self.feld_dirty:
             return
         
@@ -1064,6 +1068,45 @@ class PdvmSystemEditor(QDialog):
         
         gruppe_name = gruppe_item.text()
         feld_guid = feld_item.data(Qt.UserRole)
+        
+        # ========================================
+        # VALIDIERUNG: Name-Eindeutigkeit (NACH Änderung!)
+        # ========================================
+        # WICHTIG: Wir prüfen mit den NEUEN Daten (self.data wurde bereits aktualisiert)
+        # Also: Wenn User von "familienname" → "vorname" ändert, prüfen wir mit "vorname"
+        
+        current_feld = self.data[gruppe_name][feld_guid]
+        current_name = current_feld.get('name', '')
+        
+        if current_name:
+            # Zähle wie oft dieser Name in der Gruppe vorkommt
+            name_count = 0
+            konflikt_guid = None
+            
+            for other_guid, other_feld in self.data[gruppe_name].items():
+                other_name = other_feld.get('name', '')
+                if other_name == current_name:
+                    name_count += 1
+                    if other_guid != feld_guid:
+                        konflikt_guid = other_guid
+            
+            # Wenn Name mehr als 1x vorkommt → Duplikat!
+            if name_count > 1:
+                QMessageBox.warning(
+                    self,
+                    "Validierungsfehler",
+                    f"❌ Der Name '{current_name}' existiert bereits in der Gruppe '{gruppe_name}'!\n\n"
+                    f"Aktuelles Feld: {feld_guid[:8]}...\n"
+                    f"Konflikt mit: {konflikt_guid[:8] if konflikt_guid else '???'}...\n\n"
+                    f"Bitte einen eindeutigen Namen wählen.\n"
+                    f"Hinweis: Ändern Sie ZUERST den anderen Eintrag!"
+                )
+                logger.warning(f"❌ Name-Duplikat verhindert: {current_name} erscheint {name_count}x in {gruppe_name}")
+                return  # Übernahme abbrechen!
+        
+        # ========================================
+        # Übernahme durchführen
+        # ========================================
         
         # Change-Tracking mit Backup
         if self.current_feld_backup:
@@ -2049,8 +2092,9 @@ class PdvmSystemEditor(QDialog):
             for gruppe_name, gruppe_data in self.data.items():
                 self.db.set_group(gruppe_name, gruppe_data)
             
-            # Speichern
+            # Speichern via save_all_values
             self.db.save_all_values()
+            logger.info(f"💾 Daten gespeichert: {self.table_name}.{self.record_uid}")
             
             # Original-Daten aktualisieren (für Farb-Markierungen)
             self.original_data = json.loads(json.dumps(self.data))

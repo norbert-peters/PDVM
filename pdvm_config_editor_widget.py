@@ -169,26 +169,21 @@ class PdvmConfigEditorWidget(QWidget):
             
             # SCHRITT 1: Alle UIDs aus Tabelle holen
             from pdvm_datenbank import PdvmDatenbank
-            db = PdvmDatenbank()
+            db = PdvmDatenbank(table_name)
             
-            # Query: Hole alle UIDs + BESCHREIBUNG_NAME aus ROOT
-            query = f"""
-                SELECT uid, 
-                       json_extract(daten, '$.ROOT.BESCHREIBUNG_NAME') as name
-                FROM {table_name}
-                WHERE json_extract(daten, '$.ROOT') IS NOT NULL
-                ORDER BY name
-            """
+            # ✅ EINFACH: alle_lesen() liefert uid + name aus daten.ROOT.name
+            records = db.alle_lesen()
             
-            records = db.execute_query(query)
+            # Nach Name sortieren
+            records.sort(key=lambda r: r.get('name', ''))
             
             self.key_combo.clear()
             self.key_combo.addItem("Bitte Datensatz wählen...", userData=None)
             
             if records:
-                for row in records:
-                    uid = row[0]
-                    name = row[1] or f"Datensatz {uid[:8]}"
+                for record in records:
+                    uid = record['uid']
+                    name = record.get('name', '') or f"Datensatz {uid[:8]}"
                     
                     display_text = f"{name} ({uid[:8]}...)"
                     self.key_combo.addItem(display_text, userData=uid)

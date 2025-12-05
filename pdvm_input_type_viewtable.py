@@ -31,14 +31,17 @@ class PdvmInputTypeViewtable(PdvmInputTypeBase):
     def __init__(self, parent: QWidget, control_config: dict):
         super().__init__(parent, control_config)
         
-        # Viewtable-spezifische Config
-        self.viewtable_config = self.field_config.get('viewtable_config', {})
-        self.viewtable_guid = self.viewtable_config.get('guid', None)
+        # Viewtable-spezifische Config V3 (aus configs.viewtable)
+        configs = self.field_config.get('configs', {})
+        viewtable_config = configs.get('viewtable', {})
+        
+        # V3: key ist die view_guid
+        self.viewtable_guid = viewtable_config.get('key', None)
         
         # Display-Wert Cache
         self.display_text = ""
         
-        logger.debug(f"    🔍 VIEWTABLE-Type erstellt: {self.viewtable_guid[:20] if self.viewtable_guid else 'keine GUID'}...")
+        logger.debug(f"    🔍 VIEWTABLE V3-Type erstellt: {self.viewtable_guid[:20] if self.viewtable_guid else 'keine GUID'}...")
     
     def get_target_width(self) -> int:
         """Gibt Breite für Viewtable-Button zurück"""

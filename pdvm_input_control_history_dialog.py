@@ -91,8 +91,21 @@ class PdvmInputControlHistoryDialog(QDialog):
                 self.field_config['table_name'] = table_name
                 logger.info(f"  🎯 ViewTable: Extrahierte Tabelle '{table_name}' aus feld '{self.feld}'")
         
+        # 🎯 DROPDOWN: configs.dropdown extrahieren (V3)
+        if self.control_type == 'dropdown':
+            configs = self.field_config.get('configs', {})
+            dropdown_config = configs.get('dropdown', {})
+            if dropdown_config:
+                self.field_config['dropdown_config'] = dropdown_config
+                logger.info(f"  🎯 Dropdown: V3 Config übergeben: {dropdown_config}")
+            else:
+                logger.warning(f"  ⚠️ Dropdown: Keine configs.dropdown gefunden")
+        
         # Type-Widget instanziieren (wird in _create_ui erstellt)
         self.value_widget = None
+        
+        # Gelöschte Abdatum-Werte (für Übernahme nach Dialog-Schließen)
+        self.deleted_abdatums = []
         
         # Dialog-Konfiguration
         self.setWindowTitle(f"Historie: {label}")
@@ -132,8 +145,8 @@ class PdvmInputControlHistoryDialog(QDialog):
         widget_class = self.VALUE_WIDGETS.get(self.control_type, PdvmHistoryValueWidgetText)
         self.value_widget = widget_class(self.table, self.field_config, self.db_instance)
         
-        # 🎯 SPALTEN festlegen (Type-abhängig!)
-        columns = ["Abdatum", "Wert"] + self.value_widget.get_additional_columns()
+        # 🎯 SPALTEN festlegen (Type-abhängig!) + Löschen-Spalte
+        columns = ["Abdatum", "Wert"] + self.value_widget.get_additional_columns() + ["Löschen"]
         self.table.setColumnCount(len(columns))
         self.table.setHorizontalHeaderLabels(columns)
         
@@ -141,11 +154,15 @@ class PdvmInputControlHistoryDialog(QDialog):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Abdatum
         
-        if len(columns) == 3:  # ViewTable: GUID + Name
+        delete_col_idx = len(columns) - 1  # Letzte Spalte = Löschen
+        
+        if len(columns) == 4:  # Text/DateTime/Dropdown + Löschen
+            header.setSectionResizeMode(1, QHeaderView.Stretch)  # Wert
+            header.setSectionResizeMode(delete_col_idx, QHeaderView.ResizeToContents)  # Löschen
+        else:  # ViewTable: GUID + Name + Löschen
             header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # GUID
             header.setSectionResizeMode(2, QHeaderView.Stretch)  # Name
-        else:  # Text/DateTime/Dropdown
-            header.setSectionResizeMode(1, QHeaderView.Stretch)  # Wert
+            header.setSectionResizeMode(delete_col_idx, QHeaderView.ResizeToContents)  # Löschen
         
         # Styling
         self.table.setAlternatingRowColors(True)
@@ -245,6 +262,29 @@ class PdvmInputControlHistoryDialog(QDialog):
                 
                 # Spalte 2+: Zusätzliche Spalten (z.B. Name bei ViewTable)
                 self.value_widget.create_additional_cells(row, wert)
+                
+                # 🗑️ Letzte Spalte: Lösch-Button
+                delete_button = QPushButton("🗑️")
+                delete_button.setToolTip("Diesen historischen Eintrag löschen")
+                delete_button.setMaximumWidth(40)
+                delete_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #e74c3c;
+                        color: white;
+                        border: none;
+                        border-radius: 3px;
+                        padding: 5px;
+                        font-size: 14px;
+                    }
+                    QPushButton:hover {
+                        background-color: #c0392b;
+                    }
+                """)
+                # Lambda mit abdatum als Parameter
+                delete_button.clicked.connect(lambda checked, a=abdatum: self._delete_history_entry(a))
+                
+                delete_col_idx = self.table.columnCount() - 1
+                self.table.setCellWidget(row, delete_col_idx, delete_button)
             
             # Zeilen-Höhe anpassen
             if self.control_type == 'datetime':
@@ -404,6 +444,61 @@ class PdvmInputControlHistoryDialog(QDialog):
                 f"Die Änderungen konnten nicht gespeichert werden:\n{e}"
             )
     
+    def _delete_history_entry(self, abdatum: float):
+        """
+        Löscht einen historischen Eintrag.
+        
+        REGEL: Mindestens 1 Eintrag muss immer bleiben!
+        Nach Löschung wird Dialog geschlossen (kein Refresh nötig).
+        
+        Args:
+            abdatum: Zeitstempel des zu löschenden Eintrags
+        """
+        try:
+            # Prüfe Anzahl vorhandener Einträge
+            history_data = self.db_instance.get_field(self.gruppe, self.feld)
+            
+            if not history_data or len(history_data) <= 1:
+                QMessageBox.warning(
+                    self,
+                    "Löschen nicht möglich",
+                    "Der letzte historische Eintrag kann nicht gelöscht werden.\n"
+                    "Es muss mindestens 1 Eintrag vorhanden bleiben."
+                )
+                return
+            
+            # Bestätigung
+            formatted_date = self._format_abdatum(abdatum)
+            reply = QMessageBox.question(
+                self,
+                "Eintrag löschen?",
+                f"Möchten Sie den historischen Eintrag vom\n{formatted_date}\nwirklich löschen?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Abdatum zur Lösch-Liste hinzufügen (wird bei accept() übernommen)
+            logger.info(f"🗑️ Markiere zum Löschen: {self.gruppe}.{self.feld} @ {abdatum}")
+            self.deleted_abdatums.append(abdatum)
+            
+            # Dialog mit Accepted schließen (Übernahme-Button-Semantik)
+            # Input-Dialog erkennt Löschung als Änderung
+            logger.info("✅ Löschung bestätigt - Dialog schließt")
+            self.accept()
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Löschen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(
+                self,
+                "Fehler",
+                f"Fehler beim Löschen des Eintrags:\n{e}"
+            )
+    
     def _on_viewtable_double_click(self, item):
         """
         Handler für Doppelklick auf ViewTable-Zeile.
@@ -437,3 +532,34 @@ class PdvmInputControlHistoryDialog(QDialog):
         
         self.table.setSpan(0, 0, 1, 2)
         self.table.setItem(0, 0, item)
+    
+    def reject(self):
+        """
+        Überschreibt QDialog.reject() für Warnung bei ungespeicherten Änderungen.
+        
+        PRÜFT NUR Type-Widget Änderungen (Wert-Änderungen).
+        Lösch-Operationen zählen NICHT als ungespeichert (werden bei accept() übernommen).
+        """
+        # Prüfe Type-Widget auf Änderungen
+        has_changes = False
+        if self.value_widget:
+            for row in range(self.table.rowCount()):
+                if self.value_widget.is_value_changed(row):
+                    has_changes = True
+                    break
+        
+        if has_changes:
+            reply = QMessageBox.question(
+                self,
+                "Ungespeicherte Änderungen",
+                "Es gibt ungespeicherte Wert-Änderungen.\n\nMöchten Sie wirklich abbrechen?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return  # Abbruch des Abbruchs
+        
+        # Keine Änderungen oder Benutzer hat bestätigt - Lösch-Liste leeren!
+        self.deleted_abdatums = []
+        super().reject()

@@ -516,7 +516,7 @@ class PdvmCentralDatenbank:
 
     def delete_field(self, gruppe: str, feld: str):
         """
-        Löscht ein Feld aus einer Gruppe.
+        Löscht ein Feld aus einer Gruppe (KOMPLETT - alle historischen Einträge).
         
         Args:
             gruppe: Name der Gruppe
@@ -528,6 +528,61 @@ class PdvmCentralDatenbank:
             if feld in self.data[gruppe]:
                 del self.data[gruppe][feld]
                 logger.debug(f"Feld gelöscht: {gruppe}.{feld}")
+    
+    def delete_field_at_abdatum(self, gruppe: str, feld: str, abdatum: float):
+        """
+        Löscht einen spezifischen historischen Eintrag aus einem Feld.
+        
+        REGEL: Mindestens 1 Eintrag muss bleiben (wird durch Aufrufer geprüft!)
+        
+        Args:
+            gruppe: Name der Gruppe
+            feld: Name des Feldes
+            abdatum: Zeitstempel des zu löschenden Eintrags
+            
+        Raises:
+            ValueError: Wenn Gruppe/Feld nicht existiert oder nicht historisch
+            ValueError: Wenn abdatum nicht gefunden
+        """
+        self._ensure_data_loaded()
+        
+        # Prüfungen
+        if gruppe not in self.data:
+            raise ValueError(f"Gruppe '{gruppe}' nicht gefunden")
+        
+        if not isinstance(self.data[gruppe], dict):
+            raise ValueError(f"Gruppe '{gruppe}' ist kein Dictionary")
+        
+        if feld not in self.data[gruppe]:
+            raise ValueError(f"Feld '{feld}' nicht in Gruppe '{gruppe}' gefunden")
+        
+        feld_data = self.data[gruppe][feld]
+        
+        # Muss historisch sein (Dictionary mit Zeitstempeln)
+        if not isinstance(feld_data, dict):
+            raise ValueError(f"Feld '{feld}' ist nicht historisch (kein Dictionary)")
+        
+        # Zeitstempel finden und löschen
+        abdatum_str = str(abdatum)
+        found = False
+        
+        for timestamp_key in list(feld_data.keys()):
+            try:
+                if float(timestamp_key) == float(abdatum):
+                    del feld_data[timestamp_key]
+                    found = True
+                    logger.info(f"🗑️ Historischer Eintrag gelöscht: {gruppe}.{feld} @ {abdatum}")
+                    break
+            except (ValueError, TypeError):
+                continue
+        
+        if not found:
+            raise ValueError(f"Abdatum {abdatum} nicht gefunden in {gruppe}.{feld}")
+        
+        # Falls jetzt leer → komplettes Feld löschen
+        if not feld_data:
+            logger.warning(f"⚠️ Feld {gruppe}.{feld} ist jetzt leer - wird komplett gelöscht")
+            del self.data[gruppe][feld]
 
     def get_groups(self) -> List[str]:
         """

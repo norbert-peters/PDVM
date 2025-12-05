@@ -121,20 +121,42 @@ class PdvmAutonomeView(QWidget):
             self.no_data_mode = bool(no_data_flag)  # False wenn nicht gesetzt
             
             if self.no_data_mode:
-                logger.info("🎯 NO_DATA Modus aktiviert - überspringe METADATEN-Ladung")
+                logger.info("🎯 NO_DATA Modus aktiviert - überspringe Controls-Ladung")
                 # Nur automatische Spalten (uid, name)
                 self.controls = {}  # Keine benutzerdefinierten Controls
                 logger.info("✅ NO_DATA Modus - nur automatische Spalten (uid, name)")
             else:
-                # [4b] METADATEN.{TABLE}.controls holen (nur wenn NOT no_data_mode)
+                # [4b] Controls aus FLACHER STRUKTUR holen (NEUE V2-Struktur!)
+                # sys_viewdaten hat jetzt: ROOT, FINANZDATEN, PERSONDATEN, etc.
+                # Keine METADATEN mehr!
                 table_upper = self.view_table.upper()
-                metadaten, _ = view_db.get_value('METADATEN', table_upper, self.stichtag)
                 
-                if not metadaten or 'controls' not in metadaten:
-                    raise ValueError(f"METADATEN.{table_upper}.controls nicht gefunden")
+                # Prüfe welche Gruppen (außer ROOT) existieren
+                all_groups = view_db.get_groups()
+                data_groups = [g for g in all_groups if g != 'ROOT']
                 
-                self.controls = metadaten['controls']
-                logger.info(f"✅ {len(self.controls)} Controls geladen: {list(self.controls.keys())}")
+                logger.info(f"📂 Verfügbare Gruppen: {data_groups}")
+                
+                # Controls aus der passenden Gruppe holen
+                # Bei sys_viewtable → TABLE ist "finanzdaten" → Gruppe ist "FINANZDATEN"
+                if table_upper in data_groups:
+                    controls_data = view_db.get_value_by_group(table_upper)
+                    if controls_data:
+                        self.controls = controls_data
+                        logger.info(f"✅ {len(self.controls)} Controls aus {table_upper} geladen")
+                    else:
+                        logger.warning(f"⚠️ Gruppe {table_upper} ist leer")
+                        self.controls = {}
+                else:
+                    # Fallback: Erste Nicht-ROOT Gruppe verwenden
+                    if data_groups:
+                        first_group = data_groups[0]
+                        logger.info(f"⚠️ {table_upper} nicht gefunden - verwende {first_group}")
+                        controls_data = view_db.get_value_by_group(first_group)
+                        self.controls = controls_data if controls_data else {}
+                        logger.info(f"✅ {len(self.controls)} Controls aus {first_group} geladen")
+                    else:
+                        raise ValueError(f"Keine Daten-Gruppen gefunden in sys_viewdaten")
             
             # [5] call_daten für ViewController erstellen
             call_daten = {

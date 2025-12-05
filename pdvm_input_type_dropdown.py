@@ -41,35 +41,45 @@ class PdvmInputTypeDropdown(PdvmInputTypeBase):
         return self.calculated_width
     
     def _init_dropdown_instance(self):
-        """Initialisiert Dropdown-Instanz und lädt Items via GCS"""
-        if not self.dropdown_config:
-            logger.error("    ❌ DROPDOWN: Keine dropdown_config")
+        """Initialisiert Dropdown-Instanz und lädt Items via GCS V3"""
+        # Prüfe ob V3 config in field_config.configs.dropdown existiert
+        configs = self.field_config.get('configs', {})
+        dropdown_config = configs.get('dropdown', {})
+        
+        if not dropdown_config:
+            logger.error("    ❌ DROPDOWN: Keine configs.dropdown vorhanden")
             return
         
-        key = self.dropdown_config.get('key', '')
-        value = self.dropdown_config.get('value', '')
+        # V3 Config: {table, key, feld, gruppe}
+        table = dropdown_config.get('table', '')
+        key = dropdown_config.get('key', '')
+        feld = dropdown_config.get('feld', '')
+        gruppe = dropdown_config.get('gruppe', '')
         
-        if not key or not value:
-            logger.error("    ❌ DROPDOWN: Unvollständige Config (key oder value fehlt)")
+        if not table or not key or not feld:
+            logger.error(f"    ❌ DROPDOWN: Unvollständige V3-Config: {dropdown_config}")
             return
         
-        # Dropdown-Optionen direkt aus GCS holen (verwendet sys_dropdowndaten)
+        # Dropdown-Optionen via GCS V3 holen
         try:
-            dropdown_dict = self.control.gcs.get_dropdown_options(key, value)
+            edit_list = self.control.gcs.get_dropdown_options_v3(dropdown_config)
             
-            if not dropdown_dict:
-                logger.warning(f"    ⚠️ Keine Dropdown-Daten für {value} (GUID: {key})")
+            if not edit_list:
+                logger.warning(f"    ⚠️ Keine Dropdown-Daten für {feld}")
                 return
             
-            # Mapping erstellen: {display_text: key}
-            for item_key, display_text in dropdown_dict.items():
-                if item_key and display_text:
-                    self.dropdown_items[display_text] = item_key
+            # Mapping erstellen: {display_value: key}
+            # edit_list = [{"key": "w", "value": "Frau"}, {"key": "m", "value": "Herr"}, ...]
+            for item in edit_list:
+                item_key = item.get('key', '')
+                display_value = item.get('value', '')
+                if item_key and display_value:
+                    self.dropdown_items[display_value] = item_key
             
-            logger.info(f"    🔽 Dropdown geladen: {len(self.dropdown_items)} Items für {value}")
+            logger.info(f"    🔽 Dropdown V3 geladen: {len(self.dropdown_items)} Items für {feld}")
             
         except Exception as e:
-            logger.error(f"    ❌ Dropdown-Items-Fehler: {e}")
+            logger.error(f"    ❌ Dropdown V3 Fehler: {e}")
             import traceback
             logger.error(traceback.format_exc())
     
