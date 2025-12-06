@@ -484,6 +484,15 @@ class PdvmCentralDatenbank:
         self._database.speichern(self.guid, data_to_save)
         
         logger.info(f"Alle Daten gespeichert für GUID {self.guid}")
+        
+        # ✅ Modified Tracking: Aktualisiere MODIFIED_AT für diese Tabelle
+        # WICHTIG: Nur für Geschäftsdaten, nicht für System-Tabellen (verhindert Loop)
+        if self.table_name not in ['sys_systemsteuerung', 'sys_viewdaten', 'sys_framedaten', 'sys_dialogdaten', 'sys_menudaten']:
+            try:
+                from pdvm_modified_tracking import update_modified_tracking
+                update_modified_tracking(self.table_name)
+            except Exception as e:
+                logger.debug(f"Modified Tracking Update übersprungen: {e}")
 
     def set_group(self, gruppe: str, gruppe_data: Dict[str, Any]):
         """

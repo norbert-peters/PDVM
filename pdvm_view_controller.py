@@ -198,12 +198,29 @@ class V2PdvmViewController(QObject):
                 guid=self.view_guid
             )
             
+            # ✅ Modified Tracking: Prüfe ob View-Tabelle geändert wurde
+            # Wird erst nach table_name-Ladung aufgerufen (siehe unten)
+            
             # ROOT-Daten
             root_data = view_db.get_static_value(gruppe='ROOT', feld='TABLE')
             if not root_data:
                 raise ValueError(f"ROOT.TABLE nicht gefunden für {self.view_guid}")
             
             self.table_name = root_data
+            
+            # ✅ Modified Tracking: Prüfe ob Tabelle neu geladen werden muss
+            # NUR für Geschäftsdaten-Tabellen, nicht für System-Tabellen
+            system_tables = ['sys_systemsteuerung', 'sys_viewdaten', 'sys_framedaten', 'sys_dialogdaten', 'sys_menudaten', 'benutzerstamm']
+            if self.table_name not in system_tables and self.gcs:
+                try:
+                    from pdvm_modified_tracking import check_modified_and_should_refresh
+                    should_refresh = check_modified_and_should_refresh(self.table_name)
+                    if should_refresh:
+                        logger.info(f"🔄 Tabelle '{self.table_name}' wurde geändert - lade View neu")
+                    else:
+                        logger.info(f"✅ Tabelle '{self.table_name}' unverändert - nutze Cache")
+                except Exception as e:
+                    logger.debug(f"Modified Tracking Check übersprungen: {e}")
             
             # ✅ NO_DATA Flag prüfen (für Tabellen ohne Metadaten wie Menüs)
             no_data_flag = view_db.get_static_value(gruppe='ROOT', feld='NO_DATA')

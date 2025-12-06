@@ -344,8 +344,12 @@ class PdvmViewMatrixManager:
         self.basis_matrix = rows
         
         logger.info(f"✅ BasisMatrix erstellt: {len(self.basis_matrix)} Zeilen (aus {len(instances)} Instanzen)")
+        
+        # 🔐 Security-Filter anwenden (NACH BasisMatrix-Erstellung)
+        self._apply_security_filter()
+        
         logger.info("🎯 ORIGINAL-LOGIK vollständig migriert!")
-        self._trace_matrix("BasisMatrix (NACH Erstellung)", self.basis_matrix)
+        self._trace_matrix("BasisMatrix (NACH Erstellung + Security)", self.basis_matrix)
     
     def _format_abdatum(self, abdatum_value):
         """
@@ -1439,3 +1443,149 @@ class PdvmViewMatrixManager:
             'basis_columns': basis_columns,
             'current_projection': len(self.current_projection_table) if self.current_projection_table else 0
         }
+    
+    def _apply_security_filter(self):
+        """
+        🔐 Security-Filter: Filtert Sätze nach Security-Profile
+        
+        Wird NACH BasisMatrix-Erstellung ausgeführt und entfernt Zeilen
+        basierend auf sec_id und View-Security-Konfiguration.
+        """
+        if not self.basis_matrix:
+            logger.debug("⚠️ Keine BasisMatrix für Security-Filter")
+            return
+        
+        logger.info(f"🔐 Wende Security-Filter an ({len(self.basis_matrix)} Zeilen)")
+        
+        # Security-Config aus View holen (falls vorhanden)
+        security_config = self._get_view_security_config()
+        security_mode = security_config.get('security_mode', 'standard')
+        show_templates = security_config.get('show_templates', False)
+        show_system = security_config.get('show_system', False)
+        
+        logger.debug(f"   Security-Mode: {security_mode}")
+        logger.debug(f"   show_templates: {show_templates}")
+        logger.debug(f"   show_system: {show_system}")
+        
+        # Security-Profile Cache (für Performance)
+        security_cache = {}
+        
+        filtered_rows = []
+        filtered_count = 0
+        
+        for row in self.basis_matrix:
+            uid = get_wert(row.get('uid_original', create_cell(None, None, None)))
+            
+            # sec_id aus Datenbank holen (via PdvmDatenbank)
+            sec_id = self._get_sec_id_for_row(uid)
+            
+            if not sec_id:
+                # Kein Security-Profile → Normal behandeln
+                filtered_rows.append(row)
+                continue
+            
+            # Security-Profile laden (mit Cache)
+            if sec_id not in security_cache:
+                security_cache[sec_id] = self._load_security_profile(sec_id)
+            
+            sec_profile = security_cache[sec_id]
+            
+            if not sec_profile:
+                # Unbekanntes Profile → Normal behandeln
+                filtered_rows.append(row)
+                continue
+            
+            # Kategorie aus Profile holen
+            category = sec_profile.get('category', 'normal')
+            
+            # Admin-Override: Alles anzeigen
+            if security_mode == 'admin':
+                filtered_rows.append(row)
+                continue
+            
+            # Template-Filter
+            if category == 'template':
+                if not show_templates and security_mode != 'expert':
+                    filtered_count += 1
+                    logger.debug(f"   🔒 Template gefiltert: {uid}")
+                    continue
+            
+            # System-Filter
+            if category == 'system':
+                if not show_system:
+                    filtered_count += 1
+                    logger.debug(f"   🔒 System gefiltert: {uid}")
+                    continue
+            
+            # Deleted-Filter (immer ausblenden außer admin)
+            if category == 'deleted':
+                filtered_count += 1
+                logger.debug(f"   🔒 Deleted gefiltert: {uid}")
+                continue
+            
+            # Zeile durchlassen
+            filtered_rows.append(row)
+        
+        # Basis-Matrix überschreiben
+        self.basis_matrix = filtered_rows
+        
+        logger.info(f"✅ Security-Filter angewendet: {len(filtered_rows)} Zeilen behalten, {filtered_count} gefiltert")
+    
+    def _get_view_security_config(self) -> Dict[str, Any]:
+        """Holt Security-Konfiguration aus View-Config"""
+        try:
+            if self.controller and hasattr(self.controller, 'view_config'):
+                view_config = self.controller.view_config
+                if view_config and 'ROOT' in view_config:
+                    root = view_config['ROOT']
+                    return {
+                        'security_mode': root.get('security_mode', 'standard'),
+                        'show_templates': root.get('show_templates', False),
+                        'show_system': root.get('show_system', False)
+                    }
+        except Exception as e:
+            logger.debug(f"Fehler beim Laden Security-Config: {e}")
+        
+        # Default: Standard-Mode, nichts extra anzeigen
+        return {
+            'security_mode': 'standard',
+            'show_templates': False,
+            'show_system': False
+        }
+    
+    def _get_sec_id_for_row(self, uid: str) -> Optional[str]:
+        """Holt sec_id für eine Zeile aus Datenbank"""
+        if not uid:
+            return None
+        
+        try:
+            # Tabellen-Name aus Controller holen
+            if self.controller and hasattr(self.controller, 'table_name'):
+                table_name = self.controller.table_name
+                
+                from pdvm_datenbank import PdvmDatenbank
+                db = PdvmDatenbank(table_name)
+                sec_id = db.get_sec_id(uid)
+                
+                return sec_id
+        except Exception as e:
+            logger.debug(f"Fehler beim Holen sec_id für {uid}: {e}")
+            return None
+    
+    def _load_security_profile(self, sec_id: str) -> Optional[Dict[str, Any]]:
+        """Lädt Security-Profile aus sys_security"""
+        try:
+            from pdvm_datenbank import PdvmDatenbank
+            sec_db = PdvmDatenbank('sys_security')
+            profile_data = sec_db.lesen(sec_id)
+            
+            if profile_data and 'VISIBILITY' in profile_data:
+                return {
+                    'category': profile_data['VISIBILITY'].get('category', 'normal'),
+                    'show_by_default': profile_data['VISIBILITY'].get('show_by_default', True),
+                    'requires_permission': profile_data['VISIBILITY'].get('requires_permission')
+                }
+        except Exception as e:
+            logger.debug(f"Fehler beim Laden Security-Profile {sec_id}: {e}")
+        
+        return None

@@ -310,6 +310,15 @@ class PdvmDatenbank:
         conn.close()
         
         logger.info(f"Datensatz gespeichert: {guid} ({len(json_daten)} Zeichen)")
+        
+        # ✅ Modified Tracking: Aktualisiere MODIFIED_AT für diese Tabelle
+        # WICHTIG: Nur für Geschäftsdaten, nicht für System-Tabellen (verhindert Loop)
+        if self.table_name not in ['sys_systemsteuerung', 'sys_viewdaten', 'sys_framedaten', 'sys_dialogdaten', 'sys_menudaten', 'benutzerstamm']:
+            try:
+                from pdvm_modified_tracking import update_modified_tracking
+                update_modified_tracking(self.table_name)
+            except Exception as e:
+                logger.debug(f"Modified Tracking Update übersprungen: {e}")
     
     def set_name(self, guid, name):
         """
@@ -346,6 +355,67 @@ class PdvmDatenbank:
         conn.close()
         
         logger.info(f"Name gesetzt für {guid}: {name}")
+    
+    def set_sec_id(self, guid, sec_id):
+        """
+        Setzt die sec_id-Spalte für einen Datensatz (Security-Profile).
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            sec_id (str): Security-Profile GUID
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        if not sec_id:
+            raise ValueError("sec_id darf nicht leer sein")
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # Prüfen ob Datensatz existiert
+        cursor.execute(f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?', (guid,))
+        exists = cursor.fetchone()[0] > 0
+        
+        if exists:
+            # Update sec_id
+            cursor.execute(
+                f'UPDATE {self.table_name} SET sec_id = ? WHERE uid = ?',
+                (sec_id, guid)
+            )
+            logger.debug(f"sec_id aktualisiert für {guid}: {sec_id}")
+        else:
+            # sec_id kann nur für existierende Datensätze gesetzt werden
+            raise ValueError(f"Datensatz {guid} existiert nicht - kann sec_id nicht setzen")
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"sec_id gesetzt für {guid}: {sec_id}")
+    
+    def get_sec_id(self, guid):
+        """
+        Liest die sec_id-Spalte für einen Datensatz.
+        
+        Args:
+            guid (str): GUID des Datensatzes
+            
+        Returns:
+            str|None: Security-Profile GUID oder None
+        """
+        if not guid:
+            raise ValueError("GUID darf nicht leer sein")
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute(f'SELECT sec_id FROM {self.table_name} WHERE uid = ?', (guid,))
+        result = cursor.fetchone()
+        
+        conn.close()
+        
+        if result and result[0]:
+            return result[0]
+        return None
 
     def lesen(self, guid):
         """
