@@ -129,10 +129,9 @@ class PdvmCentralSystemsteuerung(QObject):
         _gcs_instance = self
         logger.info(f"✅ V2.0: Globale GCS-Instanz registriert (für DB-Zugriff)")
 
-        # 2.1 Datenbank-Instanz für Benutzerstamm (fiktiv, OHNE GUID!)
-        self._u_db = PdvmCentralDatenbank('benutzerstamm')
-        self._u_db.set_data(self._user_data)  # Nur user_data, KEINE GUID!
-        logger.info(f"✅ Benutzerdatenbank geladen (fiktiv, ohne GUID) mit {len(self._user_data)} Properties")
+        # 2.1 ENTFERNT: _u_db wird nicht mehr benötigt - user_data ist direkt in self._user_data
+        # Keine benutzerstamm Tabelle mehr!
+        logger.info(f"✅ Benutzerdaten geladen (direkt aus user_data) mit {len(self._user_data)} Properties")
 
         # 2.2 Datenbank-Instanz für Systemsteuerung
         self._db = PdvmCentralDatenbank('sys_systemsteuerung', user_guid)
@@ -299,8 +298,9 @@ class PdvmCentralSystemsteuerung(QObject):
             
         if db_type == 'u':
             try:
-                return self._u_db.get_static_value(gruppe, property_name)
-            except KeyError:
+                # Direkt aus _user_data lesen (keine DB mehr!)
+                return self._user_data.get(gruppe, {}).get(property_name)
+            except (KeyError, AttributeError):
                 logger.warning(f"⚠️ Property '{property_name}' nicht in Benutzerdaten gefunden für Gruppe '{gruppe}'")
                 return None
         else:
@@ -378,7 +378,8 @@ class PdvmCentralSystemsteuerung(QObject):
         self._ensure_initialized()
         
         try:
-            anwendungen = self._u_db.data.get('Anwendungen', {})
+            # Direkt aus _user_data lesen (keine DB mehr!)
+            anwendungen = self._user_data.get('Anwendungen', {})
             applications = anwendungen.get('Application', {})
             
             app_menu_mapping = {}

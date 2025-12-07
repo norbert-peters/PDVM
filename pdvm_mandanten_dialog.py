@@ -11,12 +11,19 @@ VERSION: 1.0
 import sys
 import sqlite3
 import json
+import logging
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QComboBox, 
-    QPushButton, QMessageBox, QApplication
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
+    QPushButton, QMessageBox, QApplication, QGroupBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+
+# User-Datenbank und Password-Change-Dialog
+from pdvm_user_db import PdvmUserDatenbank
+from pdvm_password_change_dialog import PasswordChangeDialog
+
+logger = logging.getLogger(__name__)
 
 
 class V2MandantenDialog(QDialog):
@@ -31,6 +38,43 @@ class V2MandantenDialog(QDialog):
     
     def setup_ui(self):
         """UI aufbauen"""
+        # 🔐 PHASE 1.3: Passwort-Änderung erzwingen wenn FLAG gesetzt
+        user_email = self.user_data.get('email', self.user_data.get('benutzer', ''))
+        
+        try:
+            user_db = PdvmUserDatenbank()
+            
+            # Prüfen ob Passwort-Änderung erforderlich
+            if user_db.check_password_change_required(user_email):
+                logger.info(f"🔐 Passwort-Änderung erforderlich für User: {user_email}")
+                
+                # Passwort-Änderungs-Dialog ERZWINGEN
+                pw_dialog = PasswordChangeDialog(
+                    benutzer=user_email,  # KORRIGIERT: benutzer statt user_email
+                    force_change=True,
+                    parent=self
+                )
+                
+                result = pw_dialog.exec_()
+                
+                if result != QDialog.Accepted:
+                    # User hat Abbrechen gedrückt → Login-Vorgang abbrechen
+                    logger.warning(f"⚠️ User {user_email} hat Passwort-Änderung abgebrochen")
+                    QMessageBox.warning(
+                        self,
+                        "Passwort-Änderung erforderlich",
+                        "Sie müssen Ihr Passwort ändern, bevor Sie fortfahren können.\n\n"
+                        "Der Login-Vorgang wird abgebrochen."
+                    )
+                    self.reject()  # Dialog schließen ohne Mandanten-Auswahl
+                    return
+                    
+                logger.info(f"✅ Passwort erfolgreich geändert für User: {user_email}")
+                
+        except Exception as e:
+            logger.error(f"❌ Fehler bei Passwort-Änderung-Check: {e}")
+        
+        # Standard-UI aufbauen (nur wenn Passwort OK)
         self.setWindowTitle("Mandant auswählen")
         self.setModal(True)
         self.setMinimumWidth(400)

@@ -28,6 +28,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 
+# User-Datenbank für Security-Features
+from pdvm_user_db import PdvmUserDatenbank
+
 
 class V2LoginDialog(QDialog):
     """Login-Dialog für V2.0 Authentication"""
@@ -51,15 +54,15 @@ class V2LoginDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
         
-        # Titel mit Styling
+        # Titel mit Styling - KOMPAKT
         title = QLabel("🔐 Anmeldung im PDVM System")
-        title_font = QFont("Segoe UI", 16, QFont.Bold)
+        title_font = QFont("Segoe UI", 14, QFont.Bold)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("""
             QLabel {
                 color: #2c3e50;
-                padding: 10px;
+                padding: 29px 10px;
                 background-color: #ecf0f1;
                 border-radius: 8px;
                 border: 2px solid #3498db;
@@ -67,10 +70,13 @@ class V2LoginDialog(QDialog):
         """)
         layout.addWidget(title)
         
+        layout.addSpacing(10)
+        
         # Email
         email_label = QLabel("E-Mail:")
         email_label.setMinimumWidth(100)
         layout.addWidget(email_label)
+        layout.addSpacing(-10)  # Weniger Abstand zum Feld
         
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("E-Mail eingeben...")
@@ -81,6 +87,7 @@ class V2LoginDialog(QDialog):
         password_label = QLabel("Passwort:")
         password_label.setMinimumWidth(100)
         layout.addWidget(password_label)
+        layout.addSpacing(-10)  # Weniger Abstand zum Feld
         
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
@@ -92,6 +99,15 @@ class V2LoginDialog(QDialog):
         self.show_password_cb = QCheckBox("👁️ Passwort anzeigen")
         self.show_password_cb.stateChanged.connect(self._toggle_password)
         layout.addWidget(self.show_password_cb)
+        
+        # Passwort-Änderung nach Login Checkbox
+        self.change_password_cb = QCheckBox("🔐 Passwort nach dem Login ändern")
+        self.change_password_cb.setToolTip(
+            "Wenn aktiviert, wird nach erfolgreichem Login ein Dialog zur Passwortänderung angezeigt."
+        )
+        layout.addWidget(self.change_password_cb)
+        
+        layout.addSpacing(10)
         
         # Buttons
         button_layout = QHBoxLayout()
@@ -107,34 +123,25 @@ class V2LoginDialog(QDialog):
         self.login_button.setDefault(True)
         self.login_button.clicked.connect(self.on_login_clicked)
         
-        # Button-Styling
-        button_style = """
-            QPushButton {
-                padding: 8px 16px;
-                font-size: 11pt;
-                border-radius: 6px;
-                border: 1px solid #bdc3c7;
-            }
-            QPushButton:hover {
-                background-color: #ecf0f1;
-            }
-        """
-        self.cancel_button.setStyleSheet(button_style)
-        self.demo_button.setStyleSheet(button_style + """
+        # Button-Styling - VEREINFACHT (keine festen Höhen, System-Standard)
+        self.cancel_button.setMinimumHeight(35)
+        self.demo_button.setMinimumHeight(35)
+        self.login_button.setMinimumHeight(35)
+        
+        # Nur Farben setzen, keine Rahmen/Padding die Größe beeinflussen
+        self.demo_button.setStyleSheet("""
             QPushButton {
                 background-color: #f39c12;
                 color: white;
-                border: 1px solid #e67e22;
             }
             QPushButton:hover {
                 background-color: #e67e22;
             }
         """)
-        self.login_button.setStyleSheet(button_style + """
+        self.login_button.setStyleSheet("""
             QPushButton {
                 background-color: #27ae60;
                 color: white;
-                border: 1px solid #229954;
             }
             QPushButton:hover {
                 background-color: #229954;
@@ -160,7 +167,7 @@ class V2LoginDialog(QDialog):
     def handle_demo_login(self):
         """Demo-Login: Automatisch als Admin einloggen"""
         self.email_input.setText("admin@super.de")
-        self.password_input.setText("admin")
+        self.password_input.setText("@Pdvm2025")
         self.on_login_clicked()
     
     def on_login_clicked(self):
@@ -210,6 +217,21 @@ class V2LoginDialog(QDialog):
                 self.email_input.setFocus()
                 return
             
+            # ✅ SECURITY CHECK: Account gesperrt?
+            try:
+                user_db = PdvmUserDatenbank()
+                if user_db.is_account_locked(email):
+                    QMessageBox.critical(
+                        self,
+                        "Account gesperrt",
+                        "Ihr Account wurde aufgrund zu vieler Fehlversuche gesperrt.\n\n"
+                        "Bitte kontaktieren Sie einen Administrator."
+                    )
+                    self.password_input.clear()
+                    return
+            except Exception as e:
+                print(f"   ⚠️ Account-Lock Check fehlgeschlagen: {e}")
+            
             # 🔍 DEBUG
             print(f"✅ Benutzer gefunden: {user_row['name']}")
             print(f"   Gespeicherter Hash: {user_row['passwort']}")
@@ -220,11 +242,33 @@ class V2LoginDialog(QDialog):
             print(f"   Verifizierungs-Ergebnis: {verify_result}")
             
             if not verify_result:
-                QMessageBox.warning(
-                    self, 
-                    "Fehler", 
-                    "Falsches Passwort!"
-                )
+                # ✅ UPDATE: Failed-Login Counter erhöhen
+                try:
+                    user_db = PdvmUserDatenbank()
+                    failed_count = user_db.increment_failed_login(email)
+                    print(f"   Failed-Login Count: {failed_count}")
+                    
+                    if failed_count >= 5:
+                        QMessageBox.critical(
+                            self,
+                            "Account gesperrt",
+                            f"Ihr Account wurde nach {failed_count} Fehlversuchen gesperrt.\n\n"
+                            "Bitte kontaktieren Sie einen Administrator."
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, 
+                            "Fehler", 
+                            f"Falsches Passwort!\n\nVerbleibende Versuche: {5 - failed_count}"
+                        )
+                except Exception as e:
+                    print(f"   ⚠️ Failed-Login Update fehlgeschlagen: {e}")
+                    QMessageBox.warning(
+                        self, 
+                        "Fehler", 
+                        "Falsches Passwort!"
+                    )
+                
                 self.password_input.clear()
                 self.password_input.setFocus()
                 return
@@ -241,6 +285,20 @@ class V2LoginDialog(QDialog):
             print(f"✅ Login erfolgreich: {self.user_data['name']} ({email})")
             print(f"   Rollen: {self.user_data['daten']['PERMISSIONS']['ROLES']}")
             print(f"   Mandanten: {self.user_data['daten']['MANDANTEN']['LIST']}")
+            
+            # ✅ UPDATE: Last-Login Timestamp + Failed-Attempts zurücksetzen
+            try:
+                user_db = PdvmUserDatenbank()
+                user_db.update_last_login(email)
+                print(f"   Last-Login aktualisiert für {email}")
+                
+                # 🔐 PHASE 1.3: Passwort-Änderungs-Flag setzen wenn Checkbox aktiviert
+                if self.change_password_cb.isChecked():
+                    user_db.set_password_change_required(email, True)
+                    print(f"   🔐 Passwort-Änderungs-Flag gesetzt für {email}")
+                    
+            except Exception as e:
+                print(f"   ⚠️ Last-Login Update fehlgeschlagen: {e}")
             
             # Dialog schließen (Daten bleiben in self.user_data)
             self.accept()
