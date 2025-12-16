@@ -17,6 +17,7 @@ import json
 import allgemeines as all  # Enthält all.neue_guid(), all.convert_from_time() 
 import pdvm_datetime as dt  # Enthält PdvmDateTimeNow()
 import logging
+# ⚠️ KEIN globaler Import von get_gcs (Circular Import!) - wird lokal in alle_lesen() importiert
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,15 @@ class PdvmDatenbank:
         self.table_name = table_name
         self.is_system_table = table_name in self.SYSTEM_TABLES
         
-        if self.is_system_table:
+        # SPEZIAL-ROUTING: sys_benutzer und sys_mandanten verwenden auth.db
+        if table_name in ["sys_benutzer", "sys_mandanten"]:
+            # User/Mandanten-Tabelle → auth.db (eine Ebene über Mandanten-DB)
+            import os
+            mandant_dir = os.path.dirname(gcs.db_path)  # z.B. "Daten/mandant_001"
+            daten_dir = os.path.dirname(mandant_dir)     # z.B. "Daten"
+            self.db_name = os.path.join(daten_dir, "auth.db")
+            logger.info(f"✅ Auth-Tabelle: {self.db_name} → {table_name}")
+        elif self.is_system_table:
             # System-Tabelle → pdvm_system.db
             self.db_name = self._get_system_db_path(gcs)
             logger.info(f"✅ System-Tabelle: {self.db_name} → {table_name}")
@@ -82,8 +91,9 @@ class PdvmDatenbank:
             self.db_name = gcs.db_path
             logger.info(f"✅ Mandanten-Tabelle: {gcs.db_path} → {table_name}")
         
-        # Tabelle erstellen falls nicht vorhanden
-        self._ensure_table_exists()
+        # Tabelle erstellen falls nicht vorhanden (nicht für auth.db Tabellen)
+        if table_name not in ["sys_benutzer", "sys_mandanten"]:
+            self._ensure_table_exists()
         
         # Historisch-Status aus Datenbank ermitteln
         self.historisch = self._ermittle_historisch_status()
@@ -300,10 +310,33 @@ class PdvmDatenbank:
             logger.debug(f"Datensatz aktualisiert: {guid}")
         else:
             # Insert (created_at wird mit aktuellem Zeitstempel gesetzt)
-            cursor.execute(
-                f'INSERT INTO {self.table_name} (uid, daten, created_at, modified_at) VALUES (?, ?, ?, ?)',
-                (guid, json_daten, timestamp, timestamp)
-            )
+            # ✅ SPECIAL: sys_benutzer benötigt benutzer-Spalte (Email)
+            if self.table_name == "sys_benutzer":
+                # Prüfe ob benutzer bereits in DB existiert (bei Update)
+                cursor.execute(f'SELECT benutzer FROM {self.table_name} WHERE uid = ?', (guid,))
+                existing_benutzer = cursor.fetchone()
+                
+                if not existing_benutzer:
+                    # Neuer Datensatz: Generiere temporäre Email mit Timestamp
+                    import time
+                    temp_email = f"no-email@{int(time.time())}"
+                    cursor.execute(
+                        f'INSERT INTO {self.table_name} (uid, benutzer, passwort, daten, created_at, modified_at) VALUES (?, ?, ?, ?, ?, ?)',
+                        (guid, temp_email, "", json_daten, timestamp, timestamp)
+                    )
+                    logger.info(f"✅ sys_benutzer angelegt mit temporärer Email: {temp_email}")
+                else:
+                    # Normaler INSERT (sollte nicht vorkommen bei EXISTS=False, aber Sicherheit)
+                    cursor.execute(
+                        f'INSERT INTO {self.table_name} (uid, daten, created_at, modified_at) VALUES (?, ?, ?, ?)',
+                        (guid, json_daten, timestamp, timestamp)
+                    )
+            else:
+                # Standard-Tabellen: Normaler INSERT
+                cursor.execute(
+                    f'INSERT INTO {self.table_name} (uid, daten, created_at, modified_at) VALUES (?, ?, ?, ?)',
+                    (guid, json_daten, timestamp, timestamp)
+                )
             logger.debug(f"Datensatz eingefügt: {guid} (created_at={timestamp})")
         
         conn.commit()
@@ -490,71 +523,108 @@ class PdvmDatenbank:
 
     def alle_lesen(self):
         """
-        Liest alle Datensätze aus der Tabelle.
+        ✅ V3 OPTIMIERT: Linear, schnell, mit SEC_PROFILES Integration
+        
+        ÄNDERUNGEN:
+        - Punkt 1: Zentraler GCS-Import (am Dateianfang)
+        - Punkt 2: Linear und zeitoptimiert
+        - Punkt 3: Keine Spaltenprüfung (einheitliche Tabellen)
+        - Punkt 4+5: SEC_PROFILES Filter via SQL WHERE
+        - Punkt 6: Direkte Spalten-Zuordnung (keine dynamische Ermittlung)
+        - Punkt 7+8: Fehlerbehandlung beibehalten aber vereinfacht
         
         Returns:
-            list[dict]: Liste aller Datensätze mit uid, name (aus DB-Spalte), daten, modified_at
+            list[dict]: Liste aller Datensätze mit uid, name, daten, modified_at
         """
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        # Prüfe welche Spalten existieren
-        cursor.execute(f"PRAGMA table_info({self.table_name})")
-        columns = [col[1] for col in cursor.fetchall()]
-        has_name = 'name' in columns
-        has_modified_at = 'modified_at' in columns
-        
-        # Query mit allen verfügbaren Spalten
-        select_cols = ['uid', 'daten']
-        if has_name:
-            select_cols.insert(1, 'name')  # name zwischen uid und daten
-        if has_modified_at:
-            select_cols.append('modified_at')
-        
-        query = f"SELECT {', '.join(select_cols)} FROM {self.table_name}"
-        cursor.execute(query)
-        
-        results = cursor.fetchall()
-        conn.close()
-        
+        # ✅ GCS holen (lokaler Import wegen Circular Import Prevention)
+        from pdvm_central_systemsteuerung import get_gcs
+        gcs = get_gcs()
         datensaetze = []
-        for row in results:
-            # Spalten dynamisch zuordnen
-            col_idx = 0
-            uid = row[col_idx]
-            col_idx += 1
-            
-            name = row[col_idx] if has_name else ""
-            if has_name:
-                col_idx += 1
-            
-            raw_json = row[col_idx]
-            col_idx += 1
-            
-            modified_at = row[col_idx] if has_modified_at else None
-            
-            try:
-                # JSON → Dict konvertieren
-                data = json.loads(raw_json)
-                
-                # Historische Zeitkonvertierung falls erforderlich
-                if self.historisch:
-                    data = all.convert_from_time(data)
-                
-                datensaetze.append({
-                    'uid': uid,
-                    'name': name or "",  # ✅ Name aus DB-Spalte!
-                    'daten': data,
-                    'modified_at': modified_at
-                })
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON-Parsing-Fehler für GUID {uid}: {e}")
-                # Fehlerhafte Datensätze überspringen
-                continue
         
-        logger.info(f"Alle Datensätze gelesen: {len(datensaetze)} von {len(results)} erfolgreich")
-        return datensaetze
+        try:
+            # ✅ SEC_PROFILES vom User holen (Punkt 4)
+            allowed_sec_ids = []
+            if gcs:
+                allowed_sec_ids = gcs.get_sec_profiles()  # Neue Methode in GCS
+            
+            # ✅ SQL Query mit SEC_PROFILES Filter (Punkt 5)
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            
+            if allowed_sec_ids:
+                # Datensätze OHNE sec_id ODER mit erlaubter sec_id
+                placeholders = ','.join(['?' for _ in allowed_sec_ids])
+                query = f"""
+                    SELECT uid, name, daten, modified_at, sec_id 
+                    FROM {self.table_name}
+                    WHERE sec_id IS NULL OR sec_id IN ({placeholders})
+                """
+                cursor.execute(query, allowed_sec_ids)
+            else:
+                # Keine Berechtigung: Nur Datensätze ohne sec_id
+                query = f"""
+                    SELECT uid, name, daten, modified_at, sec_id
+                    FROM {self.table_name}
+                    WHERE sec_id IS NULL
+                """
+                cursor.execute(query)
+            
+            results = cursor.fetchall()
+            conn.close()
+            
+            for row in results:
+                # ✅ Punkt 6: Direkte Spalten-Zuordnung (keine Dynamik)
+                uid = row[0]
+                name = row[1] or ""
+                raw_json = row[2]
+                modified_at = row[3]
+                
+                try:
+                    # JSON → Dict konvertieren
+                    data = json.loads(raw_json)
+                    
+                    # ✅ KRITISCH: Validierung NACH json.loads()
+                    if not isinstance(data, dict):
+                        raise TypeError(f"Erwartete dict, bekam {type(data).__name__}")
+                    
+                    # Historische Zeitkonvertierung falls erforderlich
+                    if self.historisch:
+                        data = all.convert_from_time(data)
+                    
+                    datensaetze.append({
+                        'uid': uid,
+                        'name': name or "",  # ✅ Name aus DB-Spalte!
+                        'daten': data,
+                        'modified_at': modified_at
+                    })
+                    
+                except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                    logger.error(f"❌ Fehler beim Laden von Datensatz {uid}: {e}")
+                    logger.error(f"   Tabelle: {self.table_name}")
+                    logger.error(f"   Raw JSON (erste 200 Zeichen): {raw_json[:200]}")
+                    
+                    # ✅ Punkt 8+10: Error-Logging vereinfacht (direkt ohne Zwischenvariablen)
+                    try:
+                        if gcs and hasattr(gcs, 'error_log_manager'):
+                            gcs.error_log_manager.add_error(
+                                table_name=self.table_name,
+                                record_guid=uid,
+                                error_type="json_parse" if isinstance(e, json.JSONDecodeError) else "data_corruption",
+                                error_message=str(e),
+                                severity="error",
+                                context_guid=self.table_name,
+                                context_type="table"
+                            )
+                    except Exception as log_err:
+                        logger.error(f"❌ Error-Logging fehlgeschlagen: {log_err}")
+                    
+                    # Fehlerhafte Datensätze überspringen
+                    continue
+            
+            return datensaetze
+        
+        finally:
+            logger.info(f"✅ alle_lesen() abgeschlossen: {len(datensaetze)} Datensätze geladen")
 
     def get_table_info(self):
         """
@@ -651,3 +721,104 @@ class PdvmDatenbank:
             conn.close()
             logger.warning(f"set_name fehlgeschlagen: GUID {guid} nicht gefunden")
             return False
+
+    def get_spalte(self, guid: str, spalte: str):
+        """
+        Liest Wert einer beliebigen Spalte für einen Datensatz.
+        
+        NUR FÜR sys_benutzer ERLAUBT (Sonderspalten benutzer, passwort).
+        
+        Args:
+            guid (str): GUID des Datensatzes (uid)
+            spalte (str): Spaltenname (z.B. 'benutzer', 'passwort')
+            
+        Returns:
+            str|None: Spaltenwert oder None wenn nicht gefunden
+            
+        Raises:
+            PermissionError: Wenn Tabelle nicht sys_benutzer ist
+        """
+        if self.table_name != "sys_benutzer":
+            raise PermissionError(f"❌ get_spalte() nur für sys_benutzer erlaubt! (Tabelle: {self.table_name})")
+        
+        if not guid or not spalte:
+            raise ValueError("GUID und Spaltenname dürfen nicht leer sein")
+        
+        # Sicherheitsprüfung: Nur erlaubte Spalten
+        erlaubte_spalten = ['benutzer', 'passwort', 'uid', 'name', 'daten', 'modified_at']
+        if spalte not in erlaubte_spalten:
+            raise ValueError(f"❌ Spalte '{spalte}' nicht erlaubt! Erlaubt: {erlaubte_spalten}")
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(f'SELECT {spalte} FROM {self.table_name} WHERE uid = ?', (guid,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                return result[0]
+            else:
+                logger.warning(f"get_spalte: GUID {guid} nicht gefunden")
+                return None
+        except Exception as e:
+            conn.close()
+            logger.error(f"❌ get_spalte fehlgeschlagen: {e}")
+            raise
+
+    def set_spalte(self, guid: str, spalte: str, wert):
+        """
+        Setzt Wert einer beliebigen Spalte für einen Datensatz.
+        
+        NUR FÜR sys_benutzer ERLAUBT (Sonderspalten benutzer, passwort).
+        
+        Args:
+            guid (str): GUID des Datensatzes (uid)
+            spalte (str): Spaltenname (z.B. 'benutzer', 'passwort')
+            wert: Neuer Wert für die Spalte
+            
+        Returns:
+            bool: True wenn erfolgreich, False wenn GUID nicht existiert
+            
+        Raises:
+            PermissionError: Wenn Tabelle nicht sys_benutzer ist
+        """
+        if self.table_name != "sys_benutzer":
+            raise PermissionError(f"❌ set_spalte() nur für sys_benutzer erlaubt! (Tabelle: {self.table_name})")
+        
+        if not guid or not spalte:
+            raise ValueError("GUID und Spaltenname dürfen nicht leer sein")
+        
+        # Sicherheitsprüfung: Nur erlaubte Spalten (NICHT uid - das ist PRIMARY KEY!)
+        erlaubte_spalten = ['benutzer', 'passwort', 'name', 'daten', 'modified_at']
+        if spalte not in erlaubte_spalten:
+            raise ValueError(f"❌ Spalte '{spalte}' nicht änderbar! Erlaubt: {erlaubte_spalten}")
+        
+        wert_str = str(wert) if wert is not None else ""
+        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        try:
+            # Prüfe ob GUID existiert
+            cursor.execute(f'SELECT COUNT(*) FROM {self.table_name} WHERE uid = ?', (guid,))
+            exists = cursor.fetchone()[0] > 0
+            
+            if exists:
+                cursor.execute(
+                    f'UPDATE {self.table_name} SET {spalte} = ? WHERE uid = ?',
+                    (wert_str, guid)
+                )
+                conn.commit()
+                conn.close()
+                logger.info(f"✅ Spalte '{spalte}' gesetzt: {guid} → '{wert_str[:20]}...'")
+                return True
+            else:
+                conn.close()
+                logger.warning(f"set_spalte: GUID {guid} nicht gefunden")
+                return False
+        except Exception as e:
+            conn.close()
+            logger.error(f"❌ set_spalte fehlgeschlagen: {e}")
+            raise
