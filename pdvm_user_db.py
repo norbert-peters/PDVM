@@ -21,19 +21,42 @@ class PdvmUserDatenbank:
     def __init__(self):
         """Initialisiert die Klasse mit auth.db und sys_benutzer Tabelle"""
         # FIXIERT: auth.db statt Hauptdatenbank verwenden
-        self.db_name = "Daten/auth.db"
+        import os
+        self.db_name = os.path.join("Daten", "auth.db")
         self.table_name = "sys_benutzer"  # User-Management in auth.db
-        # Tabelle nicht mehr erstellen - existiert bereits
+        
+        # Debug: DB-Pfad prüfen
+        logger.info(f"🔍 PdvmUserDatenbank initialisiert")
+        logger.info(f"   DB-Pfad: {self.db_name}")
+        logger.info(f"   Existiert: {os.path.exists(self.db_name)}")
         
         # Aktueller User (wird bei Login gesetzt)
         self.current_user = None
         self.current_data = None
+    
+    @staticmethod
+    def normalize_email(email):
+        """
+        Normalisiert Email-Adresse (case-insensitive)
+        
+        Args:
+            email (str): Email-Adresse
+            
+        Returns:
+            str: Email in Kleinbuchstaben
+        """
+        if email:
+            return email.strip().lower()
+        return email
 
     # _load_database_from_init() und _erzeuge_tabelle() entfernt
     # auth.db und sys_benutzer sind fest vorgegeben und existieren bereits
 
     def anlegen(self, benutzer=None, passwort=None, daten={}):
         """Erstellt einen neuen Datensatz mit Benutzer und verschlüsseltem Password"""
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         if not benutzer or not passwort:
@@ -73,20 +96,35 @@ class PdvmUserDatenbank:
         conn.close()
 
     def lesen(self, benutzer):
-        """Liest einen Datensatz aus der Datenbank"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
+        """Liest einen Datensatz anhand des Benutzers"""
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
+        logger.info(f"🔍 lesen() für Benutzer: {benutzer}")
+        logger.info(f"   DB: {self.db_name}")
+        logger.info(f"   Tabelle: {self.table_name}")
+        
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
 
-        select_query = f'SELECT * FROM {self.table_name} WHERE benutzer = ?'
-        cursor.execute(select_query, (benutzer,))
-        result = cursor.fetchone()
-        conn.close()
+            select_query = f'SELECT * FROM {self.table_name} WHERE benutzer = ?'
+            cursor.execute(select_query, (benutzer,))
+            result = cursor.fetchone()
+            conn.close()
 
-        if result:
-            return result
-        else:
-            logger.error(f"🔹 Kein Datensatz für Benutzer {benutzer} gefunden.")
-            return None  # Oder eine Standardstruktur zurückgeben
+            if result:
+                logger.info(f"✅ Benutzer gefunden: {result[0]}")
+                logger.info(f"   Spalten: {len(result)}")
+                return result
+            else:
+                logger.warning(f"⚠️ Benutzer nicht gefunden: {benutzer}")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Lesen: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     def loeschen(self, benutzer):
         """Löscht einen Datensatz anhand des Benutzers"""
@@ -211,6 +249,9 @@ class PdvmUserDatenbank:
         Returns:
             tuple: (bool: Erfolg, str: Fehlermeldung oder None)
         """
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
         # Email validieren
         if not self.validate_email(benutzer):
             return False, "Ungültige Email-Adresse"
@@ -267,6 +308,76 @@ class PdvmUserDatenbank:
         conn.close()
         
         logger.info(f"✅ Passwort geändert für {benutzer}")
+        return True, None
+    
+    def admin_set_password(self, benutzer, new_password, require_change=True):
+        """
+        Setzt Passwort als Admin (ohne altes Passwort zu prüfen)
+        Für: Startpasswort setzen, Passwort zurücksetzen
+        
+        Args:
+            benutzer (str): Email des Benutzers
+            new_password (str): Neues Passwort
+            require_change (bool): Benutzer muss Passwort beim Login ändern
+            
+        Returns:
+            tuple: (bool: Erfolg, str: Fehlermeldung oder None)
+        """
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
+        # Email validieren
+        if not self.validate_email(benutzer):
+            return False, "Ungültige Email-Adresse"
+        
+        # User laden
+        user_data = self.lesen(benutzer)
+        if not user_data:
+            return False, "Benutzer nicht gefunden"
+        
+        # Neues Passwort validieren
+        valid, error_msg = self.validate_password_complexity(new_password)
+        if not valid:
+            return False, error_msg
+        
+        # Passwort hashen
+        new_hash = self.hash_password(new_password)
+        
+        # Daten-Struktur laden
+        benutzer_db, passwort_hash, uid, daten_json = user_data[0], user_data[1], user_data[2], user_data[3]
+        daten = json.loads(daten_json) if daten_json else {}
+        
+        # SECURITY-Gruppe aktualisieren
+        if 'SECURITY' not in daten:
+            daten['SECURITY'] = {}
+        
+        # Timestamp
+        dt = Pdvm_DateTime()
+        current_timestamp = dt.PdvmDateTime
+        
+        daten['SECURITY']['PASSWORD_CHANGE_REQUIRED'] = require_change
+        daten['SECURITY']['LAST_PASSWORD_CHANGE'] = current_timestamp
+        daten['SECURITY']['PASSWORD_SET_BY_ADMIN'] = True
+        
+        # Audit-Trail
+        if 'AUDIT' not in daten:
+            daten['AUDIT'] = {}
+        daten['AUDIT']['MODIFIED_AT'] = current_timestamp
+        daten['AUDIT']['MODIFIED_BY'] = 'ADMIN'
+        
+        # In DB speichern
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        json_daten = json.dumps(daten, ensure_ascii=False)
+        
+        update_query = f'UPDATE {self.table_name} SET passwort = ?, daten = ? WHERE benutzer = ?'
+        cursor.execute(update_query, (new_hash, json_daten, benutzer))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Passwort gesetzt für {benutzer} (Admin-Aktion, require_change={require_change})")
         return True, None
     
     # ============================================================================
@@ -358,13 +469,20 @@ class PdvmUserDatenbank:
         Returns:
             dict: Alle Benutzer-Daten oder {} bei Fehler
         """
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
+        logger.info(f"🔍 get_all_data() für Benutzer: {benutzer}")
         user_data = self.lesen(benutzer)
         if not user_data:
+            logger.warning(f"⚠️ Keine Daten gefunden für: {benutzer}")
             return {}
         
         # user_data ist ein Tuple mit 11 Spalten: (benutzer, passwort, uid, daten, ...)
         daten_json = user_data[3]
-        return json.loads(daten_json)
+        result = json.loads(daten_json)
+        logger.info(f"✅ Daten geladen: {len(result)} Gruppen")
+        return result
     
     def save_all_data(self, benutzer, daten):
         """
@@ -377,6 +495,9 @@ class PdvmUserDatenbank:
         Returns:
             bool: True bei Erfolg, False bei Fehler
         """
+        # Email normalisieren (case-insensitive)
+        benutzer = self.normalize_email(benutzer)
+        
         user_data = self.lesen(benutzer)
         if not user_data:
             logger.error(f"Benutzer {benutzer} nicht gefunden")

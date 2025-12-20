@@ -710,6 +710,10 @@ class PdvmSystemEditor(QDialog):
         # WICHTIG: display_order aus Template kann String/leer sein → robuste Conversion
         def safe_display_order(feld_data):
             """Sichere Konvertierung von display_order zu int"""
+            # ROOT Properties sind direkte Werte (String) statt Feld-Konfigurationen
+            if not isinstance(feld_data, dict):
+                return 999
+            
             order = feld_data.get('display_order', 999)
             if order == '' or order is None:
                 return 999
@@ -724,15 +728,23 @@ class PdvmSystemEditor(QDialog):
         )
         
         for feld_guid, feld_data in felder_sorted:
-            # Label anzeigen (name + key im Tooltip)
-            display_label = feld_data.get('label', 'Kein Label')
-            item = QListWidgetItem(display_label)
-            item.setData(Qt.UserRole, feld_guid)  # GUID speichern
-            
-            # Tooltip mit name und key
-            name = feld_data.get('name', 'Kein Name')
-            tooltip = f"Name: {name}\nKey: {feld_guid}"
-            item.setToolTip(tooltip)
+            # ROOT Properties: direkte Werte (String) → Feld-Name als Label
+            if not isinstance(feld_data, dict):
+                display_label = feld_guid  # Key als Label
+                item = QListWidgetItem(display_label)
+                item.setData(Qt.UserRole, feld_guid)
+                tooltip = f"ROOT Property\nKey: {feld_guid}\nWert: {feld_data}"
+                item.setToolTip(tooltip)
+            else:
+                # Normale Feld-Konfiguration
+                display_label = feld_data.get('label', 'Kein Label')
+                item = QListWidgetItem(display_label)
+                item.setData(Qt.UserRole, feld_guid)
+                
+                # Tooltip mit name und key
+                name = feld_data.get('name', 'Kein Name')
+                tooltip = f"Name: {name}\nKey: {feld_guid}"
+                item.setToolTip(tooltip)
             
             # Farbmarkierung
             if self._is_feld_changed(gruppe_name, feld_guid):
@@ -775,6 +787,11 @@ class PdvmSystemEditor(QDialog):
             return
         
         feld_data = self.data[gruppe_name][feld_guid]
+        
+        # ROOT Properties: direkte Werte (String) → Einfacher Text-Editor
+        if not isinstance(feld_data, dict):
+            self._refresh_properties_editor_root(gruppe_name, feld_guid, feld_data)
+            return
         
         # Template-Controls laden
         template_guid = '55555555-5555-5555-5555-555555555555'
@@ -902,6 +919,48 @@ class PdvmSystemEditor(QDialog):
                     
                     config_group.setLayout(config_layout)
                     self.config_layout.addRow(config_group)
+    
+    def _refresh_properties_editor_root(self, gruppe_name: str, feld_guid: str, feld_value):
+        """
+        ROOT Properties Editor: Einfacher Text-Editor für direkte Werte.
+        
+        ROOT Properties sind direkte Werte (String/Int) ohne Feld-Konfiguration.
+        Beispiel: {"DB_NAME": "mandant_001", "BEZEICHNUNG": "Hauptverwaltung"}
+        """
+        # Label mit Property-Name
+        label = QLabel(f"{feld_guid}:")
+        label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        self.property_layout.addWidget(label)
+        
+        # Text-Editor für Wert
+        editor = QLineEdit()
+        editor.setText(str(feld_value))
+        editor.setStyleSheet("font-size: 10pt; padding: 5px;")
+        
+        # Änderungen tracken
+        def on_value_changed():
+            new_value = editor.text()
+            old_value = self.data[gruppe_name][feld_guid]
+            
+            # Wert aktualisieren
+            self.data[gruppe_name][feld_guid] = new_value
+            
+            # Änderung tracken
+            self._track_change(
+                gruppe=gruppe_name,
+                feld=feld_guid,
+                property_name=feld_guid,  # Bei ROOT ist Property = Feld
+                old_value=old_value,
+                new_value=new_value
+            )
+        
+        editor.textChanged.connect(on_value_changed)
+        self.property_layout.addWidget(editor)
+        
+        # Spacer
+        self.property_layout.addStretch()
+        
+        logger.info(f"✅ ROOT Property Editor erstellt: {feld_guid}")
     
     def _add_legacy_config_fields(self, layout, gruppe_name, feld_guid, config_name, config_value):
         """

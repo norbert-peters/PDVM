@@ -180,6 +180,7 @@ class V2PdvmViewController(QObject):
             self._connect_stichtag_signal()
             
             logger.info("✅ Controller-Initialisierung abgeschlossen")
+            
             return True
             
         except Exception as e:
@@ -187,6 +188,8 @@ class V2PdvmViewController(QObject):
             import traceback
             logger.error(traceback.format_exc())
             return False
+    
+
     
     def _load_viewdata(self):
         """1. ViewDaten laden (V2: sys_viewdaten)"""
@@ -452,26 +455,49 @@ class V2PdvmViewController(QObject):
         """4. Daten laden"""
         logger.info("📂 SCHRITT 4: Daten laden...")
         
-        try:
-            data_db = PdvmCentralDatenbank(table_name=self.table_name)
-            self.raw_records = data_db.get_all_records()
-            
-            # Performance-Instanzen erstellen
-            self.optimized_instances = []
-            for record in self.raw_records:
+        data_db = PdvmCentralDatenbank(
+            table_name=self.table_name
+        )
+        self.raw_records = data_db.get_all_records()
+        
+        # Performance-Instanzen erstellen (mit Error-Handling für korruptes JSON)
+        self.optimized_instances = []
+        skipped_count = 0
+        
+        for record in self.raw_records:
+            try:
+                # Versuche Instanz zu erstellen
                 instance = PdvmCentralDatenbank.create_with_data(
                     guid=record["uid"],
                     daten=record["daten"],
                     table_name=self.table_name
                 )
                 self.optimized_instances.append(instance)
-            
-            logger.info(f"✅ {len(self.optimized_instances)} Datensätze geladen")
-            
-        except Exception as e:
-            logger.error(f"❌ Datenladung fehlgeschlagen: {e}")
-            self.raw_records = []
-            self.optimized_instances = []
+                
+            except Exception as e:
+                # Korrupter Datensatz → überspringen mit Warnung
+                skipped_count += 1
+                logger.warning(f"⚠️ Datensatz übersprungen (korruptes JSON): {record['uid']}")
+                logger.debug(f"   Fehler: {e}")
+                
+                # Error-Log (falls verfügbar)
+                try:
+                    from pdvm_error_log_manager import log_error
+                    log_error(
+                        context_guid=self.view_guid,
+                        context_type="view",
+                        error_type="data_corruption",
+                        error_message=f"Datensatz konnte nicht geladen werden: {str(e)}",
+                        record_guid=record['uid'],
+                        table_name=self.table_name,
+                        severity="error"
+                    )
+                except Exception as log_err:
+                    logger.debug(f"Error-Logging fehlgeschlagen: {log_err}")
+        
+        logger.info(f"✅ {len(self.optimized_instances)} Datensätze geladen")
+        if skipped_count > 0:
+            logger.warning(f"⚠️ {skipped_count} Datensatz/Datensätze übersprungen (korruptes JSON)")
     
     def _initialize_matrix_manager(self):
         """5. Matrix Manager initialisieren"""

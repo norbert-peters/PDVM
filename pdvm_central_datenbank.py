@@ -37,7 +37,8 @@ class PdvmCentralDatenbank:
         self,
         table_name: str = "sys_menudaten",
         guid: Optional[str] = None,
-        no_save: bool = False
+        no_save: bool = False,
+        edit_type: Optional[str] = None
     ):
         """
         V2.0: Initialisiert die Business-Logic-Schicht.
@@ -48,21 +49,33 @@ class PdvmCentralDatenbank:
             table_name: Name der Tabelle (Standard: sys_menudaten)
             guid: GUID des Datensatzes (falls None, muss später gesetzt werden)
             no_save: Wenn True, verhindert save_all_values() die Persistierung (für temporäre Strukturen wie Menü-Rendering)
+            edit_type: Spezial-Typ für alternative Datenquellen (z.B. "change_user" für pdvm_user_db)
         """
         self.table_name = table_name
         self.guid = guid
         self.no_save = no_save  # Sicherheitsschalter für temporäre Daten
+        self.edit_type = edit_type  # Spezial-Typ für alternative Datenquellen
         
-        # Basis-Datenbankschicht initialisiert sich selbst aus GCS
-        self._database = PdvmDatenbank(
-            table_name=table_name
-        )
-        
-        # Datenbank-Name aus der PdvmDatenbank-Instanz abrufen
-        self.db_name = self._database.db_name
-        
-        # Historisch-Status aus PdvmDatenbank abrufen
-        self.historisch = self._database.get_historisch_status()
+        # SPEZIAL-FALL: change_user verwendet pdvm_user_db statt PdvmDatenbank
+        if edit_type == "change_user":
+            from pdvm_user_db import PdvmUserDatenbank
+            self._database = None  # Keine Standard-Datenbank
+            self._user_db = PdvmUserDatenbank()
+            self.db_name = self._user_db.db_name
+            self.historisch = False  # User-DB ist nicht historisch
+            logger.info(f"🔐 PdvmCentralDatenbank mit pdvm_user_db initialisiert (edit_type=change_user)")
+        else:
+            # Basis-Datenbankschicht initialisiert sich selbst aus GCS
+            self._database = PdvmDatenbank(
+                table_name=table_name
+            )
+            self._user_db = None
+            
+            # Datenbank-Name aus der PdvmDatenbank-Instanz abrufen
+            self.db_name = self._database.db_name
+            
+            # Historisch-Status aus PdvmDatenbank abrufen
+            self.historisch = self._database.get_historisch_status()
         
         # Daten-Cache (wird bei Bedarf geladen)
         self.data: Dict[str, Any] = {}
@@ -122,9 +135,21 @@ class PdvmCentralDatenbank:
         logger.debug(f"Daten geladen für GUID {self.guid}: {len(self.data)} Gruppen")
 
     def _ensure_data_loaded(self):
-        """Stellt sicher, dass Daten geladen sind."""
+        """
+        Stellt sicher, dass Daten geladen sind.
+        
+        WICHTIG: Für nicht-historische Tabellen ohne GUID wird ein leeres Dict initialisiert
+        statt zu laden (ermöglicht Workflow: Init ohne GUID → set_value() → save_all_values())
+        """
         if not self._data_loaded:
-            self._load_data()
+            # ✅ SONDERFALL: Nicht-historisch ohne GUID → Leeres Dict initialisieren
+            if not self.guid and not self.historisch:
+                logger.info(f"✅ Initialisiere leeres Dict für nicht-historische Tabelle ohne GUID: {self.table_name}")
+                self.data = {}
+                self._data_loaded = True
+            else:
+                # Normal: Daten aus DB laden
+                self._load_data()
 
     def _get_current_timestamp(self) -> float:
         """
@@ -469,13 +494,18 @@ class PdvmCentralDatenbank:
         
         SICHERHEITSSCHALTER: Wenn no_save=True wurde, wird nichts gespeichert.
         Dies verhindert Persistierung von temporären Strukturen (z.B. Menü-Rendering mit Templates).
+        
+        AUTO-GUID: Wenn keine GUID vorhanden ist, wird automatisch eine neue generiert.
         """
         if self.no_save:
             logger.debug(f"⚠️ save_all_values() übersprungen (no_save=True) für {self.table_name}.{self.guid}")
             return
         
+        # ✅ AUTO-GUID: Generiere neue GUID falls keine vorhanden
         if not self.guid:
-            raise ValueError("GUID muss gesetzt sein um Daten zu speichern")
+            import allgemeines as all
+            self.guid = all.neue_guid()
+            logger.info(f"✅ Neue GUID generiert für {self.table_name}: {self.guid}")
         
         # Float-Keys → String-Keys für JSON-Speicherung
         import allgemeines as all
@@ -484,6 +514,9 @@ class PdvmCentralDatenbank:
         self._database.speichern(self.guid, data_to_save)
         
         logger.info(f"Alle Daten gespeichert für GUID {self.guid}")
+        
+        # Rückgabe der GUID (für Weiterverwendung)
+        return self.guid
         
         # ✅ Modified Tracking: Aktualisiere MODIFIED_AT für diese Tabelle
         # WICHTIG: Nur für Geschäftsdaten, nicht für System-Tabellen (verhindert Loop)

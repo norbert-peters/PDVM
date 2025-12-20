@@ -532,6 +532,7 @@ class PdvmDatenbank:
         - Punkt 4+5: SEC_PROFILES Filter via SQL WHERE
         - Punkt 6: Direkte Spalten-Zuordnung (keine dynamische Ermittlung)
         - Punkt 7+8: Fehlerbehandlung beibehalten aber vereinfacht
+        - BUGFIX: sys_benutzer/sys_mandanten OHNE SEC_PROFILES Filter (auth.db!)
         
         Returns:
             list[dict]: Liste aller Datensätze mit uid, name, daten, modified_at
@@ -542,16 +543,27 @@ class PdvmDatenbank:
         datensaetze = []
         
         try:
-            # ✅ SEC_PROFILES vom User holen (Punkt 4)
+            # ✅ BUGFIX: auth.db Tabellen OHNE SEC_PROFILES Filter
+            # sys_benutzer und sys_mandanten sind Verwaltungstabellen!
+            is_auth_table = self.table_name in ["sys_benutzer", "sys_mandanten"]
+            
+            # ✅ SEC_PROFILES vom User holen (Punkt 4) - NUR für Nicht-Auth-Tabellen
             allowed_sec_ids = []
-            if gcs:
+            if gcs and not is_auth_table:
                 allowed_sec_ids = gcs.get_sec_profiles()  # Neue Methode in GCS
             
             # ✅ SQL Query mit SEC_PROFILES Filter (Punkt 5)
             conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
-            if allowed_sec_ids:
+            if is_auth_table:
+                # Auth-Tabellen: ALLE Datensätze laden (KEIN sec_id Filter!)
+                query = f"""
+                    SELECT uid, name, daten, modified_at, sec_id 
+                    FROM {self.table_name}
+                """
+                cursor.execute(query)
+            elif allowed_sec_ids:
                 # Datensätze OHNE sec_id ODER mit erlaubter sec_id
                 placeholders = ','.join(['?' for _ in allowed_sec_ids])
                 query = f"""

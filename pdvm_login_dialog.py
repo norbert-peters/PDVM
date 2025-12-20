@@ -172,7 +172,8 @@ class V2LoginDialog(QDialog):
     
     def on_login_clicked(self):
         """Login-Button geklickt"""
-        email = self.email_input.text().strip()
+        # Email IMMER in Kleinbuchstaben (case-insensitive)
+        email = self.email_input.text().strip().lower()
         password = self.password_input.text()
         
         # 🔍 DEBUG

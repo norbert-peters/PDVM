@@ -266,6 +266,15 @@ def main():
         mandant_data=mandant_data       # ⭐ Mandanten-Daten (dict)!
     ) 
     
+    # ⭐ ERROR-LOG MANAGER INITIALISIEREN
+    print("\n[2.6/3] Error-Log System initialisieren...")
+    try:
+        # ✅ V2 PIPELINE: Starte Error-Sammlung über GCS
+        gcs.error_log_manager.start_collection()
+        print("   ✅ Error-Sammlung gestartet (Pipeline-Modus)")
+    except Exception as e:
+        print(f"   ⚠️ Error-Log Manager konnte nicht gestartet werden: {e}")
+    
     # ⭐ MENÜ-SYSTEM PRÜFEN
     print("\n[2.7/3] Menü-System prüfen...")
     try:
@@ -294,6 +303,14 @@ def main():
     main_window = V2MainAppComplete()
     
     main_window.show()
+    
+    # ✅ V2 PIPELINE: Beende Error-Sammlung und zeige Popup
+    print("\n⚠️ Prüfe auf Datenbankfehler...")
+    try:
+        gcs.error_log_manager.finish_collection()
+        print("   ✅ Error-Sammlung abgeschlossen")
+    except Exception as e:
+        print(f"   ⚠️ Error-Sammlung Fehler: {e}")
     
     return app.exec_()
 

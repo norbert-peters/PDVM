@@ -17,6 +17,7 @@ from typing import Dict, Union
 from PyQt5.QtCore import QObject, pyqtSignal
 from pdvm_datetime import Pdvm_DateTime
 from pdvm_central_datenbank import PdvmCentralDatenbank
+from pdvm_error_log_manager import PdvmErrorLogManager
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,13 @@ class PdvmCentralSystemsteuerung(QObject):
         self._man_db = PdvmCentralDatenbank('sys_anwendungsdaten', mandant_guid)
         logger.info(f"✅ Mandanten-Anwendungsdatenbank geladen mit Mandant-GUID: {mandant_guid}")
         
-        # 2.5 Datenbank-Instanz für System-Menü (sys_menudaten)
+        # 2.5 ZENTRALE ERROR-ACKNOWLEDGMENTS INSTANZ (SESSION-WEIT!)
+        # sys_error_acknowledgments: MIT user_guid - pro User
+        # sys_error_log wird über Pipeline/PdvmCentralDatenbank verwaltet
+        self._error_ack_db = PdvmCentralDatenbank('sys_error_acknowledgments', user_guid)
+        logger.info(f"✅ Error-Acknowledgments-Datenbank initialisiert (User-GUID: {user_guid})")
+        
+        # 2.6 Datenbank-Instanz für System-Menü (sys_menudaten)
         # WICHTIG: Menü wird über UID aus sys_menudaten geladen
         # Standard: Admin-Startmenü (TODO: Aus User-Profil laden)
         start_menu_uid = '5ca6674e-b9ce-4581-9756-64e742883f80'  # Admin-Startmenü
@@ -170,6 +177,10 @@ class PdvmCentralSystemsteuerung(QObject):
         # Temporäre Pdvm_DateTime Instanz für Formatierungen erstellen
         self._temp_dt_inst = Pdvm_DateTime(country)
         logger.info(f"✅ Pdvm_DateTime Instanzen erstellt für Country: {country}")
+        
+        # Error-Log-Manager initialisieren (zentrale Error-Verwaltung)
+        self._error_log_manager = PdvmErrorLogManager(self)
+        logger.info(f"✅ Error-Log-Manager initialisiert")
 
         # Layout-Manager initialisieren (für zentrale Style-Verwaltung)
         from pdvm_layout_manager import PdvmLayoutManager
@@ -395,6 +406,34 @@ class PdvmCentralSystemsteuerung(QObject):
             return {}
     
     # ENTFERNT: save_all_values() - nicht benötigt da Systemsteuerung-DB direkt ansprechbar
+    
+    def get_sec_profiles(self):
+        """
+        ✅ Punkt 4: Holt SEC_PROFILES Liste vom User
+        
+        Liest aus user_data → PERMISSION → SEC_PROFILES die Liste der erlaubten sec_id Werte.
+        
+        Returns:
+            list: Liste von sec_id Strings auf die der User Zugriff hat
+        """
+        self._ensure_initialized()
+        
+        try:
+            # Aus user_data lesen: PERMISSION.SEC_PROFILES
+            permission_data = self._user_data.get('PERMISSION', {})
+            sec_profiles = permission_data.get('SEC_PROFILES', [])
+            
+            # Sicherstellen dass es eine Liste ist
+            if not isinstance(sec_profiles, list):
+                logger.warning(f"⚠️ SEC_PROFILES ist keine Liste: {type(sec_profiles)}")
+                return []
+            
+            logger.debug(f"✅ SEC_PROFILES geladen: {len(sec_profiles)} Einträge")
+            return sec_profiles
+            
+        except Exception as e:
+            logger.error(f"❌ Fehler beim Laden von SEC_PROFILES: {e}")
+            return []
     
     def field_value(self, property_name, value=None):
         """
@@ -1152,6 +1191,17 @@ class PdvmCentralSystemsteuerung(QObject):
         self._db.set_value(self.user_guid, 'version', str(value))
         self._db.save_all_values()
         logger.info(f"💾 Version aktualisiert: {self._version}")
+    
+    @property
+    def error_log_manager(self):
+        """
+        Error-Log-Manager Property (zentral über GCS)
+        
+        Ermöglicht Error-Logging über gcs.error_log_manager.log_error(...)
+        Manager sammelt Errors während Startup und zeigt Popup am Ende.
+        """
+        self._ensure_initialized()
+        return self._error_log_manager
     
     def get_dropdown_options(self, dropdown_guid: str, dropdown_gruppe: str = None) -> Dict[str, str]:
         """

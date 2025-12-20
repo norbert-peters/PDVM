@@ -1,55 +1,64 @@
-"""
-Prüft Template-Struktur (55555...) in sys_viewdaten
-"""
-import sys
-import os
+import sqlite3
+import json
 
-# Pfad anpassen
-sys.path.insert(0, os.path.dirname(__file__))
+# VIEW Template prüfen
+print("="*60)
+print("VIEW TEMPLATE (sys_viewdaten)")
+print("="*60)
 
-from pdvm_central_systemsteuerung import get_gcs
-from pdvm_central_datenbank import PdvmCentralDatenbank
+conn = sqlite3.connect('Daten/pdvm_system.db')
+cursor = conn.cursor()
 
-# Minimales GCS Setup
-os.chdir(os.path.dirname(__file__))
+cursor.execute("SELECT uid, name, daten FROM sys_viewdaten WHERE uid LIKE '5555%'")
+row = cursor.fetchone()
 
-# Datenbank direkt öffnen
-from pdvm_datenbank_manager import PdvmDatenbankManager
-
-manager = PdvmDatenbankManager()
-manager.set_system_db_path('Daten/pdvm_system.db')
-
-# Template laden
-db = PdvmCentralDatenbank('sys_viewdaten', '55555555-5555-5555-5555-555555555555')
-
-print("=" * 60)
-print("TEMPLATE-STRUKTUR (55555555-5555-5555-5555-555555555555)")
-print("=" * 60)
-
-gruppen = db.get_groups()
-print(f"\n✅ Gruppen ({len(gruppen)}):")
-for g in gruppen:
-    print(f"  - {g}")
-
-# ROOT prüfen
-print("\n📋 ROOT:")
-root = db.get_value_by_group('ROOT')
-if root:
-    for key, val in root.items():
-        print(f"  {key}: {val}")
+if row:
+    print(f"UID: {row[0]}")
+    print(f"Name: {row[1]}")
+    daten = json.loads(row[2])
+    print(f"\nGruppen: {list(daten.keys())}\n")
+    
+    for gruppe in sorted(daten.keys()):
+        print(f"📁 {gruppe}:")
+        if isinstance(daten[gruppe], dict):
+            for key, value in sorted(daten[gruppe].items()):
+                val_str = str(value)[:50]
+                print(f"  - {key}: {val_str}")
+        else:
+            print(f"  - Type: {type(daten[gruppe])}")
+        print()
 else:
-    print("  ❌ Nicht vorhanden")
+    print("NICHT GEFUNDEN!")
 
-# ROOT_CONTROLS prüfen
-print("\n📋 ROOT_CONTROLS:")
-root_controls = db.get_value_by_group('ROOT_CONTROLS')
-if root_controls:
-    for key, val in root_controls.items():
-        print(f"  {key}: {type(val).__name__}")
-        if isinstance(val, dict):
-            for k2, v2 in val.items():
-                print(f"    {k2}: {v2}")
+conn.close()
+
+# FRAME Template prüfen
+print("="*60)
+print("FRAME TEMPLATE (sys_framedaten)")
+print("="*60)
+
+conn = sqlite3.connect('Daten/pdvm_system.db')
+cursor = conn.cursor()
+
+cursor.execute("SELECT uid, name, daten FROM sys_framedaten WHERE uid LIKE '5555%'")
+row = cursor.fetchone()
+
+if row:
+    print(f"UID: {row[0]}")
+    print(f"Name: {row[1]}")
+    daten = json.loads(row[2])
+    print(f"\nGruppen: {list(daten.keys())}\n")
+    
+    for gruppe in sorted(daten.keys()):
+        print(f"📁 {gruppe}:")
+        if isinstance(daten[gruppe], dict):
+            for key, value in sorted(daten[gruppe].items()):
+                val_str = str(value)[:50]
+                print(f"  - {key}: {val_str}")
+        else:
+            print(f"  - Type: {type(daten[gruppe])}")
+        print()
 else:
-    print("  ❌ Nicht vorhanden")
+    print("NICHT GEFUNDEN!")
 
-print("\n" + "=" * 60)
+conn.close()

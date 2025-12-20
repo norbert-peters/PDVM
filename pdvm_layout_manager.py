@@ -134,6 +134,23 @@ class PdvmLayoutManager:
             logger.warning(f"⚠️ Font-Property '{property_name}' nicht gefunden: {e}")
             return default
     
+    def get_monospace_font(self):
+        """
+        Erstellt QFont für Monospace-Darstellung (z.B. für Error-Logs).
+        
+        Returns:
+            QFont: Monospace-Font mit Basis-Größe
+        """
+        from PyQt5.QtGui import QFont
+        
+        font_family = self.get_font_property('FAMILY_MONOSPACE', 'Courier New')
+        font_size = self.get_font_property('SIZE_DEFAULT', 10)
+        
+        font = QFont(font_family, font_size)
+        font.setStyleHint(QFont.Monospace)
+        
+        return font
+    
     def get_stylesheet(self, widget_type: str) -> str:
         """
         Holt kompiliertes Stylesheet aus STYLES Gruppe.

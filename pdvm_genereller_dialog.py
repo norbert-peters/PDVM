@@ -76,6 +76,10 @@ class V2PdvmGenerellerDialog(QWidget):
         if not self.gcs or not self.gcs.is_initialized:
             raise RuntimeError("❌ GCS muss initialisiert sein!")
         
+        # ✅ Error-Sammlung starten (unterdrückt Popup bis finish)
+        if hasattr(self.gcs, 'error_log_manager'):
+            self.gcs.error_log_manager.start_collection()
+        
         self.frame_guid = frame_guid
         self.main_app = main_app  # ✅ MainApp-Referenz speichern
         
@@ -103,7 +107,8 @@ class V2PdvmGenerellerDialog(QWidget):
         self.edit_modules = {
             'input_controls': 'pdvm_input_controls_manager.PdvmInputControlsManager',  # ✅ PDVM 0.9 VERSION
             'menu_editor': 'pdvm_menu_editor_module.PdvmMenuEditorModule',  # ✅ Menü-Editor Integration
-            'system_editor': 'pdvm_system_editor.PdvmSystemEditor',  # ✅ UNIVERSELL: Alle System-Tabellen (sys_viewdaten, sys_framedaten, etc.)
+            'system_editor': 'pdvm_system_editor_tree.PdvmSystemEditorTree',  # ✅ V4 BAUM-ANSATZ: Rekursiv, beliebige Verschachtelung
+            'change_user': 'pdvm_change_user_module.PdvmChangeUserModule',  # ✅ User-Management (Phase 2)
             # Weitere Module können hier hinzugefügt werden:
             # 'advanced_edit': 'pdvm_advanced_edit_module.PdvmAdvancedEditModule',
             # 'custom_form': 'pdvm_custom_form_module.PdvmCustomFormModule',
@@ -130,10 +135,19 @@ class V2PdvmGenerellerDialog(QWidget):
             
             logger.info("✅ Genereller Dialog erfolgreich initialisiert")
             
+            # ✅ Error-Sammlung beenden und gesammelte Errors zeigen
+            if hasattr(self.gcs, 'error_log_manager'):
+                self.gcs.error_log_manager.finish_collection()
+            
         except Exception as e:
             logger.error(f"❌ Fehler bei Initialisierung: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            
+            # ✅ Auch bei Exception: Sammlung beenden
+            if hasattr(self.gcs, 'error_log_manager'):
+                self.gcs.error_log_manager.finish_collection()
+            
             raise
     
     def _init_ui(self):
@@ -779,19 +793,18 @@ class V2PdvmGenerellerDialog(QWidget):
             module = importlib.import_module(module_name)
             ModuleClass = getattr(module, class_name)
             
-            # ✅ V3: System-Editor - EINFACH & LINEAR!
+            # ✅ V3: System-Editor - ULTRA EINFACH!
             if self.edit_type == 'system_editor':
-                # ✅ EINFACH: TABLE aus framedaten übergeben
-                # Editor arbeitet in dieser Tabelle mit einem Datensatz
-                logger.info(f"  📦 System-Editor: Tabelle = {self.root_table}")
+                # ✅ EINFACH: Nur table_name + record_uid
+                logger.info(f"  📦 System-Editor SIMPLE: Tabelle = {self.root_table}, UID = {selected_guid[:8]}...")
                 
-                # ✅ NUR 2 Parameter: record_uid + table_name
+                # ✅ NUR 2 Parameter: table_name + record_uid
                 self.current_edit_module = ModuleClass(
-                    record_uid=selected_guid,  # ✅ SELECTED GUID, nicht frame_guid!
                     table_name=self.root_table,  # ✅ TABLE aus framedaten!
+                    record_uid=selected_guid,    # ✅ SELECTED GUID
                     parent=self
                 )
-                logger.info(f"  ✅ System-Editor initialisiert: {self.root_table}")
+                logger.info(f"  ✅ System-Editor SIMPLE initialisiert")
                 
             else:
                 # Andere Editoren: Verwenden framedaten_db (sys_framedaten)
