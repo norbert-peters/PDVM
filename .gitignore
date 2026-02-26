@@ -17,3 +17,7 @@ __pycache__/
 
 # Lokale Backup-Secrets (nicht versionieren)
 scripts/secrets/
+
+# Build-/Cache-Artefakte
+node_modules/
+**/__pycache__/
