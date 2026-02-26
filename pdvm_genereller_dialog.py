@@ -345,6 +345,15 @@ class V2PdvmGenerellerDialog(QWidget):
         except Exception as e:
             logger.error(f"❌ Fehler bei Dialogdaten: {e}")
             raise
+
+    def _get_last_call_key(self) -> str:
+        """
+        Erzeugt den Schlüssel für LAST_CALL basierend auf view_guid + TABLE.
+        Fallback: frame_guid (falls view_guid oder root_table fehlt).
+        """
+        if self.view_guid and self.root_table:
+            return f"{self.view_guid}::{self.root_table}"
+        return self.frame_guid
     
     def _init_tabs(self):
         """Initialisiert die Tabs basierend auf Dialogdaten"""
@@ -364,9 +373,18 @@ class V2PdvmGenerellerDialog(QWidget):
             self._create_edit_tab()
             
             # === FEATURE: Letzte GUID aus Systemsteuerung laden ===
-            # Wenn eine GUID für diesen Frame gespeichert ist → direkt Edit öffnen
-            # V2: Verwende get_value für Konsistenz mit set_value
-            last_guid, _ = self.gcs._db.get_value(self.frame_guid, 'LAST_SELECTION')
+            # LAST_CALL ist immer an view_guid + TABLE gebunden (nicht an Frame!)
+            last_call_key = self._get_last_call_key()
+            last_guid, _ = self.gcs._db.get_value('LAST_CALL', last_call_key)
+            if not last_guid:
+                # Legacy-Fallback: Frame-basiert (alte Logik)
+                legacy_guid, _ = self.gcs._db.get_value(self.frame_guid, 'LAST_SELECTION')
+                if legacy_guid:
+                    last_guid = legacy_guid
+                    # Migration in neue Struktur
+                    self.gcs._db.set_value('LAST_CALL', last_call_key, legacy_guid)
+                    self.gcs._db.save_all_values()
+                    logger.info(f"  🔁 Legacy LAST_SELECTION migriert → LAST_CALL[{last_call_key}]")
             
             if last_guid:
                 logger.info(f"🔍 Letzte ausgewählte GUID gefunden: {last_guid}")
@@ -663,6 +681,9 @@ class V2PdvmGenerellerDialog(QWidget):
                 logger.info(f"  ✅ FRAME-spezifische Properties überschrieben")
             
             # SCHRITT 5: GUID in Systemsteuerung speichern
+            last_call_key = self._get_last_call_key()
+            self.gcs._db.set_value('LAST_CALL', last_call_key, neue_guid)
+            # Legacy: Frame-basiert erhalten
             self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', neue_guid)
             self.gcs._db.save_all_values()
             
@@ -752,11 +773,13 @@ class V2PdvmGenerellerDialog(QWidget):
             self.current_selected_guid = selected_guid
             
             # === FEATURE: GUID in Systemsteuerung speichern ===
-            # Speichere die zuletzt ausgewählte GUID für diesen Frame
-            # → Beim nächsten Öffnen des Dialogs wird diese GUID direkt geladen
+            # LAST_CALL ist immer an view_guid + TABLE gebunden
+            last_call_key = self._get_last_call_key()
+            self.gcs._db.set_value('LAST_CALL', last_call_key, selected_guid)
+            # Legacy: Frame-basiert erhalten
             self.gcs._db.set_value(self.frame_guid, 'LAST_SELECTION', selected_guid)
             self.gcs._db.save_all_values()
-            logger.info(f"  💾 GUID in Systemsteuerung gespeichert: {self.frame_guid}.LAST_SELECTION = {selected_guid}")
+            logger.info(f"  💾 GUID in Systemsteuerung gespeichert: LAST_CALL[{last_call_key}] = {selected_guid}")
             
             # === SCHRITT 1: edit_type verwenden (bereits in __init__ geladen) ===
             logger.info(f"  📋 Edit-Type: {self.edit_type}")

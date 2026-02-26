@@ -6,6 +6,186 @@
 
 ---
 
+# PDVM Web System – PIC V2 Spezifikation (Ableitung aus `pdvm_input_*`)
+
+**Ziel**: Die bewährte Desktop-Architektur (Control = Rahmen, Type = Logik) wird 1:1 auf das Web übertragen. Das Web benötigt **keine Historie im Start**, sondern eine **stufenweise Einführung**. Der Menü-Editor (`edit_type=menu`) ist das erste Feld, an dem die PIC-Implementierung reift.
+
+## 1) Architektur-Prinzipien (direkt aus Desktop abgeleitet)
+
+### ✅ 1.1 PIC = Rahmen, Type = Logik
+**Desktop**: `PdvmInputControlV4` ist nur Rahmen (Label, Hilfe, Historie), Logik ist in `PdvmInputType*`.
+
+**Web (Zielbild)**:
+- `PdvmInputControl` = Rahmen (Label, Tooltip, Help-Button, optional History-Icon)
+- `PdvmInputType*` = Logik + konkrete Input-UI (string, text, dropdown, true_false, später datetime/viewtable)
+
+### ✅ 1.2 Type-Registry (plug-in Pattern)
+**Desktop**: `TYPE_CLASSES = { text, datetime, dropdown, viewtable }`
+
+**Web (Zielbild)**:
+```
+PIC_TYPE_REGISTRY = {
+    string: PdvmInputTypeString,
+    text: PdvmInputTypeText,
+    dropdown: PdvmInputTypeDropdown,
+    true_false: PdvmInputTypeBoolean,
+    # später:
+    datetime: PdvmInputTypeDatetime,
+    viewtable: PdvmInputTypeViewtable,
+    guid: PdvmInputTypeGuidLookup
+}
+```
+
+### ✅ 1.3 Metadaten aus `sys_framedaten`
+**Desktop**: Manager lädt Controls-Metadaten aus `sys_framedaten` und baut daraus Controls.
+
+**Web (Zielbild)**:
+- Ein **PIC-Renderer** baut Controls aus `sys_framedaten` (Gruppe = `SYS_<TABELLE>`)
+- Für `sys_menudaten` → Gruppe `SYS_MENUDATEN`
+- Ordnung per `display_order`
+- Labels, Tooltips, Type, Help etc. ausschließlich aus Metadaten (kein Hardcoding)
+
+### ✅ 1.4 Controls bleiben autonom – Manager koordiniert
+**Desktop**: Manager koordiniert `render/save/refresh`, Controls beschaffen Instanzen selbst.
+
+**Web (Zielbild)**:
+- Manager/Renderer erzeugt Controls aus Metadaten
+- Controls arbeiten auf **einem Datenobjekt** (z.B. MenüItem-Draft)
+- Kommandos: `render`, `save`, `refresh` als Web-Pattern: *hydrate → edit → persist*
+
+---
+
+## 2) PIC-Datenmodell (Web)
+
+### 2.1 Metadaten-Quelle (aus `sys_framedaten`)
+**Konzept**: `daten["SYS_MENUDATEN"]` enthält Controls.
+
+Minimales Beispiel:
+```json
+{
+    "SYS_MENUDATEN": [
+        {
+            "table": "SYS_MENUDATEN",
+            "gruppe": "MENU",
+            "feld": "label",
+            "label": "Label",
+            "display_order": 10,
+            "field_config": {
+                "type": "string",
+                "tooltip": "Anzeigetext",
+                "read_only": false,
+                "historical": false,
+                "configs": {
+                    "help": {"key": "menu.label"}
+                }
+            }
+        }
+    ]
+}
+```
+
+### 2.2 Pflichtfelder (Web)
+| Feld | Bedeutung |
+|---|---|
+| `table` | Zieltabelle (z.B. `SYS_MENUDATEN`) |
+| `gruppe` | logische Gruppe (z.B. `MENU`) |
+| `feld` | Feldname/Key im Datenobjekt |
+| `label` | UI-Label |
+| `display_order` | Sortierung |
+| `field_config.type` | `string | text | dropdown | true_false` |
+
+### 2.3 Optionale Konfigurationen
+| Feld | Bedeutung |
+|---|---|
+| `field_config.tooltip` | Tooltip an Label/Control |
+| `field_config.read_only` | ReadOnly |
+| `field_config.historical` | Historie erlaubt (später) |
+| `field_config.abdatum` | Historie/Abdatum aktiv (später) |
+| `configs.dropdown` | Dropdown-Quelle (z.B. `table/key/feld/gruppe`) |
+| `configs.help` | Help-Key/Config für Hilfetext |
+| `configs.viewtable` | View-GUID für Viewtable-Selector |
+
+---
+
+## 3) Web-Komponenten (Zielbild)
+
+### 3.1 `PdvmInputControl` (PIC Rahmen)
+- Label links
+- Input rechts (Type-Widget)
+- Help-Icon (immer sichtbar; disabled wenn keine help-config)
+- optional History-Icon (später)
+
+### 3.2 `PdvmInputType*`
+| Type | UI | Wert | Quelle |
+|---|---|---|---|
+| `string` | Input | string | local value |
+| `text` | Textarea | string | local value |
+| `dropdown` | Select | string | `configs.dropdown` |
+| `true_false` | Checkbox/Toggle | boolean | local value |
+| **später** `datetime` | DateTime Picker | float / ISO | GCS |
+| **später** `viewtable` | Lookup-Dialog | guid | View |
+| **später** `guid` | Lookup | guid | `/lookups/{table}` |
+
+---
+
+## 4) Menü-Editor: Blind-Tab-UX (Pflicht)
+
+### Problem
+Inline-Editor im selben Scroll-Bereich ist unpraktisch (ständiges Scrollen).
+
+### Ziel-UX
+- **Tab 1: Struktur** (Tree-Editor)
+- **Tab 2: Eigenschaften** (blind / leer bis Auswahl)
+- Wechsel zwischen Tabs ohne Scroll-Verlust
+- Beim Zurückkommen **bleibt Auswahl erhalten**
+
+### Persistenz
+- `selectedItemUid` pro Gruppe in Dialog-UI-State speichern
+- Beim Tab-Wechsel `selectedItemUid` wiederherstellen
+- Optional: `menu_active_tab` bleibt wie bisher
+
+---
+
+## 5) Stufenweise Umsetzung (Start = MenüItem-Properties)
+
+### **Stufe 1 – MenüItem Properties (ohne Historie)**
+**Ziel**: PIC minimal produktiv, **ohne Historie**.
+- Feld-Set: `label`, `tooltip`, `icon`, `enabled`, `visible`
+- `command.handler` + `command.params`
+- keine Historie/Abdatum
+- Controls aus `sys_framedaten` optional (fallback erlaubt)
+
+### **Stufe 2 – PIC-Renderer aus `sys_framedaten`**
+- Controls 100% aus `sys_framedaten`
+- Sortierung via `display_order`
+- `help` Konfiguration wird angezeigt (Modal mit Text)
+
+### **Stufe 3 – Dropdown + GUID Lookup stabilisieren**
+- Dropdowns via `configs.dropdown`
+- GUIDs via `/lookups/{table}` oder `viewtable`
+
+### **Stufe 4 – Historie/Abdatum (optional)**
+- History-Icon aktivieren
+- Abdatum-Picker und History-Dialog (später)
+
+---
+
+## 6) Konkreter Startpunkt (MenüItems)
+
+**Konfiguration in `sys_framedaten`**:
+- Gruppe: `SYS_MENUDATEN`
+- Felder: `label`, `tooltip`, `icon`, `enabled`, `visible`, `command.handler`, `command.params.*`
+
+**Hinweis**: Im Menü-Editor sind `sort_order` und `parent_guid` **maschinenverwaltet** und deshalb **read_only**.
+
+---
+
+## 7) Entscheidung
+
+**Vorschlag**: Implementierung in **Blind-Tab** + **PIC-Renderer** aus `sys_framedaten`, beginnend mit MenüItems (ohne Historie). Die PIC-Architektur bleibt dadurch **tab-unabhängig** und kann später auch im Dialog-Modul genutzt werden.
+
+---
+
 ## 🎯 ZIELE
 
 Die V2-Architektur löst die Komplexität der V1-Implementierung auf durch:
